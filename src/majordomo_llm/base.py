@@ -1,0 +1,330 @@
+"""Base classes and types for the majordomo-llm library."""
+
+import json
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, Type, TypeVar
+
+from pydantic import BaseModel
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)
+
+from majordomo_llm.exceptions import ResponseParsingError
+
+#: Type variable for Pydantic model types used in structured responses.
+T = TypeVar("T", bound=BaseModel)
+
+#: Number of tokens per million (used for cost calculations).
+TOKENS_PER_MILLION = 1_000_000
+
+
+@dataclass
+class Usage:
+    """Token usage and cost metrics for an LLM request.
+
+    Attributes:
+        input_tokens: Number of tokens in the input/prompt.
+        output_tokens: Number of tokens in the response.
+        cached_tokens: Number of tokens served from cache (provider-specific).
+        input_cost: Cost for input tokens in USD.
+        output_cost: Cost for output tokens in USD.
+        total_cost: Total cost (input + output) in USD.
+        response_time: Time taken for the request in seconds.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    input_cost: float
+    output_cost: float
+    total_cost: float
+    response_time: float
+
+
+@dataclass
+class LLMResponse(Usage):
+    """Response from an LLM containing plain text content.
+
+    Inherits all usage metrics from :class:`Usage`.
+
+    Attributes:
+        content: The text content of the LLM response.
+    """
+
+    content: str
+
+
+@dataclass
+class LLMJSONResponse(Usage):
+    """Response from an LLM containing parsed JSON content.
+
+    Inherits all usage metrics from :class:`Usage`.
+
+    Attributes:
+        content: The parsed JSON content as a Python dict.
+    """
+
+    content: dict[str, Any]
+
+
+@dataclass
+class LLMStructuredResponse(Usage):
+    """Response from an LLM containing a validated Pydantic model.
+
+    Inherits all usage metrics from :class:`Usage`.
+
+    Attributes:
+        content: The validated Pydantic model instance.
+    """
+
+    content: BaseModel
+
+class LLM(ABC):
+    """Abstract base class for LLM provider implementations.
+
+    Provides a unified interface for interacting with different LLM providers
+    (OpenAI, Anthropic, Gemini) with automatic retry logic and cost tracking.
+
+    Subclasses must implement the :meth:`get_response` method. Other methods
+    have default implementations that can be overridden for provider-specific
+    optimizations.
+
+    Attributes:
+        provider: The LLM provider name (e.g., "openai", "anthropic", "gemini").
+        model: The specific model identifier (e.g., "gpt-4o", "claude-sonnet-4-20250514").
+        input_cost: Cost per million input tokens in USD.
+        output_cost: Cost per million output tokens in USD.
+        supports_temperature_top_p: Whether the model supports temperature/top_p params.
+        use_web_search: Whether to enable web search (Anthropic only).
+
+    Example:
+        >>> from majordomo_llm import get_llm_instance
+        >>> llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
+        >>> response = await llm.get_response("What is 2+2?")
+        >>> print(response.content)
+        4
+        >>> print(f"Cost: ${response.total_cost:.6f}")
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        input_cost: float,
+        output_cost: float,
+        supports_temperature_top_p: bool = True,
+        use_web_search: bool = False,
+    ) -> None:
+        """Initialize the LLM instance.
+
+        Args:
+            provider: The LLM provider name.
+            model: The model identifier.
+            input_cost: Cost per million input tokens in USD.
+            output_cost: Cost per million output tokens in USD.
+            supports_temperature_top_p: Whether temperature/top_p are supported.
+            use_web_search: Enable web search capability (Anthropic only).
+        """
+        self.provider = provider
+        self.model = model
+        self.input_cost = input_cost
+        self.output_cost = output_cost
+        self.supports_temperature_top_p = supports_temperature_top_p
+        self.use_web_search = use_web_search
+
+    def get_full_model_name(self) -> str:
+        """Get the fully qualified model name.
+
+        Returns:
+            Model name in the format "provider:model" (e.g., "anthropic:claude-sonnet-4-20250514").
+        """
+        return f"{self.provider}:{self.model}"
+
+    def _calculate_costs(
+        self, input_tokens: int, output_tokens: int
+    ) -> tuple[float, float, float]:
+        """Calculate costs for a request.
+
+        Args:
+            input_tokens: Number of input tokens.
+            output_tokens: Number of output tokens.
+
+        Returns:
+            Tuple of (input_cost, output_cost, total_cost) in USD.
+        """
+        input_cost = (input_tokens * self.input_cost) / TOKENS_PER_MILLION
+        output_cost = (output_tokens * self.output_cost) / TOKENS_PER_MILLION
+        return input_cost, output_cost, input_cost + output_cost
+
+    @abstractmethod
+    async def get_response(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMResponse:
+        """Get a plain text response from the LLM.
+
+        Args:
+            user_prompt: The user's input prompt.
+            system_prompt: Optional system prompt to set context/behavior.
+            temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
+            top_p: Nucleus sampling parameter (0.0-1.0).
+
+        Returns:
+            LLMResponse containing the text content and usage metrics.
+
+        Raises:
+            Exception: If the API request fails after retries.
+        """
+        raise NotImplementedError()
+
+    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
+    async def get_json_response(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMJSONResponse:
+        """Get a JSON response from the LLM.
+
+        Automatically parses the LLM's text response as JSON.
+
+        Args:
+            user_prompt: The user's input prompt.
+            system_prompt: Optional system prompt to set context/behavior.
+            temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
+            top_p: Nucleus sampling parameter (0.0-1.0).
+
+        Returns:
+            LLMJSONResponse containing the parsed JSON dict and usage metrics.
+
+        Raises:
+            ResponseParsingError: If the response cannot be parsed as JSON.
+            Exception: If the API request fails after retries.
+        """
+        response = await self.get_response(user_prompt, system_prompt, temperature, top_p)
+        try:
+            parsed_content = json.loads(response.content)
+        except json.JSONDecodeError as e:
+            raise ResponseParsingError(
+                f"Failed to parse JSON response: {e}",
+                raw_content=response.content,
+            ) from e
+        return LLMJSONResponse(
+            content=parsed_content,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cached_tokens=response.cached_tokens,
+            input_cost=response.input_cost,
+            output_cost=response.output_cost,
+            total_cost=response.total_cost,
+            response_time=response.response_time,
+        )
+
+    async def get_structured_json_response(
+        self,
+        response_model: Type[T],
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStructuredResponse:
+        """Get a structured response validated against a Pydantic model.
+
+        Uses provider-specific mechanisms (tool calling, response schemas) to
+        ensure the response conforms to the specified Pydantic model schema.
+
+        Args:
+            response_model: Pydantic model class defining the expected structure.
+            user_prompt: The user's input prompt.
+            system_prompt: Optional system prompt to set context/behavior.
+            temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
+            top_p: Nucleus sampling parameter (0.0-1.0).
+
+        Returns:
+            LLMStructuredResponse containing the validated Pydantic model instance.
+
+        Raises:
+            pydantic.ValidationError: If the response doesn't match the model schema.
+            Exception: If the API request fails after retries.
+
+        Example:
+            >>> from pydantic import BaseModel
+            >>> class Person(BaseModel):
+            ...     name: str
+            ...     age: int
+            >>> response = await llm.get_structured_json_response(
+            ...     response_model=Person,
+            ...     user_prompt="Extract: John is 30 years old",
+            ... )
+            >>> print(response.content.name)
+            John
+        """
+        response = await self._get_structured_response(
+            response_model=response_model,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        parsed_content = response_model.model_validate(response.content)
+
+        return LLMStructuredResponse(
+            content=parsed_content,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cached_tokens=response.cached_tokens,
+            input_cost=response.input_cost,
+            output_cost=response.output_cost,
+            total_cost=response.total_cost,
+            response_time=response.response_time,
+        )
+
+    async def _get_structured_response(
+        self,
+        response_model: Type[T],
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMJSONResponse:
+        """Provider-specific implementation for structured responses.
+
+        Default implementation injects the JSON schema into the system prompt.
+        Providers should override this to use native structured output features.
+
+        Args:
+            response_model: Pydantic model class defining the expected structure.
+            user_prompt: The user's input prompt.
+            system_prompt: Optional system prompt to set context/behavior.
+            temperature: Sampling temperature (0.0-2.0).
+            top_p: Nucleus sampling parameter (0.0-1.0).
+
+        Returns:
+            LLMJSONResponse containing the parsed JSON content.
+        """
+        schema = response_model.model_json_schema()
+
+        # Add schema to system prompt
+        schema_prompt = f"""You must respond with valid JSON that matches this exact schema:
+        {json.dumps(schema, indent=2)}
+
+        Important: Return only the JSON object, no additional text or markdown formatting."""
+
+        if system_prompt:
+            combined_system_prompt = f"{system_prompt}\n\n{schema_prompt}"
+        else:
+            combined_system_prompt = schema_prompt
+
+        if self.supports_temperature_top_p:
+            return await self.get_json_response(
+                user_prompt, combined_system_prompt, temperature, top_p
+            )
+        else:
+            return await self.get_json_response(user_prompt, combined_system_prompt)
