@@ -8,7 +8,7 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 
 ## Features
 
-- **Unified API** - Same interface for OpenAI, Anthropic (Claude), and Google Gemini
+- **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, and Cohere
 - **Cost Tracking** - Automatic calculation of input/output token costs per request
 - **Structured Outputs** - Native support for Pydantic models as response schemas
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
@@ -101,6 +101,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 # Google Gemini
 export GEMINI_API_KEY="..."
+
+# DeepSeek
+export DEEPSEEK_API_KEY="sk-..."
+
+# Cohere
+export CO_API_KEY="..."
 ```
 
 ### Available Models
@@ -117,6 +123,13 @@ export GEMINI_API_KEY="..."
 #### Gemini
 - `gemini-2.5-flash`, `gemini-2.5-flash-lite`
 - `gemini-2.0-flash`, `gemini-2.0-flash-lite`
+
+#### DeepSeek
+- `deepseek-chat`, `deepseek-reasoner`
+
+#### Cohere
+- `command-a-03-2025`, `command-r-plus-08-2024`
+- `command-r-08-2024`, `command-r7b-12-2024`
 
 ## API Reference
 

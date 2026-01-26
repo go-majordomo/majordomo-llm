@@ -1,7 +1,10 @@
 """Factory functions for creating LLM instances."""
 
+import importlib.resources
 import logging
 from typing import Iterator
+
+import yaml
 
 from majordomo_llm.base import LLM
 from majordomo_llm.exceptions import ConfigurationError
@@ -13,126 +16,17 @@ from majordomo_llm.providers.openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
+
+def _load_llm_config() -> dict[str, dict]:
+    """Load LLM configuration from the bundled YAML file."""
+    config_file = importlib.resources.files("majordomo_llm").joinpath("llm_config.yaml")
+    with config_file.open("r") as f:
+        return yaml.safe_load(f)
+
+
 #: Configuration mapping for all supported providers and models.
 #: Costs are specified in USD per million tokens.
-LLM_CONFIG: dict[str, dict] = {
-    "openai": {
-        "models": {
-            "gpt-5": {
-                "input_cost": 1.25,  # per million tokens
-                "output_cost": 10.00, # per million tokens
-                "supports_temperature_top_p": False
-            },
-            "gpt-5-mini": {
-                "input_cost": 0.25,  # per million tokens
-                "output_cost": 2.00,  # per million tokens
-                "supports_temperature_top_p": False
-            },
-            "gpt-5-nano": {
-                "input_cost": 0.05,  # per million tokens
-                "output_cost": 0.40,  # per million tokens
-                "supports_temperature_top_p": False
-            },
-            "gpt-4o": {
-                "input_cost": 2.50,  # per million tokens
-                "output_cost": 10.00  # per million tokens
-            },
-            "gpt-4.1": {
-                "input_cost": 2.00,  # per million tokens
-                "output_cost": 8.00   # per million tokens
-            },
-            "gpt-4.1-mini": {
-                "input_cost": 0.40,  # pricing not yet available
-                "output_cost": 1.60  # pricing not yet available
-            },
-            "gpt-4.1-nano": {
-                "input_cost": 0.10,  # per million tokens
-                "output_cost": 0.40  # per million tokens
-            }
-        },
-    },
-    "anthropic": {
-        "models": {
-            "claude-sonnet-4-5-20250929": {
-                "input_cost": 3,  # per million tokens
-                "output_cost": 15.00,  # per million tokens
-                "supports_temperature_top_p": False
-            },
-            "claude-opus-4-1-20250805": {
-                "input_cost": 15.00,  # per million tokens
-                "output_cost": 75.00  # per million tokens
-            },
-            "claude-opus-4-20250514": {
-                "input_cost": 15.00,  # per million tokens
-                "output_cost": 75.00  # per million tokens
-            },
-            "claude-sonnet-4-20250514": {
-                "input_cost": 3.00,   # per million tokens
-                "output_cost": 15.00  # per million tokens
-            },
-            "claude-3-7-sonnet-latest": {
-                "input_cost": 3.00,   # per million tokens
-                "output_cost": 15.00  # per million tokens
-            },
-            "claude-3-5-haiku-latest": {
-                "input_cost": 0.80,   # per million tokens (using Claude 3.5 Haiku pricing)
-                "output_cost": 4.00   # per million tokens
-            }
-        }
-    },
-    "gemini": {
-        "models": {
-            "gemini-2.0-flash-lite": {
-                "input_cost": 0.075,  # per million tokens
-                "output_cost": 0.30   # per million tokens
-            },
-            "gemini-2.0-flash": {
-                "input_cost": 0.10,   # per million tokens
-                "output_cost": 0.40   # per million tokens
-            },
-            "gemini-2.5-flash-lite": {
-                "input_cost": 0.10,  # per million tokens
-                "output_cost": 0.40  # per million tokens
-            },
-            "gemini-2.5-flash": {
-                "input_cost": 0.30,  # per million tokens
-                "output_cost": 2.50  # per million tokens
-            }
-        }
-    },
-    "deepseek": {
-        "models": {
-            "deepseek-chat": {
-                "input_cost": 0.28,   # per million tokens (cache miss)
-                "output_cost": 0.42   # per million tokens
-            },
-            "deepseek-reasoner": {
-                "input_cost": 0.28,   # per million tokens (cache miss)
-                "output_cost": 1.68   # per million tokens
-            }
-        }
-    },
-    "cohere": {
-        "models": {
-            "command-a-03-2025": {
-                "input_cost": 2.50,   # per million tokens
-                "output_cost": 10.00  # per million tokens
-            },
-            "command-r-plus-08-2024": {
-                "input_cost": 2.50,   # per million tokens
-                "output_cost": 10.00  # per million tokens
-            },
-            "command-r-08-2024": {
-                "input_cost": 0.50,   # per million tokens
-                "output_cost": 1.50   # per million tokens
-            },
-            "command-r7b-12-2024": {
-                "input_cost": 0.0375,  # per million tokens
-                "output_cost": 0.15    # per million tokens
-            }
-        }
-    }
-}
+LLM_CONFIG: dict[str, dict] = _load_llm_config()
 
 
 def get_llm_instance(provider: str, model: str) -> LLM:
@@ -142,14 +36,15 @@ def get_llm_instance(provider: str, model: str) -> LLM:
     provider-specific initialization and configuration lookup.
 
     Args:
-        provider: The LLM provider name. One of: "openai", "anthropic", "gemini".
+        provider: The LLM provider name. One of: "openai", "anthropic", "gemini",
+            "deepseek", "cohere".
         model: The model identifier (e.g., "gpt-4o", "claude-sonnet-4-20250514").
 
     Returns:
         An LLM instance configured for the specified provider and model.
 
     Raises:
-        ValueError: If the provider or model is not recognized.
+        ConfigurationError: If the provider or model is not recognized.
 
     Example:
         >>> llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
