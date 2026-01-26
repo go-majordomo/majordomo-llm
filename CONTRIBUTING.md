@@ -109,17 +109,36 @@ To add support for a new LLM provider:
 
 2. Implement the provider class inheriting from `LLM`:
    ```python
+   import os
    from majordomo_llm.base import LLM, LLMResponse, LLMJSONResponse, T
+   from majordomo_llm.exceptions import ConfigurationError
 
    class NewProvider(LLM):
-       def __init__(self, model: str, input_cost: float, output_cost: float, ...):
+       def __init__(
+           self,
+           model: str,
+           input_cost: float,
+           output_cost: float,
+           *,
+           api_key: str | None = None,
+           api_key_alias: str | None = None,
+       ):
+           # Resolve API key before calling super().__init__
+           resolved_api_key = api_key or os.environ.get("NEW_PROVIDER_API_KEY")
+           if not resolved_api_key:
+               raise ConfigurationError(
+                   "API key not found. Set NEW_PROVIDER_API_KEY or pass api_key."
+               )
+
            super().__init__(
                provider="new_provider",
                model=model,
                input_cost=input_cost,
                output_cost=output_cost,
+               api_key=resolved_api_key,        # For hashed logging
+               api_key_alias=api_key_alias,     # For human-readable logging
            )
-           # Initialize client
+           # Initialize client with resolved_api_key
 
        async def get_response(self, user_prompt: str, ...) -> LLMResponse:
            # Implement text response

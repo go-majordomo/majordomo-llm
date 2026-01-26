@@ -43,6 +43,7 @@ class Cohere(LLM):
         supports_temperature_top_p: bool = True,
         *,
         api_key: str | None = None,
+        api_key_alias: str | None = None,
     ) -> None:
         """Initialize the Cohere provider.
 
@@ -52,23 +53,26 @@ class Cohere(LLM):
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
             api_key: Optional API key. Defaults to ``CO_API_KEY`` env var.
+            api_key_alias: Optional human-readable name for the API key.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
         """
-        super().__init__(
-            provider="cohere",
-            model=model,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            supports_temperature_top_p=supports_temperature_top_p,
-        )
         resolved_api_key = api_key or os.environ.get("CO_API_KEY")
         if not resolved_api_key:
             raise ConfigurationError(
                 "Cohere API key not found. Set the CO_API_KEY environment "
                 "variable or pass api_key to the constructor."
             )
+        super().__init__(
+            provider="cohere",
+            model=model,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            supports_temperature_top_p=supports_temperature_top_p,
+            api_key=resolved_api_key,
+            api_key_alias=api_key_alias,
+        )
         self.client = cohere.AsyncClientV2(api_key=resolved_api_key)
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))

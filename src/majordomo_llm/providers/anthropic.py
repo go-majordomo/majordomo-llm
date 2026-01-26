@@ -55,6 +55,7 @@ class Anthropic(LLM):
         use_web_search: bool = False,
         *,
         api_key: str | None = None,
+        api_key_alias: str | None = None,
     ) -> None:
         """Initialize the Anthropic provider.
 
@@ -65,10 +66,17 @@ class Anthropic(LLM):
             supports_temperature_top_p: Whether temperature/top_p are supported.
             use_web_search: Enable web search (requires claude-sonnet-4-5-20250929).
             api_key: Optional API key. Defaults to ``ANTHROPIC_API_KEY`` env var.
+            api_key_alias: Optional human-readable name for the API key.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
         """
+        resolved_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not resolved_api_key:
+            raise ConfigurationError(
+                "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
+                "variable or pass api_key to the constructor."
+            )
         super().__init__(
             provider="anthropic",
             model=model,
@@ -76,13 +84,9 @@ class Anthropic(LLM):
             output_cost=output_cost,
             supports_temperature_top_p=supports_temperature_top_p,
             use_web_search=use_web_search,
+            api_key=resolved_api_key,
+            api_key_alias=api_key_alias,
         )
-        resolved_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not resolved_api_key:
-            raise ConfigurationError(
-                "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
-                "variable or pass api_key to the constructor."
-            )
         self.client = anthropic.AsyncAnthropic(api_key=resolved_api_key)
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))

@@ -1,0 +1,25 @@
+{
+  "prompts": [
+    {
+      "id": "code-001",
+      "category": "code-generation",
+      "name": "rust_ownership_explanation",
+      "system": "You are a Rust expert. Explain concisely in 2-3 sentences.",
+      "user": "Why doesn't this compile?\n\n```rust\nfn main() {\n    let s1 = String::from(\"hello\");\n    let s2 = s1;\n    println!(\"{}\", s1);\n}\n```"
+    },
+    {
+      "id": "content-001",
+      "category": "content-generation",
+      "name": "product_tagline",
+      "system": "You are a marketing copywriter. Be concise and impactful.",
+      "user": "Write a one-sentence tagline for an AI-powered code review tool that catches bugs before they reach production."
+    },
+    {
+      "id": "support-001",
+      "category": "customer-support",
+      "name": "ticket_classification",
+      "system": "You are a ticket classification system. Categorize the message into one of: billing, technical, shipping, returns, account, other. Respond with only the category.",
+      "user": "Why was I charged $49.99 when the website showed $39.99? This is false advertising!"
+    }
+  ]
+}

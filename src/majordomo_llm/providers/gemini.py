@@ -44,6 +44,7 @@ class Gemini(LLM):
         output_cost: float,
         *,
         api_key: str | None = None,
+        api_key_alias: str | None = None,
     ) -> None:
         """Initialize the Gemini provider.
 
@@ -52,23 +53,26 @@ class Gemini(LLM):
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             api_key: Optional API key. Defaults to ``GEMINI_API_KEY`` env var.
+            api_key_alias: Optional human-readable name for the API key.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
         """
-        super().__init__(
-            provider="gemini",
-            model=model,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            supports_temperature_top_p=True,
-        )
         resolved_api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if not resolved_api_key:
             raise ConfigurationError(
                 "Gemini API key not found. Set the GEMINI_API_KEY environment "
                 "variable or pass api_key to the constructor."
             )
+        super().__init__(
+            provider="gemini",
+            model=model,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            supports_temperature_top_p=True,
+            api_key=resolved_api_key,
+            api_key_alias=api_key_alias,
+        )
         self.client = genai.Client(api_key=resolved_api_key)
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))

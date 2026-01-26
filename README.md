@@ -13,7 +13,8 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 - **Structured Outputs** - Native support for Pydantic models as response schemas
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
 - **Automatic Fallback** - Cascade across providers with `LLMCascade` for resilience
-- **Request Logging** - Optional async logging to PostgreSQL/MySQL with S3 storage for request/response bodies
+- **Request Logging** - Optional async logging to PostgreSQL/MySQL/SQLite with S3 or local file storage for request/response bodies
+- **API Key Tracking** - Log hashed API keys and optional aliases for usage attribution
 - **Async First** - Fully async/await compatible for high-performance applications
 - **Type Safe** - Complete type annotations and `py.typed` marker for IDE support
 
@@ -239,7 +240,7 @@ llm = Anthropic(
 
 ### Request Logging
 
-Log all LLM requests asynchronously to a database with optional S3 storage for request/response bodies. Logging is fire-and-forget and does not block your main request flow.
+Log all LLM requests asynchronously to a database with optional storage for request/response bodies. Logging is fire-and-forget and does not block your main request flow.
 
 ```python
 from majordomo_llm import get_llm_instance
@@ -249,7 +250,7 @@ async def main():
     # Create your LLM instance
     llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
 
-    # Set up database adapter (PostgreSQL or MySQL)
+    # Set up database adapter (PostgreSQL, MySQL, or SQLite)
     db = await PostgresAdapter.create(
         host="localhost",
         port=5432,
@@ -274,6 +275,54 @@ async def main():
     await logged_llm.close()
 ```
 
+#### Local Development Setup
+
+For local development and testing, use SQLite and local file storage:
+
+```python
+from majordomo_llm import get_llm_instance
+from majordomo_llm.logging import LoggingLLM, SqliteAdapter, FileStorageAdapter
+
+async def main():
+    llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
+
+    # SQLite for metrics (auto-creates database and table)
+    db = await SqliteAdapter.create("llm_logs.db")
+
+    # Local file storage for request/response bodies
+    storage = await FileStorageAdapter.create("./request_logs")
+
+    logged_llm = LoggingLLM(llm, db, storage)
+    response = await logged_llm.get_response("Hello!")
+
+    await logged_llm.close()
+```
+
+#### API Key Tracking
+
+Track which API key was used for each request with optional human-readable aliases:
+
+```python
+from majordomo_llm.providers.anthropic import Anthropic
+
+# Create LLM with API key alias for attribution
+llm = Anthropic(
+    model="claude-sonnet-4-20250514",
+    input_cost=3.0,
+    output_cost=15.0,
+    api_key_alias="production-team-1",  # Optional human-readable name
+)
+
+# The LoggingLLM wrapper automatically logs:
+# - api_key_hash: First 16 chars of SHA256 hash (safe for logging)
+# - api_key_alias: Your custom name (e.g., "production-team-1")
+```
+
+This is useful for:
+- Tracking costs per team or application
+- Debugging which key was used for specific requests
+- Auditing API key usage patterns
+
 #### Database Schema
 
 Create the logging table using the included schema:
@@ -294,15 +343,22 @@ CREATE TABLE IF NOT EXISTS llm_requests (
     s3_request_key VARCHAR(255),
     s3_response_key VARCHAR(255),
     status VARCHAR(20) NOT NULL,
-    error_message TEXT
+    error_message TEXT,
+    api_key_hash VARCHAR(16),
+    api_key_alias VARCHAR(100)
 );
 ```
 
 #### Available Adapters
 
+**Database Adapters:**
 - **PostgresAdapter** - PostgreSQL via asyncpg
 - **MySQLAdapter** - MySQL via aiomysql
+- **SqliteAdapter** - SQLite via aiosqlite (great for local development)
+
+**Storage Adapters:**
 - **S3Adapter** - AWS S3 via aioboto3
+- **FileStorageAdapter** - Local filesystem (great for local development)
 
 ## Development
 

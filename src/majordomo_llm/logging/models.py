@@ -24,3 +24,5 @@ class LogEntry:
     s3_response_key: str | None
     status: str  # "success" or "error"
     error_message: str | None
+    api_key_hash: str | None
+    api_key_alias: str | None

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-01-26
+
+### Added
+
+- API key tracking: `api_key_hash` (SHA256 truncated to 16 chars) and optional `api_key_alias` fields in log entries
+- `api_key_alias` parameter to all provider constructors for human-readable key identification
+- SQLite adapter (`SqliteAdapter`) for lightweight local development logging
+- File storage adapter (`FileStorageAdapter`) for local request/response body storage
+- Demo application in `examples/` showcasing multi-provider usage with logging
+
+### Changed
+
+- Updated all database adapter schemas to include `api_key_hash` and `api_key_alias` columns
+
 ## [0.1.3] - 2025-01-25
 
 ### Added
@@ -59,7 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.0...v0.1.1

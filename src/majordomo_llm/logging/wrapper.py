@@ -57,6 +57,7 @@ class LoggingLLM(LLM):
         self._llm = llm
         self._database = database
         self._storage = storage
+        self._pending_tasks: set[asyncio.Task[None]] = set()
 
     async def _log_request(
         self,
@@ -92,6 +93,8 @@ class LoggingLLM(LLM):
             s3_response_key=s3_response_key,
             status=status,
             error_message=error_message,
+            api_key_hash=self._llm.api_key_hash,
+            api_key_alias=self._llm.api_key_alias,
         )
 
         await self._database.insert(entry)
@@ -105,7 +108,7 @@ class LoggingLLM(LLM):
         error_message: str | None,
     ) -> None:
         """Schedule logging as a background task."""
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._log_request(
                 request_body=request_body,
                 response_content=response_content,
@@ -114,6 +117,8 @@ class LoggingLLM(LLM):
                 error_message=error_message,
             )
         )
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
 
     async def get_response(
         self,
@@ -228,8 +233,14 @@ class LoggingLLM(LLM):
             )
             raise
 
+    async def flush(self) -> None:
+        """Wait for all pending logging tasks to complete."""
+        if self._pending_tasks:
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+
     async def close(self) -> None:
-        """Close database and storage connections."""
+        """Wait for pending tasks and close database and storage connections."""
+        await self.flush()
         await self._database.close()
         if self._storage:
             await self._storage.close()

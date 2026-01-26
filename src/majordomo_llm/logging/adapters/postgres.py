@@ -44,8 +44,12 @@ class PostgresAdapter(DatabaseAdapter):
                     request_id, provider, model, timestamp, response_time,
                     input_tokens, output_tokens, cached_tokens,
                     input_cost, output_cost, total_cost,
-                    s3_request_key, s3_response_key, status, error_message
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                    s3_request_key, s3_response_key, status, error_message,
+                    api_key_hash, api_key_alias
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17
+                )
                 """,
                 entry.request_id,
                 entry.provider,
@@ -62,6 +66,8 @@ class PostgresAdapter(DatabaseAdapter):
                 entry.s3_response_key,
                 entry.status,
                 entry.error_message,
+                entry.api_key_hash,
+                entry.api_key_alias,
             )
 
     async def close(self) -> None:

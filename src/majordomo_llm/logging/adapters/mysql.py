@@ -45,8 +45,9 @@ class MySQLAdapter(DatabaseAdapter):
                         request_id, provider, model, timestamp, response_time,
                         input_tokens, output_tokens, cached_tokens,
                         input_cost, output_cost, total_cost,
-                        s3_request_key, s3_response_key, status, error_message
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        s3_request_key, s3_response_key, status, error_message,
+                        api_key_hash, api_key_alias
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         str(entry.request_id),
@@ -64,6 +65,8 @@ class MySQLAdapter(DatabaseAdapter):
                         entry.s3_response_key,
                         entry.status,
                         entry.error_message,
+                        entry.api_key_hash,
+                        entry.api_key_alias,
                     ),
                 )
             await conn.commit()

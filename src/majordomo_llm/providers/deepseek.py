@@ -45,6 +45,7 @@ class DeepSeek(LLM):
         supports_temperature_top_p: bool = True,
         *,
         api_key: str | None = None,
+        api_key_alias: str | None = None,
     ) -> None:
         """Initialize the DeepSeek provider.
 
@@ -54,23 +55,26 @@ class DeepSeek(LLM):
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
             api_key: Optional API key. Defaults to ``DEEPSEEK_API_KEY`` env var.
+            api_key_alias: Optional human-readable name for the API key.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
         """
-        super().__init__(
-            provider="deepseek",
-            model=model,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            supports_temperature_top_p=supports_temperature_top_p,
-        )
         resolved_api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         if not resolved_api_key:
             raise ConfigurationError(
                 "DeepSeek API key not found. Set the DEEPSEEK_API_KEY environment "
                 "variable or pass api_key to the constructor."
             )
+        super().__init__(
+            provider="deepseek",
+            model=model,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            supports_temperature_top_p=supports_temperature_top_p,
+            api_key=resolved_api_key,
+            api_key_alias=api_key_alias,
+        )
         self.client = openai.AsyncOpenAI(
             api_key=resolved_api_key,
             base_url=self.DEEPSEEK_BASE_URL,

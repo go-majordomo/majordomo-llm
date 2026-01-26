@@ -1,5 +1,6 @@
 """Base classes and types for the majordomo-llm library."""
 
+import hashlib
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -13,6 +14,15 @@ from tenacity import (
 )
 
 from majordomo_llm.exceptions import ResponseParsingError
+
+
+def _hash_api_key(api_key: str) -> str:
+    """Compute a truncated SHA256 hash of an API key.
+
+    Returns the first 16 characters of the hex digest, which is enough
+    to identify keys without being reversible.
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()[:16]
 
 #: Type variable for Pydantic model types used in structured responses.
 T = TypeVar("T", bound=BaseModel)
@@ -99,6 +109,8 @@ class LLM(ABC):
         output_cost: Cost per million output tokens in USD.
         supports_temperature_top_p: Whether the model supports temperature/top_p params.
         use_web_search: Whether to enable web search (Anthropic only).
+        api_key_hash: Truncated SHA256 hash of the API key (for logging).
+        api_key_alias: Optional human-readable name for the API key.
 
     Example:
         >>> from majordomo_llm import get_llm_instance
@@ -117,6 +129,8 @@ class LLM(ABC):
         output_cost: float,
         supports_temperature_top_p: bool = True,
         use_web_search: bool = False,
+        api_key: str | None = None,
+        api_key_alias: str | None = None,
     ) -> None:
         """Initialize the LLM instance.
 
@@ -127,6 +141,8 @@ class LLM(ABC):
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
             use_web_search: Enable web search capability (Anthropic only).
+            api_key: The API key (used to compute hash for logging).
+            api_key_alias: Optional human-readable name for the API key.
         """
         self.provider = provider
         self.model = model
@@ -134,6 +150,8 @@ class LLM(ABC):
         self.output_cost = output_cost
         self.supports_temperature_top_p = supports_temperature_top_p
         self.use_web_search = use_web_search
+        self.api_key_hash = _hash_api_key(api_key) if api_key else None
+        self.api_key_alias = api_key_alias
 
     def get_full_model_name(self) -> str:
         """Get the fully qualified model name.
