@@ -1,6 +1,6 @@
 [project]
 name = "majordomo-llm"
-version = "0.1.2"
+version = "0.1.3"
 description = "Unified Python interface for multiple LLM providers with cost tracking"
 readme = "README.md"
 license = {text = "MIT"}
@@ -50,6 +50,11 @@ Issues = "https://github.com/superset-studio/majordomo-llm/issues"
 Changelog = "https://github.com/superset-studio/majordomo-llm/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+logging = [
+    "asyncpg>=0.29.0",
+    "aiomysql>=0.2.0",
+    "aioboto3>=13.0.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -74,6 +79,10 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["asyncpg", "aiomysql", "aioboto3"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

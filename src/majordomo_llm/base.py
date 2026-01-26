@@ -3,7 +3,7 @@
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 from tenacity import (
@@ -229,7 +229,7 @@ class LLM(ABC):
 
     async def get_structured_json_response(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
         temperature: float = 0.3,
@@ -288,7 +288,7 @@ class LLM(ABC):
 
     async def _get_structured_response(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
         temperature: float = 0.3,

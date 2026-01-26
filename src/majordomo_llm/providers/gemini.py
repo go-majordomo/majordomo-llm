@@ -3,12 +3,10 @@
 import json
 import os
 import time
-from typing import Type
 
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from pydantic import BaseModel
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -157,7 +155,7 @@ class Gemini(LLM):
 
     async def _get_structured_response(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
         temperature: float = 0.3,

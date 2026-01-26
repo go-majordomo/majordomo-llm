@@ -1,7 +1,6 @@
 """Cascade LLM implementation for automatic fallback between providers."""
 
 import logging
-from typing import Type
 
 from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T
 from majordomo_llm.exceptions import ProviderError
@@ -89,7 +88,7 @@ class LLMCascade(LLM):
 
     async def _get_structured_response(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
         temperature: float = 0.3,

@@ -2,7 +2,7 @@
 
 import importlib.resources
 import logging
-from typing import Iterator
+from collections.abc import Iterator
 
 import yaml
 
@@ -59,7 +59,9 @@ def get_llm_instance(provider: str, model: str) -> LLM:
     model_attributes = llm_models.get(model)
     if model_attributes is None:
         available = ", ".join(llm_models.keys())
-        raise ConfigurationError(f"Unknown model '{model}' for provider '{provider}'. Available: {available}")
+        raise ConfigurationError(
+            f"Unknown model '{model}' for provider '{provider}'. Available: {available}"
+        )
 
     if provider == "openai":
         return OpenAI(

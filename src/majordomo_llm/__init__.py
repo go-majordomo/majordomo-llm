@@ -21,13 +21,13 @@ from majordomo_llm.base import (
     LLMStructuredResponse,
     Usage,
 )
+from majordomo_llm.cascade import LLMCascade
 from majordomo_llm.exceptions import (
     ConfigurationError,
     MajordomoError,
     ProviderError,
     ResponseParsingError,
 )
-from majordomo_llm.cascade import LLMCascade
 from majordomo_llm.factory import (
     LLM_CONFIG,
     get_all_llm_instances,
@@ -39,7 +39,7 @@ from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = [
     # Base classes and types

@@ -3,7 +3,6 @@
 import logging
 import os
 import time
-from typing import Type
 
 import anthropic
 from anthropic.types import (
@@ -15,7 +14,6 @@ from anthropic.types import (
     ToolParam,
     WebSearchTool20250305Param,
 )
-from pydantic import BaseModel
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -156,7 +154,7 @@ class Anthropic(LLM):
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
     async def _get_structured_response(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
         temperature: float = 0.3,
@@ -172,17 +170,19 @@ class Anthropic(LLM):
 
         schema = response_model.model_json_schema()
 
+        tool_instruction = "Use the structured_response tool to provide your answer."
         if system_prompt is None:
-            system_prompt = "You are a helpful assistant. Use the structured_response tool to provide your answer."
+            system_prompt = f"You are a helpful assistant. {tool_instruction}"
         else:
-            system_prompt = f"{system_prompt}\n\nUse the structured_response tool to provide your answer."
+            system_prompt = f"{system_prompt}\n\n{tool_instruction}"
 
         messages = _anthropic_user_message(user_prompt)
         system_message = _anthropic_system_prompt(system_prompt)
+        tool_desc = f"Provide a structured response using the {response_model.__name__} format"
         tools = [
             ToolParam(
                 name="structured_response",
-                description=f"Provide a structured response using the {response_model.__name__} format",
+                description=tool_desc,
                 input_schema=schema,
             )
         ]
@@ -248,7 +248,7 @@ class Anthropic(LLM):
 
     async def _get_structured_response_with_web_search(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
     ) -> LLMJSONResponse:
@@ -288,7 +288,7 @@ class Anthropic(LLM):
 
     async def _structured_response_with_web_search_helper(
         self,
-        response_model: Type[T],
+        response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
     ) -> tuple:
@@ -305,10 +305,11 @@ class Anthropic(LLM):
         )
         tools = [structured_response_tool, web_search_tool]
 
+        tool_instruction = "Use the structured_response tool to provide your answer."
         if system_prompt is None:
-            system_prompt = "You are a helpful assistant. Use the structured_response tool to provide your answer."
+            system_prompt = f"You are a helpful assistant. {tool_instruction}"
         else:
-            system_prompt = f"{system_prompt}\n\nUse the structured_response tool to provide your answer."
+            system_prompt = f"{system_prompt}\n\n{tool_instruction}"
 
         messages = _anthropic_user_message(user_prompt)
         system_message = _anthropic_system_prompt(system_prompt)
@@ -351,7 +352,10 @@ class Anthropic(LLM):
                         # Add continuation prompt
                         current_messages.append({
                             "role": "user",
-                            "content": "Continue with your analysis. Use the structured_response tool when ready to generate the final output.",
+                            "content": (
+                            "Continue with your analysis. Use the structured_response "
+                            "tool when ready to generate the final output."
+                        ),
                         })
                         continue
                 break

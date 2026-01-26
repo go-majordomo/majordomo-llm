@@ -12,6 +12,8 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 - **Cost Tracking** - Automatic calculation of input/output token costs per request
 - **Structured Outputs** - Native support for Pydantic models as response schemas
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
+- **Automatic Fallback** - Cascade across providers with `LLMCascade` for resilience
+- **Request Logging** - Optional async logging to PostgreSQL/MySQL with S3 storage for request/response bodies
 - **Async First** - Fully async/await compatible for high-performance applications
 - **Type Safe** - Complete type annotations and `py.typed` marker for IDE support
 
@@ -25,6 +27,14 @@ Or with [uv](https://github.com/astral-sh/uv):
 
 ```bash
 uv add majordomo-llm
+```
+
+### Optional: Request Logging
+
+To enable request logging to PostgreSQL, MySQL, or S3:
+
+```bash
+pip install majordomo-llm[logging]
 ```
 
 ## Quick Start
@@ -226,6 +236,73 @@ llm = Anthropic(
     use_web_search=True,
 )
 ```
+
+### Request Logging
+
+Log all LLM requests asynchronously to a database with optional S3 storage for request/response bodies. Logging is fire-and-forget and does not block your main request flow.
+
+```python
+from majordomo_llm import get_llm_instance
+from majordomo_llm.logging import LoggingLLM, PostgresAdapter, S3Adapter
+
+async def main():
+    # Create your LLM instance
+    llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
+
+    # Set up database adapter (PostgreSQL or MySQL)
+    db = await PostgresAdapter.create(
+        host="localhost",
+        port=5432,
+        database="llm_logs",
+        user="postgres",
+        password="password",
+    )
+
+    # Optional: Set up S3 for storing request/response bodies
+    storage = await S3Adapter.create(
+        bucket="my-llm-logs",
+        prefix="requests",  # optional, defaults to "llm-logs"
+    )
+
+    # Wrap your LLM with logging
+    logged_llm = LoggingLLM(llm, db, storage)
+
+    # Use as normal - all requests are logged automatically
+    response = await logged_llm.get_response("Hello!")
+
+    # Don't forget to close connections when done
+    await logged_llm.close()
+```
+
+#### Database Schema
+
+Create the logging table using the included schema:
+
+```sql
+CREATE TABLE IF NOT EXISTS llm_requests (
+    request_id VARCHAR(36) PRIMARY KEY,
+    provider VARCHAR(50) NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    response_time FLOAT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cached_tokens INTEGER,
+    input_cost DECIMAL(10, 8),
+    output_cost DECIMAL(10, 8),
+    total_cost DECIMAL(10, 8),
+    s3_request_key VARCHAR(255),
+    s3_response_key VARCHAR(255),
+    status VARCHAR(20) NOT NULL,
+    error_message TEXT
+);
+```
+
+#### Available Adapters
+
+- **PostgresAdapter** - PostgreSQL via asyncpg
+- **MySQLAdapter** - MySQL via aiomysql
+- **S3Adapter** - AWS S3 via aioboto3
 
 ## Development
 
