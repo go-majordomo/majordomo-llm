@@ -178,6 +178,26 @@ All response objects include usage metrics:
 
 ## Advanced Usage
 
+### Automatic Fallback with LLMCascade
+
+Use `LLMCascade` for automatic failover between providers:
+
+```python
+from majordomo_llm import LLMCascade
+
+# Providers are tried in order - first is primary, rest are fallbacks
+cascade = LLMCascade([
+    ("anthropic", "claude-sonnet-4-20250514"),  # Primary
+    ("openai", "gpt-4o"),                        # First fallback
+    ("gemini", "gemini-2.5-flash"),              # Last resort
+])
+
+# If Anthropic fails, automatically tries OpenAI, then Gemini
+response = await cascade.get_response("Hello!")
+```
+
+All three response methods (`get_response`, `get_json_response`, `get_structured_json_response`) support automatic fallback.
+
 ### Direct Provider Access
 
 You can also instantiate providers directly for more control:
