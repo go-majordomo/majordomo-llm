@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-01-25
+
+### Added
+
+- DeepSeek provider support (deepseek-chat, deepseek-reasoner models)
+- Cohere provider support (Command A, Command R+, Command R, Command R7B models)
+
+### Changed
+
+- Moved LLM configuration from Python dict to external YAML file (llm_config.yaml)
+- Added pyyaml as a dependency
+
 ## [0.1.0] - 2025-01-25
 
 ### Added
@@ -31,5 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/superset-studio/majordomo-llm/releases/tag/v0.1.0
