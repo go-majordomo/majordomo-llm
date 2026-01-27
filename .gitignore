@@ -209,3 +209,5 @@ __marimo__/
 # Example app outputs
 examples/llm_logs.db
 examples/request_logs/
+examples/structured_logs.db
+examples/structured_request_logs/
