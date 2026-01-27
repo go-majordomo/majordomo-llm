@@ -2,6 +2,31 @@
 
 This directory contains example applications demonstrating majordomo-llm features.
 
+## Structured Response Demo
+
+The `structured_response_demo.py` script showcases the `get_structured_json_response()` method with various Pydantic models:
+
+- **Sentiment Analysis** - Simple model with Enum field
+- **Text Analysis** - Nested models with entity extraction
+- **Code Review** - Constrained integer fields and booleans
+- **Product Recommendations** - Complex nested lists with validation
+
+### Run
+
+```bash
+uv run python examples/structured_response_demo.py
+```
+
+### Example Output
+
+```
+Demo 1: Sentiment Analysis (with Enum)
+Result (SentimentAnalysis):
+  Sentiment: positive
+  Confidence: 95.00%
+  Reasoning: The text expresses enthusiasm with words like "thrilled" and "exceeded expectations"
+```
+
 ## Demo: Multi-Provider Comparison with Logging
 
 The `demo.py` script showcases:

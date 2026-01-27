@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -13,7 +14,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from majordomo_llm.exceptions import ResponseParsingError
+from majordomo_llm.exceptions import ConfigurationError, ResponseParsingError
 
 
 def _hash_api_key(api_key: str) -> str:
@@ -23,6 +24,85 @@ def _hash_api_key(api_key: str) -> str:
     to identify keys without being reversible.
     """
     return hashlib.sha256(api_key.encode()).hexdigest()[:16]
+
+
+def resolve_api_key(api_key: str | None, env_var: str, provider_name: str) -> str:
+    """Resolve an API key from parameter or environment variable.
+
+    Args:
+        api_key: Optional API key passed directly.
+        env_var: Environment variable name to check if api_key is None.
+        provider_name: Provider name for error message (e.g., "OpenAI", "Anthropic").
+
+    Returns:
+        The resolved API key.
+
+    Raises:
+        ConfigurationError: If no API key is found.
+    """
+    resolved = api_key or os.environ.get(env_var)
+    if not resolved:
+        raise ConfigurationError(
+            f"{provider_name} API key not found. Set the {env_var} environment "
+            "variable or pass api_key to the constructor."
+        )
+    return resolved
+
+
+def inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline all $ref references in a JSON schema, removing $defs.
+
+    This flattens nested model definitions so the schema is self-contained
+    without JSON Schema $ref pointers, which some LLMs handle poorly.
+
+    Args:
+        schema: The JSON schema dict (from Pydantic's model_json_schema()).
+
+    Returns:
+        A new schema dict with all $ref replaced by their definitions.
+    """
+    import copy
+
+    schema = copy.deepcopy(schema)
+    defs = schema.pop("$defs", {})
+
+    def resolve_refs(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            if "$ref" in obj and len(obj) == 1:
+                # Extract definition name from "#/$defs/EntityName"
+                ref_path = obj["$ref"]
+                if ref_path.startswith("#/$defs/"):
+                    def_name = ref_path[len("#/$defs/") :]
+                    if def_name in defs:
+                        # Recursively resolve refs in the definition too
+                        return resolve_refs(copy.deepcopy(defs[def_name]))
+                return obj
+            return {k: resolve_refs(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [resolve_refs(item) for item in obj]
+        return obj
+
+    return resolve_refs(schema)
+
+
+def build_schema_prompt(schema: dict[str, Any], system_prompt: str | None = None) -> str:
+    """Build a system prompt that includes a JSON schema instruction.
+
+    Args:
+        schema: The JSON schema dict (from Pydantic's model_json_schema()).
+        system_prompt: Optional existing system prompt to prepend.
+
+    Returns:
+        Combined system prompt with schema instructions.
+    """
+    schema_instruction = f"""You must respond with valid JSON that matches this exact schema:
+{json.dumps(schema, indent=2)}
+
+Important: Return only the JSON object, no additional text or markdown formatting."""
+
+    if system_prompt:
+        return f"{system_prompt}\n\n{schema_instruction}"
+    return schema_instruction
 
 #: Type variable for Pydantic model types used in structured responses.
 T = TypeVar("T", bound=BaseModel)
@@ -227,8 +307,10 @@ class LLM(ABC):
             Exception: If the API request fails after retries.
         """
         response = await self.get_response(user_prompt, system_prompt, temperature, top_p)
+        # Strip markdown code fencing if present
+        content = response.content.replace("```json", "").replace("```", "").strip()
         try:
-            parsed_content = json.loads(response.content)
+            parsed_content = json.loads(content)
         except json.JSONDecodeError as e:
             raise ResponseParsingError(
                 f"Failed to parse JSON response: {e}",
@@ -328,17 +410,7 @@ class LLM(ABC):
             LLMJSONResponse containing the parsed JSON content.
         """
         schema = response_model.model_json_schema()
-
-        # Add schema to system prompt
-        schema_prompt = f"""You must respond with valid JSON that matches this exact schema:
-        {json.dumps(schema, indent=2)}
-
-        Important: Return only the JSON object, no additional text or markdown formatting."""
-
-        if system_prompt:
-            combined_system_prompt = f"{system_prompt}\n\n{schema_prompt}"
-        else:
-            combined_system_prompt = schema_prompt
+        combined_system_prompt = build_schema_prompt(schema, system_prompt)
 
         if self.supports_temperature_top_p:
             return await self.get_json_response(

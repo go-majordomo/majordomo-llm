@@ -198,6 +198,8 @@ class TestCohereStructuredResponse:
 
         call_kwargs = cohere_llm.client.chat.call_args.kwargs
         assert call_kwargs["response_format"] == {"type": "json_object"}
+        # Schema is injected into the system prompt instead
+        assert "json" in call_kwargs["messages"][0]["content"].lower()
 
     async def test_returns_validated_pydantic_model(self, cohere_llm, mock_cohere_json_response):
         """Should return a validated Pydantic model instance."""

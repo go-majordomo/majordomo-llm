@@ -1,7 +1,6 @@
 """Anthropic (Claude) LLM provider implementation."""
 
 import logging
-import os
 import time
 
 import anthropic
@@ -20,8 +19,8 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T
-from majordomo_llm.exceptions import ConfigurationError, ProviderError, ResponseParsingError
+from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T, resolve_api_key
+from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +70,7 @@ class Anthropic(LLM):
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
         """
-        resolved_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not resolved_api_key:
-            raise ConfigurationError(
-                "Anthropic API key not found. Set the ANTHROPIC_API_KEY environment "
-                "variable or pass api_key to the constructor."
-            )
+        resolved_api_key = resolve_api_key(api_key, "ANTHROPIC_API_KEY", "Anthropic")
         super().__init__(
             provider="anthropic",
             model=model,

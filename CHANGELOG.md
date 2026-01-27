@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2025-01-26
+
+### Added
+
+- Structured response demo (`examples/structured_response_demo.py`) showcasing Pydantic models with enums, nested models, constrained fields, and complex lists
+- `inline_schema_refs()` helper to flatten nested JSON schemas by inlining `$defs/$ref` references
+- `resolve_api_key()` helper for DRY API key resolution across providers
+- `build_schema_prompt()` helper for consistent schema prompt injection
+- Shared utilities module (`examples/shared.py`) for common demo functionality
+
+### Changed
+
+- Improved Cohere structured output handling for nested models by flattening schemas
+- Refactored provider implementations to use shared helper functions (DRY)
+- Moved duplicate `get_json_response()` markdown stripping logic to base class
+
 ## [0.1.4] - 2025-01-26
 
 ### Added
@@ -73,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.1...v0.1.2

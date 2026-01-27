@@ -1,7 +1,6 @@
 """Google Gemini LLM provider implementation."""
 
 import json
-import os
 import time
 
 from google import genai
@@ -13,8 +12,8 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T
-from majordomo_llm.exceptions import ConfigurationError, ProviderError, ResponseParsingError
+from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T, resolve_api_key
+from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 
 
 class Gemini(LLM):
@@ -58,12 +57,7 @@ class Gemini(LLM):
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
         """
-        resolved_api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        if not resolved_api_key:
-            raise ConfigurationError(
-                "Gemini API key not found. Set the GEMINI_API_KEY environment "
-                "variable or pass api_key to the constructor."
-            )
+        resolved_api_key = resolve_api_key(api_key, "GEMINI_API_KEY", "Gemini")
         super().__init__(
             provider="gemini",
             model=model,
@@ -85,35 +79,6 @@ class Gemini(LLM):
     ) -> LLMResponse:
         """Get a plain text response from Gemini."""
         return await self._get_response(user_prompt, system_prompt, temperature, top_p)
-
-    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
-    async def get_json_response(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
-    ) -> LLMJSONResponse:
-        """Get a JSON response from Gemini."""
-        response = await self._get_response(user_prompt, system_prompt, temperature, top_p)
-        content = response.content.replace("```json", "").replace("```", "")
-        try:
-            parsed_content = json.loads(content)
-        except json.JSONDecodeError as e:
-            raise ResponseParsingError(
-                f"Failed to parse JSON response: {e}",
-                raw_content=response.content,
-            ) from e
-        return LLMJSONResponse(
-            content=parsed_content,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cached_tokens=0,
-            input_cost=response.input_cost,
-            output_cost=response.output_cost,
-            total_cost=response.total_cost,
-            response_time=response.response_time,
-        )
 
     async def _get_response(
         self,
