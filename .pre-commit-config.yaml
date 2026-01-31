@@ -1,0 +1,13 @@
+# Install: pipx install pre-commit  (or: pip install pre-commit)
+# Enable in this repo: pre-commit install
+
+repos:
+  # Basic hygiene checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

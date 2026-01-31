@@ -79,6 +79,21 @@ uv run pytest tests/test_factory.py
 - Use `pytest-asyncio` for async test functions
 - Mock external API calls to avoid costs and flakiness
 
+## Secrets & Pre-commit Hooks
+
+- Use `.env.example` as a template for local development. Copy to `.env` and fill your keys:
+  ```bash
+  cp .env.example .env
+  ```
+  Never commit `.env`.
+
+- Enable pre-commit hooks (via uvx) for hygiene checks:
+  ```bash
+  uvx pre-commit install
+  uvx pre-commit run --all-files
+  ```
+  See `.pre-commit-config.yaml` for configured hooks (private-key detection, large-file check, whitespace, etc.).
+
 ## Pull Request Process
 
 1. **Fork the repository** and create your branch from `main`

@@ -3,6 +3,7 @@
 [![PyPI version](https://badge.fury.io/py/majordomo-llm.svg)](https://badge.fury.io/py/majordomo-llm)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-website-blue.svg)](https://superset-studio.github.io/majordomo-llm/)
 
 A unified Python interface for multiple LLM providers with automatic cost tracking, retry logic, and structured output support.
 
@@ -119,6 +120,8 @@ export DEEPSEEK_API_KEY="sk-..."
 # Cohere
 export CO_API_KEY="..."
 ```
+
+For local development, copy `.env.example` to `.env` and fill in your keys. Never commit `.env`.
 
 ### Available Models
 
@@ -387,6 +390,26 @@ uv run mypy src/majordomo_llm
 ```bash
 uv run ruff check src/majordomo_llm
 ```
+
+### Documentation
+
+Build and preview the docs locally:
+
+```bash
+uv add --dev mkdocs mkdocs-material mkdocstrings[python] pymdown-extensions
+uv run mkdocs serve
+```
+
+### Pre-commit Hooks & Checks
+
+Enable local checks (using uvx):
+
+```bash
+uvx pre-commit install
+uvx pre-commit run --all-files
+```
+
+Hooks include private-key detection and basic hygiene checks. See `.pre-commit-config.yaml`.
 
 ## Contributing
 

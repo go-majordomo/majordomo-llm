@@ -37,6 +37,7 @@ dependencies = [
     "cohere>=5.1.8",
     "google-genai>=1.60.0",
     "openai>=2.15.0",
+    "pre-commit>=4.5.1",
     "pydantic>=2.12.5",
     "pyyaml>=6.0",
     "tenacity>=9.1.2",
@@ -96,3 +97,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.1",
+    "mkdocstrings[python]>=1.0.2",
+    "pymdown-extensions>=10.20.1",
+]

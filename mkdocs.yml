@@ -1,0 +1,41 @@
+site_name: majordomo-llm
+site_url: https://superset-studio.github.io/majordomo-llm/
+repo_url: https://github.com/superset-studio/majordomo-llm
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.instant
+    - navigation.sections
+markdown_extensions:
+  - admonition
+  - codehilite
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            separate_signature: true
+            heading_level: 2
+            paths:
+              - src
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Recipes:
+      - Structured Outputs: recipes/structured-outputs.md
+      - Cost Tracking & Logging: recipes/logging.md
+      - Cascade Failover: recipes/cascade.md
+      - Offline Testing (Mocking): recipes/mocking.md
+  - API Reference:
+      - Base: api/base.md
+      - Providers: api/providers.md
+      - Logging: api/logging.md
+      - Factory & Cascade: api/factory-cascade.md
