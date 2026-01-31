@@ -1,4 +1,4 @@
-% majordomo-llm
+# majordomo-llm
 
 Unified Python interface for multiple LLM providers with cost tracking, retries, and structured outputs.
 
