@@ -45,7 +45,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/superset-studio/majordomo-llm"
-Documentation = "https://github.com/superset-studio/majordomo-llm#readme"
+Documentation = "https://majordomo-llm.readthedocs.io/"
 Repository = "https://github.com/superset-studio/majordomo-llm"
 Issues = "https://github.com/superset-studio/majordomo-llm/issues"
 Changelog = "https://github.com/superset-studio/majordomo-llm/blob/main/CHANGELOG.md"

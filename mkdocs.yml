@@ -1,5 +1,5 @@
 site_name: majordomo-llm
-site_url: https://superset-studio.github.io/majordomo-llm/
+site_url: https://majordomo-llm.readthedocs.io/
 repo_url: https://github.com/superset-studio/majordomo-llm
 theme:
   name: material
