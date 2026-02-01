@@ -3,6 +3,7 @@
 
 openai:
   models:
+    # GPT-5 family
     gpt-5:
       input_cost: 1.25
       output_cost: 10.00
@@ -15,9 +16,18 @@ openai:
       input_cost: 0.05
       output_cost: 0.40
       supports_temperature_top_p: false
+    gpt-5-pro:
+      input_cost: 15.00
+      output_cost: 120.00
+      supports_temperature_top_p: false
+    # GPT-4o family
     gpt-4o:
       input_cost: 2.50
       output_cost: 10.00
+    gpt-4o-mini:
+      input_cost: 0.15
+      output_cost: 0.60
+    # GPT-4.1 family
     gpt-4.1:
       input_cost: 2.00
       output_cost: 8.00
@@ -27,13 +37,38 @@ openai:
     gpt-4.1-nano:
       input_cost: 0.10
       output_cost: 0.40
+    # o-series reasoning models
+    o1:
+      input_cost: 15.00
+      output_cost: 60.00
+      supports_temperature_top_p: false
+    o3:
+      input_cost: 2.00
+      output_cost: 8.00
+      supports_temperature_top_p: false
+    o3-mini:
+      input_cost: 1.10
+      output_cost: 4.40
+      supports_temperature_top_p: false
+    o4-mini:
+      input_cost: 1.10
+      output_cost: 4.40
+      supports_temperature_top_p: false
 
 anthropic:
   models:
+    # Claude 4.5 family
+    claude-opus-4-5-20251101:
+      input_cost: 5.00
+      output_cost: 25.00
     claude-sonnet-4-5-20250929:
       input_cost: 3.00
       output_cost: 15.00
       supports_temperature_top_p: false
+    claude-haiku-4-5-20251001:
+      input_cost: 1.00
+      output_cost: 5.00
+    # Claude 4 family
     claude-opus-4-1-20250805:
       input_cost: 15.00
       output_cost: 75.00
@@ -43,27 +78,44 @@ anthropic:
     claude-sonnet-4-20250514:
       input_cost: 3.00
       output_cost: 15.00
-    claude-3-7-sonnet-latest:
+    # Claude 3.x family (legacy)
+    claude-3-7-sonnet-20250219:
       input_cost: 3.00
       output_cost: 15.00
-    claude-3-5-haiku-latest:
+      # deprecated - migrate to Claude 4.5
+    claude-3-5-haiku-20241022:
       input_cost: 0.80
       output_cost: 4.00
+    claude-3-haiku-20240307:
+      input_cost: 0.25
+      output_cost: 1.25
 
 gemini:
   models:
-    gemini-2.0-flash-lite:
-      input_cost: 0.075
-      output_cost: 0.30
-    gemini-2.0-flash:
-      input_cost: 0.10
-      output_cost: 0.40
-    gemini-2.5-flash-lite:
-      input_cost: 0.10
-      output_cost: 0.40
+    # Gemini 3 family (preview)
+    gemini-3-pro-preview:
+      input_cost: 2.00
+      output_cost: 12.00
+    gemini-3-flash-preview:
+      input_cost: 0.50
+      output_cost: 3.00
+    # Gemini 2.5 family
+    gemini-2.5-pro:
+      input_cost: 1.25
+      output_cost: 10.00
     gemini-2.5-flash:
       input_cost: 0.30
       output_cost: 2.50
+    gemini-2.5-flash-lite:
+      input_cost: 0.10
+      output_cost: 0.40
+    # Gemini 2.0 family (deprecated - shutdown March 31, 2026)
+    gemini-2.0-flash:
+      input_cost: 0.10
+      output_cost: 0.40
+    gemini-2.0-flash-lite:
+      input_cost: 0.075
+      output_cost: 0.30
 
 deepseek:
   models:

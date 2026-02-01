@@ -29,7 +29,13 @@ plugins:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Core Concepts:
+      - Overview: concepts/index.md
+      - Structured Outputs: concepts/structured-outputs.md
+      - Cost Tracking & Logging: concepts/cost-tracking.md
+      - Cascade Failover: concepts/cascade-failover.md
   - Recipes:
+      - Basic Usage: recipes/basic-usage.md
       - Structured Outputs: recipes/structured-outputs.md
       - Cost Tracking & Logging: recipes/logging.md
       - Cascade Failover: recipes/cascade.md

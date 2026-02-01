@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2025-01-31
+
+### Added
+
+- New OpenAI models: `gpt-4o-mini`, `gpt-5-pro`, `o1`, `o3`, `o3-mini`, `o4-mini`
+- New Anthropic models: `claude-opus-4-5-20251101`, `claude-haiku-4-5-20251001`, `claude-3-haiku-20240307`
+- New Gemini models: `gemini-2.5-pro`, `gemini-3-pro-preview`, `gemini-3-flash-preview`
+- Documentation: Basic Usage recipe
+- Documentation: Core Concepts section with Structured Outputs, Cost Tracking, and Cascade Failover guides
+- Documentation: Expanded homepage with feature overview and quick example
+- Documentation: Deprecation automation roadmap (`docs/roadmap/deprecation-automation.md`)
+
+### Changed
+
+- Fixed Anthropic model IDs to use dated snapshots (`claude-3-7-sonnet-20250219`, `claude-3-5-haiku-20241022`) instead of `-latest` aliases
+- Organized `llm_config.yaml` with section comments for model families
+- Added deprecation comments for Gemini 2.0 models (shutdown March 31, 2026)
+- Updated Structured Outputs recipe with comprehensive examples (enums, nested models, constraints)
+
 ## [0.1.5] - 2025-01-26
 
 ### Added
@@ -89,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.2...v0.1.3
