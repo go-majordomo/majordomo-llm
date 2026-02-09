@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import AsyncIterator
 
 import openai
 from tenacity import (
@@ -14,7 +15,9 @@ from majordomo_llm.base import (
     LLM,
     LLMJSONResponse,
     LLMResponse,
+    LLMStreamResponse,
     T,
+    _StreamState,
     build_schema_prompt,
     resolve_api_key,
 )
@@ -146,6 +149,67 @@ class DeepSeek(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from DeepSeek."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+
+        state = _StreamState()
+
+        try:
+            if self.supports_temperature_top_p:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+            else:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+        except openai.APIError as e:
+            raise ProviderError(
+                f"DeepSeek API error: {e}",
+                provider="deepseek",
+                original_error=e,
+            ) from e
+
+        async def generator() -> AsyncIterator[str]:
+            try:
+                async for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+                    if chunk.usage:
+                        state.input_tokens = chunk.usage.prompt_tokens
+                        state.output_tokens = chunk.usage.completion_tokens
+                        state.cached_tokens = getattr(
+                            getattr(chunk.usage, "prompt_tokens_details", None),
+                            "cached_tokens",
+                            0,
+                        ) or 0
+            except openai.APIError as e:
+                raise ProviderError(
+                    f"DeepSeek API error: {e}",
+                    provider="deepseek",
+                    original_error=e,
+                ) from e
+
+        return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
     async def _get_structured_response(
         self,

@@ -1,5 +1,7 @@
 """Tests for the base module."""
 
+import time
+
 import pytest
 from pydantic import BaseModel
 
@@ -7,9 +9,11 @@ from majordomo_llm.base import (
     LLM,
     LLMResponse,
     LLMJSONResponse,
+    LLMStreamResponse,
     LLMStructuredResponse,
     Usage,
     TOKENS_PER_MILLION,
+    _StreamState,
 )
 
 
@@ -113,6 +117,9 @@ class TestLLMCostCalculation:
         async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
             raise NotImplementedError()
 
+        async def get_response_stream(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+            raise NotImplementedError()
+
     def test_calculates_costs_correctly(self):
         """Should calculate costs based on tokens and rates."""
         llm = self.ConcreteLLM(
@@ -180,6 +187,9 @@ class TestLLMFullModelName:
         async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
             raise NotImplementedError()
 
+        async def get_response_stream(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+            raise NotImplementedError()
+
     def test_returns_provider_colon_model(self):
         """Should return 'provider:model' format."""
         llm = self.ConcreteLLM(
@@ -190,3 +200,130 @@ class TestLLMFullModelName:
         )
 
         assert llm.get_full_model_name() == "anthropic:claude-sonnet-4-20250514"
+
+
+class TestLLMStreamResponse:
+    """Tests for LLMStreamResponse async streaming wrapper."""
+
+    class ConcreteLLM(LLM):
+        """Concrete implementation for testing abstract base class."""
+
+        async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+            raise NotImplementedError()
+
+        async def get_response_stream(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+            raise NotImplementedError()
+
+    @staticmethod
+    async def _mock_stream():
+        yield "Hello"
+        yield " "
+        yield "world"
+
+    def _make_llm(self):
+        return self.ConcreteLLM(
+            provider="test",
+            model="test-model",
+            input_cost=3.0,
+            output_cost=15.0,
+        )
+
+    def _make_stream_response(self, stream=None):
+        llm = self._make_llm()
+        state = _StreamState(input_tokens=10, output_tokens=5, cached_tokens=0, start_time=time.time())
+        if stream is None:
+            stream = self._mock_stream()
+        return LLMStreamResponse(stream=stream, state=state, llm=llm)
+
+    @pytest.mark.asyncio
+    async def test_iterating_yields_chunks(self):
+        """Iterating over the stream should yield each chunk in order."""
+        stream = self._make_stream_response()
+        chunks = []
+        async for chunk in stream:
+            chunks.append(chunk)
+
+        assert chunks == ["Hello", " ", "world"]
+
+    @pytest.mark.asyncio
+    async def test_usage_populated_after_iteration(self):
+        """Usage should be populated with correct values after consuming the stream."""
+        stream = self._make_stream_response()
+        async for _ in stream:
+            pass
+
+        assert stream.usage is not None
+        assert stream.usage.input_tokens == 10
+        assert stream.usage.output_tokens == 5
+        assert stream.usage.cached_tokens == 0
+        assert stream.usage.input_cost == 10 * 3.0 / TOKENS_PER_MILLION
+        assert stream.usage.output_cost == 5 * 15.0 / TOKENS_PER_MILLION
+        assert stream.usage.total_cost == stream.usage.input_cost + stream.usage.output_cost
+
+    @pytest.mark.asyncio
+    async def test_usage_is_none_before_consumption(self):
+        """Usage should be None before the stream is consumed."""
+        stream = self._make_stream_response()
+
+        assert stream.usage is None
+
+    @pytest.mark.asyncio
+    async def test_collect_returns_llm_response(self):
+        """collect() should return an LLMResponse with correct content and usage."""
+        stream = self._make_stream_response()
+        response = await stream.collect()
+
+        assert isinstance(response, LLMResponse)
+        assert response.content == "Hello world"
+        assert response.input_tokens == 10
+        assert response.output_tokens == 5
+        assert response.cached_tokens == 0
+        assert response.input_cost == 10 * 3.0 / TOKENS_PER_MILLION
+        assert response.output_cost == 5 * 15.0 / TOKENS_PER_MILLION
+        assert response.total_cost == response.input_cost + response.output_cost
+
+    @pytest.mark.asyncio
+    async def test_on_complete_callback_fires(self):
+        """_on_complete callback should be called with Usage and content after iteration."""
+        stream = self._make_stream_response()
+        callback_args = {}
+
+        def on_complete(usage, content):
+            callback_args["usage"] = usage
+            callback_args["content"] = content
+
+        stream._on_complete = on_complete
+
+        async for _ in stream:
+            pass
+
+        assert "usage" in callback_args
+        assert "content" in callback_args
+        assert isinstance(callback_args["usage"], Usage)
+        assert callback_args["usage"].input_tokens == 10
+        assert callback_args["usage"].output_tokens == 5
+        assert callback_args["content"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_on_error_callback_fires(self):
+        """_on_error callback should be called when the stream raises an exception."""
+
+        async def failing_stream():
+            yield "partial"
+            raise RuntimeError("stream failed")
+
+        stream = self._make_stream_response(stream=failing_stream())
+        error_args = {}
+
+        def on_error(exc):
+            error_args["exception"] = exc
+
+        stream._on_error = on_error
+
+        with pytest.raises(RuntimeError, match="stream failed"):
+            async for _ in stream:
+                pass
+
+        assert "exception" in error_args
+        assert isinstance(error_args["exception"], RuntimeError)
+        assert str(error_args["exception"]) == "stream failed"

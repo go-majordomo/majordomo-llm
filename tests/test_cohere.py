@@ -197,9 +197,9 @@ class TestCohereStructuredResponse:
         )
 
         call_kwargs = cohere_llm.client.chat.call_args.kwargs
-        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert call_kwargs["response_format"].type == "json_object"
         # Schema is injected into the system prompt instead
-        assert "json" in call_kwargs["messages"][0]["content"].lower()
+        assert "json" in call_kwargs["messages"][0].content.lower()
 
     async def test_returns_validated_pydantic_model(self, cohere_llm, mock_cohere_json_response):
         """Should return a validated Pydantic model instance."""
@@ -281,3 +281,71 @@ class TestCohereInit:
             )
 
             assert llm.supports_temperature_top_p is True
+
+
+class TestCohereGetResponseStream:
+    """Tests for Cohere.get_response_stream method."""
+
+    @pytest.fixture
+    def cohere_llm(self):
+        """Create Cohere instance with mocked client."""
+        with patch("majordomo_llm.providers.cohere.cohere.AsyncClientV2"):
+            llm = Cohere(
+                model="command-a-03-2025",
+                input_cost=2.50,
+                output_cost=10.00,
+                api_key="test-key",
+            )
+            return llm
+
+    async def test_yields_text_chunks(self, cohere_llm, mock_cohere_stream_events):
+        """Should yield text chunks from stream."""
+        cohere_llm.client.chat_stream = MagicMock(
+            return_value=mock_cohere_stream_events
+        )
+
+        stream = await cohere_llm.get_response_stream("Hello")
+        chunks = [chunk async for chunk in stream]
+
+        assert chunks == ["Hello", " world"]
+
+    async def test_usage_populated_after_iteration(self, cohere_llm, mock_cohere_stream_events):
+        """Should populate usage after stream is consumed."""
+        cohere_llm.client.chat_stream = MagicMock(
+            return_value=mock_cohere_stream_events
+        )
+
+        stream = await cohere_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        assert stream.usage is not None
+        assert stream.usage.input_tokens == 20
+        assert stream.usage.output_tokens == 8
+
+    async def test_calculates_costs_correctly(self, cohere_llm, mock_cohere_stream_events):
+        """Should calculate costs from stream usage."""
+        cohere_llm.client.chat_stream = MagicMock(
+            return_value=mock_cohere_stream_events
+        )
+
+        stream = await cohere_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        expected_input_cost = 20 * 2.50 / TOKENS_PER_MILLION
+        expected_output_cost = 8 * 10.00 / TOKENS_PER_MILLION
+        assert stream.usage.input_cost == expected_input_cost
+        assert stream.usage.output_cost == expected_output_cost
+
+    async def test_collect_returns_llm_response(self, cohere_llm, mock_cohere_stream_events):
+        """Should return LLMResponse from collect()."""
+        cohere_llm.client.chat_stream = MagicMock(
+            return_value=mock_cohere_stream_events
+        )
+
+        stream = await cohere_llm.get_response_stream("Hello")
+        response = await stream.collect()
+
+        assert response.content == "Hello world"
+        assert response.input_tokens == 20

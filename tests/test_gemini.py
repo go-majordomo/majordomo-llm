@@ -233,3 +233,71 @@ class TestGeminiInit:
             )
 
             assert llm.supports_temperature_top_p is True
+
+
+class TestGeminiGetResponseStream:
+    """Tests for Gemini.get_response_stream method."""
+
+    @pytest.fixture
+    def gemini_llm(self):
+        """Create Gemini instance with mocked client."""
+        with patch("majordomo_llm.providers.gemini.genai.Client"):
+            llm = Gemini(
+                model="gemini-2.5-flash",
+                input_cost=0.30,
+                output_cost=2.50,
+                api_key="test-key",
+            )
+            return llm
+
+    async def test_yields_text_chunks(self, gemini_llm, mock_gemini_stream_chunks):
+        """Should yield text chunks from stream."""
+        gemini_llm.client.aio.models.generate_content_stream = AsyncMock(
+            return_value=mock_gemini_stream_chunks
+        )
+
+        stream = await gemini_llm.get_response_stream("Hello")
+        chunks = [chunk async for chunk in stream]
+
+        assert chunks == ["Hello", " world"]
+
+    async def test_usage_populated_after_iteration(self, gemini_llm, mock_gemini_stream_chunks):
+        """Should populate usage after stream is consumed."""
+        gemini_llm.client.aio.models.generate_content_stream = AsyncMock(
+            return_value=mock_gemini_stream_chunks
+        )
+
+        stream = await gemini_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        assert stream.usage is not None
+        assert stream.usage.input_tokens == 15
+        assert stream.usage.output_tokens == 5
+
+    async def test_calculates_costs_correctly(self, gemini_llm, mock_gemini_stream_chunks):
+        """Should calculate costs from stream usage."""
+        gemini_llm.client.aio.models.generate_content_stream = AsyncMock(
+            return_value=mock_gemini_stream_chunks
+        )
+
+        stream = await gemini_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        expected_input_cost = 15 * 0.30 / TOKENS_PER_MILLION
+        expected_output_cost = 5 * 2.50 / TOKENS_PER_MILLION
+        assert stream.usage.input_cost == expected_input_cost
+        assert stream.usage.output_cost == expected_output_cost
+
+    async def test_collect_returns_llm_response(self, gemini_llm, mock_gemini_stream_chunks):
+        """Should return LLMResponse from collect()."""
+        gemini_llm.client.aio.models.generate_content_stream = AsyncMock(
+            return_value=mock_gemini_stream_chunks
+        )
+
+        stream = await gemini_llm.get_response_stream("Hello")
+        response = await stream.collect()
+
+        assert response.content == "Hello world"
+        assert response.input_tokens == 15

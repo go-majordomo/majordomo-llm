@@ -2,8 +2,10 @@
 
 import json
 import time
+from collections.abc import AsyncIterator
 
 import cohere
+from cohere import SystemChatMessageV2, UserChatMessageV2, JsonObjectResponseFormatV2
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -14,7 +16,9 @@ from majordomo_llm.base import (
     LLM,
     LLMJSONResponse,
     LLMResponse,
+    LLMStreamResponse,
     T,
+    _StreamState,
     build_schema_prompt,
     inline_schema_refs,
     resolve_api_key,
@@ -123,8 +127,8 @@ class Cohere(LLM):
             ) from e
 
         execution_time = time.time() - start_time
-        input_tokens = response.usage.tokens.input_tokens
-        output_tokens = response.usage.tokens.output_tokens
+        input_tokens = int(response.usage.tokens.input_tokens or 0)
+        output_tokens = int(response.usage.tokens.output_tokens or 0)
         cached_tokens = 0
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
@@ -138,6 +142,58 @@ class Cohere(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from Cohere."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+
+        state = _StreamState()
+
+        try:
+            if self.supports_temperature_top_p:
+                response = self.client.chat_stream(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    p=top_p,
+                )
+            else:
+                response = self.client.chat_stream(
+                    model=self.model,
+                    messages=messages,
+                )
+        except cohere.core.api_error.ApiError as e:
+            raise ProviderError(
+                f"Cohere API error: {e}",
+                provider="cohere",
+                original_error=e,
+            ) from e
+
+        async def generator() -> AsyncIterator[str]:
+            try:
+                async for event in response:
+                    if event.type == "content-delta":
+                        yield event.delta.message.content.text
+                    elif event.type == "message-end":
+                        state.input_tokens = int(event.delta.usage.tokens.input_tokens or 0)
+                        state.output_tokens = int(event.delta.usage.tokens.output_tokens or 0)
+            except cohere.core.api_error.ApiError as e:
+                raise ProviderError(
+                    f"Cohere API error: {e}",
+                    provider="cohere",
+                    original_error=e,
+                ) from e
+
+        return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
     async def _get_structured_response(
         self,
@@ -162,8 +218,8 @@ class Cohere(LLM):
         combined_system_prompt = build_schema_prompt(schema, system_prompt)
 
         messages = [
-            {"role": "system", "content": combined_system_prompt},
-            {"role": "user", "content": user_prompt},
+            SystemChatMessageV2(content=combined_system_prompt),
+            UserChatMessageV2(content=user_prompt)
         ]
 
         start_time = time.time()
@@ -174,13 +230,13 @@ class Cohere(LLM):
                     messages=messages,
                     temperature=temperature,
                     p=top_p,
-                    response_format={"type": "json_object"},
+                    response_format=JsonObjectResponseFormatV2()
                 )
             else:
                 response = await self.client.chat(
                     model=self.model,
                     messages=messages,
-                    response_format={"type": "json_object"},
+                    response_format=JsonObjectResponseFormatV2()
                 )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(
@@ -199,8 +255,8 @@ class Cohere(LLM):
                 raw_content=response.message.content[0].text,
             ) from e
 
-        input_tokens = response.usage.tokens.input_tokens
-        output_tokens = response.usage.tokens.output_tokens
+        input_tokens = int(response.usage.tokens.input_tokens or 0)
+        output_tokens = int(response.usage.tokens.output_tokens or 0)
         cached_tokens = 0
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 

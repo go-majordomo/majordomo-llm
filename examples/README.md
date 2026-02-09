@@ -27,6 +27,36 @@ Result (SentimentAnalysis):
   Reasoning: The text expresses enthusiasm with words like "thrilled" and "exceeded expectations"
 ```
 
+## Streaming Demo
+
+The `streaming_demo.py` script showcases the `get_response_stream()` method:
+
+- **Real-time streaming** - Chunks printed as they arrive with time-to-first-chunk metrics
+- **Collect into LLMResponse** - Using `.collect()` to consume the stream and get the full response
+
+### Run
+
+```bash
+uv run python examples/streaming_demo.py
+```
+
+### Example Output
+
+```
+Demo 1: Streaming with real-time output
+
+  [anthropic/claude-3-5-haiku-latest]
+  The sky appears blue because of Rayleigh scattering...
+  Time to first chunk: 0.34s | Total: 1.12s
+  Tokens: 28 in / 45 out | Cost: $0.000159
+
+Demo 2: Collect stream into LLMResponse
+
+  [anthropic/claude-3-5-haiku-latest]
+  Content: The three primary colors are red, blue, and yellow.
+  Tokens: 22 in / 15 out | Cost: $0.000041
+```
+
 ## Demo: Multi-Provider Comparison with Logging
 
 The `demo.py` script showcases:

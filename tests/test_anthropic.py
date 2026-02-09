@@ -1,7 +1,7 @@
 """Tests for the Anthropic provider."""
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
 from majordomo_llm.providers import Anthropic
@@ -214,3 +214,72 @@ class TestAnthropicInit:
             )
 
             assert llm.use_web_search is True
+
+
+class TestAnthropicGetResponseStream:
+    """Tests for Anthropic.get_response_stream method."""
+
+    @pytest.fixture
+    def anthropic_llm(self):
+        """Create Anthropic instance with mocked client."""
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            llm = Anthropic(
+                model="claude-sonnet-4-20250514",
+                input_cost=3.0,
+                output_cost=15.0,
+                api_key="test-key",
+            )
+            return llm
+
+    async def test_yields_text_chunks(self, anthropic_llm, mock_anthropic_stream_events):
+        """Should yield text chunks from stream."""
+        anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_stream_events)
+
+        stream = await anthropic_llm.get_response_stream("Hello")
+        chunks = [chunk async for chunk in stream]
+
+        assert chunks == ["Hello", " world"]
+
+    async def test_usage_populated_after_iteration(self, anthropic_llm, mock_anthropic_stream_events):
+        """Should populate usage after stream is consumed."""
+        anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_stream_events)
+
+        stream = await anthropic_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        assert stream.usage is not None
+        assert stream.usage.input_tokens == 25
+        assert stream.usage.output_tokens == 10
+
+    async def test_calculates_costs_correctly(self, anthropic_llm, mock_anthropic_stream_events):
+        """Should calculate costs from stream usage."""
+        anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_stream_events)
+
+        stream = await anthropic_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        expected_input_cost = 25 * 3.0 / TOKENS_PER_MILLION
+        expected_output_cost = 10 * 15.0 / TOKENS_PER_MILLION
+        assert stream.usage.input_cost == expected_input_cost
+        assert stream.usage.output_cost == expected_output_cost
+
+    async def test_collect_returns_llm_response(self, anthropic_llm, mock_anthropic_stream_events):
+        """Should return LLMResponse from collect()."""
+        anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_stream_events)
+
+        stream = await anthropic_llm.get_response_stream("Hello")
+        response = await stream.collect()
+
+        assert response.content == "Hello world"
+        assert response.input_tokens == 25
+
+    async def test_passes_stream_true_to_api(self, anthropic_llm, mock_anthropic_stream_events):
+        """Should pass stream=True to the API call."""
+        anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_stream_events)
+
+        await anthropic_llm.get_response_stream("Hello")
+
+        call_kwargs = anthropic_llm.client.messages.create.call_args.kwargs
+        assert call_kwargs["stream"] is True

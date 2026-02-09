@@ -2,7 +2,7 @@
 
 import logging
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T
+from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, LLMStreamResponse, T
 from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.factory import get_llm_instance
 
@@ -86,6 +86,22 @@ class LLMCascade(LLM):
             top_p=top_p,
         )
 
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming response, falling back to next provider on failure."""
+        return await self._cascade_call(
+            "get_response_stream",
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
     async def _get_structured_response(
         self,
         response_model: type[T],
@@ -104,7 +120,9 @@ class LLMCascade(LLM):
             top_p=top_p,
         )
 
-    async def _cascade_call(self, method_name: str, **kwargs) -> LLMResponse | LLMJSONResponse:
+    async def _cascade_call(
+        self, method_name: str, **kwargs
+    ) -> LLMResponse | LLMJSONResponse | LLMStreamResponse:
         """Try each provider in order until one succeeds.
 
         Args:

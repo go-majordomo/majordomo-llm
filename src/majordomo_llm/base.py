@@ -3,8 +3,10 @@
 import hashlib
 import json
 import os
+import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -172,6 +174,109 @@ class LLMStructuredResponse(Usage):
 
     content: BaseModel
 
+
+@dataclass
+class _StreamState:
+    """Internal mutable state populated by provider stream generators.
+
+    Provider async generators update these fields as streaming events arrive.
+    After the stream completes, ``LLMStreamResponse._finalize()`` uses this
+    data to compute final :class:`Usage` metrics.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    start_time: float = field(default_factory=time.time)
+
+
+class LLMStreamResponse:
+    """Async-iterable wrapper around a streaming LLM response.
+
+    Yields text chunks as they arrive. After iteration completes, usage
+    and cost data is available via the :attr:`usage` property.
+
+    Example:
+        >>> stream = await llm.get_response_stream("Hello")
+        >>> async for chunk in stream:
+        ...     print(chunk, end="")
+        >>> print(stream.usage.total_cost)
+    """
+
+    def __init__(
+        self,
+        stream: AsyncIterator[str],
+        state: _StreamState,
+        llm: "LLM",
+    ) -> None:
+        self._stream = stream
+        self._state = state
+        self._llm = llm
+        self._chunks: list[str] = []
+        self._consumed = False
+        self._usage: Usage | None = None
+        self._on_complete: Callable[[Usage, str], None] | None = None
+        self._on_error: Callable[[Exception], None] | None = None
+
+    def __aiter__(self) -> "LLMStreamResponse":
+        return self
+
+    async def __anext__(self) -> str:
+        try:
+            chunk = await self._stream.__anext__()
+            self._chunks.append(chunk)
+            return chunk
+        except StopAsyncIteration:
+            self._finalize()
+            raise
+        except Exception as e:
+            if self._on_error:
+                self._on_error(e)
+            raise
+
+    def _finalize(self) -> None:
+        if self._consumed:
+            return
+        self._consumed = True
+        response_time = time.time() - self._state.start_time
+        input_cost, output_cost, total_cost = self._llm._calculate_costs(
+            self._state.input_tokens, self._state.output_tokens
+        )
+        self._usage = Usage(
+            input_tokens=self._state.input_tokens,
+            output_tokens=self._state.output_tokens,
+            cached_tokens=self._state.cached_tokens,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            total_cost=total_cost,
+            response_time=response_time,
+        )
+        if self._on_complete:
+            self._on_complete(self._usage, "".join(self._chunks))
+
+    @property
+    def usage(self) -> Usage | None:
+        """Usage metrics, available after the stream is fully consumed."""
+        return self._usage
+
+    async def collect(self) -> LLMResponse:
+        """Consume the entire stream and return an :class:`LLMResponse`."""
+        chunks: list[str] = []
+        async for chunk in self:
+            chunks.append(chunk)
+        assert self._usage is not None
+        return LLMResponse(
+            content="".join(self._chunks),
+            input_tokens=self._usage.input_tokens,
+            output_tokens=self._usage.output_tokens,
+            cached_tokens=self._usage.cached_tokens,
+            input_cost=self._usage.input_cost,
+            output_cost=self._usage.output_cost,
+            total_cost=self._usage.total_cost,
+            response_time=self._usage.response_time,
+        )
+
+
 class LLM(ABC):
     """Abstract base class for LLM provider implementations.
 
@@ -278,6 +383,30 @@ class LLM(ABC):
 
         Raises:
             Exception: If the API request fails after retries.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from the LLM.
+
+        Args:
+            user_prompt: The user's input prompt.
+            system_prompt: Optional system prompt to set context/behavior.
+            temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
+            top_p: Nucleus sampling parameter (0.0-1.0).
+
+        Returns:
+            LLMStreamResponse that yields text chunks and provides usage after completion.
+
+        Raises:
+            ProviderError: If the API request fails.
         """
         raise NotImplementedError()
 

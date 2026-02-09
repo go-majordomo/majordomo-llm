@@ -82,3 +82,132 @@ def mock_gemini_json_response():
     response.usage_metadata.prompt_token_count = 20
     response.usage_metadata.candidates_token_count = 12
     return response
+
+
+# --- Streaming Mock Fixtures ---
+
+
+@pytest.fixture
+def mock_openai_stream_events():
+    """Mock OpenAI streaming events."""
+    delta_event1 = MagicMock()
+    delta_event1.type = "response.output_text.delta"
+    delta_event1.delta = "Hello"
+
+    delta_event2 = MagicMock()
+    delta_event2.type = "response.output_text.delta"
+    delta_event2.delta = " world"
+
+    completed_event = MagicMock()
+    completed_event.type = "response.completed"
+    completed_event.response.usage.input_tokens = 20
+    completed_event.response.usage.output_tokens = 8
+    completed_event.response.usage.input_tokens_details.cached_tokens = 0
+
+    async def stream():
+        yield delta_event1
+        yield delta_event2
+        yield completed_event
+
+    return stream()
+
+
+@pytest.fixture
+def mock_anthropic_stream_events():
+    """Mock Anthropic streaming events."""
+    msg_start = MagicMock()
+    msg_start.type = "message_start"
+    msg_start.message.usage.input_tokens = 25
+    msg_start.message.usage.cache_read_input_tokens = 0
+
+    delta1 = MagicMock()
+    delta1.type = "content_block_delta"
+    delta1.delta.type = "text_delta"
+    delta1.delta.text = "Hello"
+
+    delta2 = MagicMock()
+    delta2.type = "content_block_delta"
+    delta2.delta.type = "text_delta"
+    delta2.delta.text = " world"
+
+    msg_delta = MagicMock()
+    msg_delta.type = "message_delta"
+    msg_delta.usage.output_tokens = 10
+
+    async def stream():
+        yield msg_start
+        yield delta1
+        yield delta2
+        yield msg_delta
+
+    return stream()
+
+
+@pytest.fixture
+def mock_gemini_stream_chunks():
+    """Mock Gemini streaming chunks."""
+    chunk1 = MagicMock()
+    chunk1.text = "Hello"
+    chunk1.usage_metadata = None
+
+    chunk2 = MagicMock()
+    chunk2.text = " world"
+    chunk2.usage_metadata.prompt_token_count = 15
+    chunk2.usage_metadata.candidates_token_count = 5
+
+    async def stream():
+        yield chunk1
+        yield chunk2
+
+    return stream()
+
+
+@pytest.fixture
+def mock_deepseek_stream_chunks():
+    """Mock DeepSeek streaming chunks."""
+    chunk1 = MagicMock()
+    chunk1.choices = [MagicMock()]
+    chunk1.choices[0].delta.content = "Hello"
+    chunk1.usage = None
+
+    chunk2 = MagicMock()
+    chunk2.choices = [MagicMock()]
+    chunk2.choices[0].delta.content = " world"
+    chunk2.usage = None
+
+    final_chunk = MagicMock()
+    final_chunk.choices = []
+    final_chunk.usage.prompt_tokens = 20
+    final_chunk.usage.completion_tokens = 8
+    final_chunk.usage.prompt_tokens_details = None
+
+    async def stream():
+        yield chunk1
+        yield chunk2
+        yield final_chunk
+
+    return stream()
+
+
+@pytest.fixture
+def mock_cohere_stream_events():
+    """Mock Cohere streaming events."""
+    event1 = MagicMock()
+    event1.type = "content-delta"
+    event1.delta.message.content.text = "Hello"
+
+    event2 = MagicMock()
+    event2.type = "content-delta"
+    event2.delta.message.content.text = " world"
+
+    end_event = MagicMock()
+    end_event.type = "message-end"
+    end_event.delta.usage.tokens.input_tokens = 20
+    end_event.delta.usage.tokens.output_tokens = 8
+
+    async def stream():
+        yield event1
+        yield event2
+        yield end_event
+
+    return stream()

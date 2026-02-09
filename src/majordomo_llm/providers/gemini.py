@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import AsyncIterator
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -12,7 +13,15 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T, resolve_api_key
+from majordomo_llm.base import (
+    LLM,
+    LLMJSONResponse,
+    LLMResponse,
+    LLMStreamResponse,
+    T,
+    _StreamState,
+    resolve_api_key,
+)
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 
 
@@ -121,6 +130,50 @@ class Gemini(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from Gemini."""
+        state = _StreamState()
+
+        try:
+            response = await self.client.aio.models.generate_content_stream(
+                model=self.model,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                ),
+                contents=user_prompt,
+            )
+        except genai_errors.APIError as e:
+            raise ProviderError(
+                f"Gemini API error: {e}",
+                provider="gemini",
+                original_error=e,
+            ) from e
+
+        async def generator() -> AsyncIterator[str]:
+            try:
+                async for chunk in response:
+                    if chunk.text:
+                        yield chunk.text
+                    if chunk.usage_metadata:
+                        state.input_tokens = chunk.usage_metadata.prompt_token_count or 0
+                        state.output_tokens = chunk.usage_metadata.candidates_token_count or 0
+            except genai_errors.APIError as e:
+                raise ProviderError(
+                    f"Gemini API error: {e}",
+                    provider="gemini",
+                    original_error=e,
+                ) from e
+
+        return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
     async def _get_structured_response(
         self,

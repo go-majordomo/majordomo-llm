@@ -256,3 +256,55 @@ class TestLLMCascadeStructuredResponse:
         )
 
         assert response.content.name == "fallback"
+
+
+class TestLLMCascadeGetResponseStream:
+    """Tests for LLMCascade.get_response_stream method."""
+
+    @pytest.fixture
+    def cascade(self, mock_all_clients):
+        """Create LLMCascade with mocked providers."""
+        return LLMCascade([
+            ("anthropic", "claude-sonnet-4-20250514"),
+            ("openai", "gpt-4o"),
+            ("gemini", "gemini-2.5-flash"),
+        ])
+
+    async def test_returns_stream_from_primary_provider(self, cascade):
+        """Should return stream from first provider when it succeeds."""
+        mock_stream = MagicMock()
+        cascade.llms[0].get_response_stream = AsyncMock(return_value=mock_stream)
+
+        result = await cascade.get_response_stream("Test prompt")
+
+        assert result is mock_stream
+        cascade.llms[0].get_response_stream.assert_called_once()
+
+    async def test_falls_back_on_creation_error(self, cascade):
+        """Should fall back to next provider when stream creation fails."""
+        mock_stream = MagicMock()
+        cascade.llms[0].get_response_stream = AsyncMock(
+            side_effect=ProviderError("Anthropic down", provider="anthropic")
+        )
+        cascade.llms[1].get_response_stream = AsyncMock(return_value=mock_stream)
+
+        result = await cascade.get_response_stream("Test prompt")
+
+        assert result is mock_stream
+
+    async def test_raises_error_when_all_fail(self, cascade):
+        """Should raise ProviderError when all providers fail."""
+        cascade.llms[0].get_response_stream = AsyncMock(
+            side_effect=ProviderError("Anthropic down", provider="anthropic")
+        )
+        cascade.llms[1].get_response_stream = AsyncMock(
+            side_effect=ProviderError("OpenAI down", provider="openai")
+        )
+        cascade.llms[2].get_response_stream = AsyncMock(
+            side_effect=ProviderError("Gemini down", provider="gemini")
+        )
+
+        with pytest.raises(ProviderError) as exc_info:
+            await cascade.get_response_stream("Test prompt")
+
+        assert "All providers in cascade failed" in str(exc_info.value)

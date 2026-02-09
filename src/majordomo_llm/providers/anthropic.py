@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections.abc import AsyncIterator
 
 import anthropic
 from anthropic.types import (
@@ -19,7 +20,15 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T, resolve_api_key
+from majordomo_llm.base import (
+    LLM,
+    LLMJSONResponse,
+    LLMResponse,
+    LLMStreamResponse,
+    T,
+    _StreamState,
+    resolve_api_key,
+)
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 
 logger = logging.getLogger(__name__)
@@ -148,6 +157,66 @@ class Anthropic(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from Anthropic."""
+        if system_prompt is None:
+            system_prompt = "You are a helpful assistant"
+
+        state = _StreamState()
+        messages = _anthropic_user_message(user_prompt)
+        system_message = _anthropic_system_prompt(system_prompt)
+
+        try:
+            if self.supports_temperature_top_p:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=1024,
+                    system=system_message,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=True,
+                )
+            else:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=1024,
+                    system=system_message,
+                    messages=messages,
+                    stream=True,
+                )
+        except anthropic.APIError as e:
+            raise ProviderError(
+                f"Anthropic API error: {e}",
+                provider="anthropic",
+                original_error=e,
+            ) from e
+
+        async def generator() -> AsyncIterator[str]:
+            try:
+                async for event in response:
+                    if event.type == "message_start":
+                        state.input_tokens = event.message.usage.input_tokens
+                        state.cached_tokens = event.message.usage.cache_read_input_tokens or 0
+                    elif event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        yield event.delta.text
+                    elif event.type == "message_delta":
+                        state.output_tokens = event.usage.output_tokens
+            except anthropic.APIError as e:
+                raise ProviderError(
+                    f"Anthropic API error: {e}",
+                    provider="anthropic",
+                    original_error=e,
+                ) from e
+
+        return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
     async def _get_structured_response(

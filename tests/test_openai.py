@@ -239,3 +239,74 @@ class TestOpenAIInit:
             )
 
             assert llm.supports_temperature_top_p is False
+
+
+class TestOpenAIGetResponseStream:
+    """Tests for OpenAI.get_response_stream method."""
+
+    @pytest.fixture
+    def openai_llm(self):
+        """Create OpenAI instance with mocked client."""
+        with patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"):
+            llm = OpenAI(
+                model="gpt-4o",
+                input_cost=2.5,
+                output_cost=10.0,
+                api_key="test-key",
+            )
+            return llm
+
+    async def test_yields_text_chunks(self, openai_llm, mock_openai_stream_events):
+        """Should yield text chunks from stream."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_stream_events)
+
+        stream = await openai_llm.get_response_stream("Hello")
+        chunks = [chunk async for chunk in stream]
+
+        assert chunks == ["Hello", " world"]
+
+    async def test_usage_populated_after_iteration(self, openai_llm, mock_openai_stream_events):
+        """Should populate usage after stream is consumed."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_stream_events)
+
+        stream = await openai_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        assert stream.usage is not None
+        assert stream.usage.input_tokens == 20
+        assert stream.usage.output_tokens == 8
+
+    async def test_calculates_costs_correctly(self, openai_llm, mock_openai_stream_events):
+        """Should calculate costs from stream usage."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_stream_events)
+
+        stream = await openai_llm.get_response_stream("Hello")
+        async for _ in stream:
+            pass
+
+        expected_input_cost = 20 * 2.5 / TOKENS_PER_MILLION
+        expected_output_cost = 8 * 10.0 / TOKENS_PER_MILLION
+        assert stream.usage.input_cost == expected_input_cost
+        assert stream.usage.output_cost == expected_output_cost
+        assert stream.usage.total_cost == expected_input_cost + expected_output_cost
+
+    async def test_collect_returns_llm_response(self, openai_llm, mock_openai_stream_events):
+        """Should return LLMResponse from collect()."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_stream_events)
+
+        stream = await openai_llm.get_response_stream("Hello")
+        response = await stream.collect()
+
+        assert response.content == "Hello world"
+        assert response.input_tokens == 20
+        assert response.output_tokens == 8
+
+    async def test_passes_stream_true_to_api(self, openai_llm, mock_openai_stream_events):
+        """Should pass stream=True to the API call."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_stream_events)
+
+        await openai_llm.get_response_stream("Hello")
+
+        call_kwargs = openai_llm.client.responses.create.call_args.kwargs
+        assert call_kwargs["stream"] is True

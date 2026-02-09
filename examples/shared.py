@@ -12,8 +12,8 @@ load_dotenv()
 # One model per provider with their API key environment variable
 PROVIDERS = [
     ("openai", "gpt-4.1-mini", "OPENAI_API_KEY"),
-    ("anthropic", "claude-3-5-haiku-latest", "ANTHROPIC_API_KEY"),
-    ("gemini", "gemini-2.0-flash", "GEMINI_API_KEY"),
+    ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
+    ("gemini", "gemini-2.5-flash", "GEMINI_API_KEY"),
     ("deepseek", "deepseek-chat", "DEEPSEEK_API_KEY"),
     ("cohere", "command-r-08-2024", "CO_API_KEY"),
 ]

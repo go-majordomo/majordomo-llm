@@ -1,6 +1,7 @@
 """OpenAI LLM provider implementation."""
 
 import time
+from collections.abc import AsyncIterator
 
 import openai
 from tenacity import (
@@ -9,7 +10,15 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, T, resolve_api_key
+from majordomo_llm.base import (
+    LLM,
+    LLMJSONResponse,
+    LLMResponse,
+    LLMStreamResponse,
+    T,
+    _StreamState,
+    resolve_api_key,
+)
 from majordomo_llm.exceptions import ProviderError
 
 
@@ -125,6 +134,59 @@ class OpenAI(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from OpenAI."""
+        state = _StreamState()
+
+        try:
+            if self.supports_temperature_top_p:
+                response = await self.client.responses.create(
+                    model=self.model,
+                    instructions=system_prompt,
+                    input=user_prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=True,
+                )
+            else:
+                response = await self.client.responses.create(
+                    model=self.model,
+                    instructions=system_prompt,
+                    input=user_prompt,
+                    stream=True,
+                )
+        except openai.APIError as e:
+            raise ProviderError(
+                f"OpenAI API error: {e}",
+                provider="openai",
+                original_error=e,
+            ) from e
+
+        async def generator() -> AsyncIterator[str]:
+            try:
+                async for event in response:
+                    if event.type == "response.output_text.delta":
+                        yield event.delta
+                    elif event.type == "response.completed":
+                        state.input_tokens = event.response.usage.input_tokens
+                        state.output_tokens = event.response.usage.output_tokens
+                        cached = event.response.usage.input_tokens_details
+                        state.cached_tokens = cached.cached_tokens
+            except openai.APIError as e:
+                raise ProviderError(
+                    f"OpenAI API error: {e}",
+                    provider="openai",
+                    original_error=e,
+                ) from e
+
+        return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
     async def _get_structured_response(
         self,

@@ -7,7 +7,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, LLMStructuredResponse, Usage
+from majordomo_llm.base import (
+    LLM,
+    LLMJSONResponse,
+    LLMResponse,
+    LLMStreamResponse,
+    LLMStructuredResponse,
+    Usage,
+)
 from majordomo_llm.logging.interfaces import DatabaseAdapter, StorageAdapter
 from majordomo_llm.logging.models import LogEntry
 
@@ -156,6 +163,57 @@ class LoggingLLM(LLM):
                 error_message=str(e),
             )
             raise
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from the LLM with logging."""
+        request_body = {
+            "user_prompt": user_prompt,
+            "system_prompt": system_prompt,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+
+        try:
+            stream = await self._llm.get_response_stream(
+                user_prompt, system_prompt, temperature, top_p
+            )
+        except Exception as e:
+            self._fire_and_forget(
+                request_body=request_body,
+                response_content=None,
+                response=None,
+                status="error",
+                error_message=str(e),
+            )
+            raise
+
+        def on_complete(usage: Usage, content: str) -> None:
+            self._fire_and_forget(
+                request_body=request_body,
+                response_content=content,
+                response=usage,
+                status="success",
+                error_message=None,
+            )
+
+        def on_error(error: Exception) -> None:
+            self._fire_and_forget(
+                request_body=request_body,
+                response_content=None,
+                response=None,
+                status="error",
+                error_message=str(error),
+            )
+
+        stream._on_complete = on_complete
+        stream._on_error = on_error
+        return stream
 
     async def get_json_response(
         self,

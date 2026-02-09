@@ -68,6 +68,7 @@ anthropic:
     claude-haiku-4-5-20251001:
       input_cost: 1.00
       output_cost: 5.00
+      supports_temperature_top_p: false
     # Claude 4 family
     claude-opus-4-1-20250805:
       input_cost: 15.00
