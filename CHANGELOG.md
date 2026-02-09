@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-08
+
+### Added
+
+- Streaming responses via `get_response_stream()` for all providers (OpenAI, Anthropic, Gemini, DeepSeek, Cohere)
+- `LLMStreamResponse` async-iterable wrapper with real-time chunk yielding, `.usage` property, and `.collect()` method
+- Streaming support in `LLMCascade` with failover on stream creation errors
+- Streaming support in `LoggingLLM` with fire-and-forget logging via callbacks
+- Streaming demo (`examples/streaming_demo.py`) with real-time output and collect examples
+
+### Fixed
+
+- `claude-haiku-4-5-20251001` config missing `supports_temperature_top_p: false`, causing API errors when both temperature and top_p were sent
+
 ## [0.1.6] - 2025-01-31
 
 ### Added
@@ -108,7 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.3...v0.1.4

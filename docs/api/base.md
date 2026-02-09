@@ -4,6 +4,8 @@
 
 ::: majordomo_llm.base.LLMResponse
 
+::: majordomo_llm.base.LLMStreamResponse
+
 ::: majordomo_llm.base.LLMJSONResponse
 
 ::: majordomo_llm.base.LLMStructuredResponse

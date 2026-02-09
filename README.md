@@ -10,6 +10,7 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 ## Features
 
 - **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, and Cohere
+- **Streaming** - Real-time token-by-token output via `get_response_stream()` with async iteration
 - **Cost Tracking** - Automatic calculation of input/output token costs per request
 - **Structured Outputs** - Native support for Pydantic models as response schemas
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
@@ -75,6 +76,25 @@ response = await llm.get_json_response(
 # response.content is a parsed Python dict
 for country in response.content["countries"]:
     print(country["name"])
+```
+
+### Streaming
+
+```python
+stream = await llm.get_response_stream(
+    user_prompt="Explain quantum computing",
+    system_prompt="Be concise.",
+)
+
+async for chunk in stream:
+    print(chunk, end="", flush=True)
+
+print(f"\nCost: ${stream.usage.total_cost:.6f}")
+
+# Or collect the full response:
+stream = await llm.get_response_stream("Summarize this document...")
+response = await stream.collect()  # Returns an LLMResponse
+print(response.content)
 ```
 
 ### Structured Output with Pydantic
@@ -171,6 +191,10 @@ Get a plain text response.
 
 Get a JSON response (automatically parsed).
 
+#### `get_response_stream(user_prompt, system_prompt=None, temperature=0.3, top_p=1.0) -> LLMStreamResponse`
+
+Get a streaming text response. Yields chunks via async iteration; usage metrics are available after the stream completes.
+
 #### `get_structured_json_response(response_model, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0) -> LLMStructuredResponse`
 
 Get a response validated against a Pydantic model.
@@ -210,7 +234,7 @@ cascade = LLMCascade([
 response = await cascade.get_response("Hello!")
 ```
 
-All three response methods (`get_response`, `get_json_response`, `get_structured_json_response`) support automatic fallback.
+All response methods (`get_response`, `get_json_response`, `get_structured_json_response`, `get_response_stream`) support automatic fallback.
 
 ### Direct Provider Access
 

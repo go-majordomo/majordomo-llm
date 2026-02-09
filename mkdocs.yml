@@ -31,11 +31,13 @@ nav:
   - Getting Started: getting-started.md
   - Core Concepts:
       - Overview: concepts/index.md
+      - Streaming: concepts/streaming.md
       - Structured Outputs: concepts/structured-outputs.md
       - Cost Tracking & Logging: concepts/cost-tracking.md
       - Cascade Failover: concepts/cascade-failover.md
   - Recipes:
       - Basic Usage: recipes/basic-usage.md
+      - Streaming: recipes/streaming.md
       - Structured Outputs: recipes/structured-outputs.md
       - Cost Tracking & Logging: recipes/logging.md
       - Cascade Failover: recipes/cascade.md

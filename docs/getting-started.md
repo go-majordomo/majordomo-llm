@@ -35,6 +35,22 @@ async def main():
 asyncio.run(main())
 ```
 
+## Streaming
+
+```python
+import asyncio
+from majordomo_llm import get_llm_instance
+
+async def main():
+    llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
+    stream = await llm.get_response_stream("What is the capital of France?")
+    async for chunk in stream:
+        print(chunk, end="", flush=True)
+    print(f"\nCost: ${stream.usage.total_cost:.6f}")
+
+asyncio.run(main())
+```
+
 ## Local Docs
 
 ```bash

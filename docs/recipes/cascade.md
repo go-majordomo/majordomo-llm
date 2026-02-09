@@ -15,6 +15,16 @@ resp = await cascade.get_response("Hello!")
 print(resp.content)
 ```
 
+Streaming is also supported:
+
+```python
+stream = await cascade.get_response_stream("Hello!")
+async for chunk in stream:
+    print(chunk, end="")
+```
+
 Notes
+
 - Order defines priority; only `ProviderError` triggers a fallback.
+- For streaming, fallback happens on stream creation errors only. Mid-stream errors propagate to the caller.
 - Consider mixed providers to diversify outages and quota limits.

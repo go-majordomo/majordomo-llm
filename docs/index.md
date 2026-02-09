@@ -53,6 +53,17 @@ llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
 llm = get_llm_instance("gemini", "gemini-2.5-flash")
 ```
 
+### Streaming Responses
+
+Stream text token-by-token as it's generated. Usage and cost metrics are available after the stream completes.
+
+```python
+stream = await llm.get_response_stream("Explain quantum computing")
+async for chunk in stream:
+    print(chunk, end="", flush=True)
+print(f"\nCost: ${stream.usage.total_cost:.6f}")
+```
+
 ### Structured Outputs with Pydantic
 
 Get validated, typed Python objects instead of raw JSON. Provider-specific implementation details are handled internally.
@@ -111,7 +122,7 @@ logged_llm = LoggingLLM(llm, db, storage)
 | DeepSeek | deepseek-chat, deepseek-reasoner |
 | Cohere | command-a, command-r-plus, command-r |
 
-All providers support structured outputs. Additional models are available—see `llm_config.yaml` for the complete list with pricing.
+All providers support structured outputs and streaming. Additional models are available—see `llm_config.yaml` for the complete list with pricing.
 
 ## Next Steps
 

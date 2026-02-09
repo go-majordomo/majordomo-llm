@@ -57,6 +57,30 @@ resp.total_cost     # Cost in USD
 resp.response_time  # Time in seconds
 ```
 
+## Streaming
+
+Stream responses in real time:
+
+```python
+stream = await llm.get_response_stream(
+    user_prompt="What is the capital of France?",
+)
+async for chunk in stream:
+    print(chunk, end="", flush=True)
+
+print(f"\nCost: ${stream.usage.total_cost:.6f}")
+```
+
+Or collect the full response:
+
+```python
+stream = await llm.get_response_stream("Summarize this text...")
+response = await stream.collect()  # Returns an LLMResponse
+print(response.content)
+```
+
+See the [Streaming recipe](streaming.md) for more examples.
+
 ## JSON Responses
 
 Get raw JSON without Pydantic validation:

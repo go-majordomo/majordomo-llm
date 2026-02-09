@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncIterator
 
 import cohere
-from cohere import SystemChatMessageV2, UserChatMessageV2, JsonObjectResponseFormatV2
+from cohere import JsonObjectResponseFormatV2, SystemChatMessageV2, UserChatMessageV2
 from tenacity import (
     retry,
     stop_after_attempt,
