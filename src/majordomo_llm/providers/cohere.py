@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 
 import cohere
 from cohere import JsonObjectResponseFormatV2, SystemChatMessageV2, UserChatMessageV2
+from cohere.core.request_options import RequestOptions
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -55,6 +56,8 @@ class Cohere(LLM):
         *,
         api_key: str | None = None,
         api_key_alias: str | None = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         """Initialize the Cohere provider.
 
@@ -65,6 +68,8 @@ class Cohere(LLM):
             supports_temperature_top_p: Whether temperature/top_p are supported.
             api_key: Optional API key. Defaults to ``CO_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
+            base_url: Optional custom base URL for routing through a proxy.
+            default_headers: Optional headers sent with every request.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
@@ -78,8 +83,24 @@ class Cohere(LLM):
             supports_temperature_top_p=supports_temperature_top_p,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
+            base_url=base_url,
+            default_headers=default_headers,
         )
-        self.client = cohere.AsyncClientV2(api_key=resolved_api_key)
+        self.client = cohere.AsyncClientV2(
+            api_key=resolved_api_key,
+            base_url=self.base_url,
+        )
+
+    def _cohere_request_options(
+        self, extra_headers: dict[str, str] | None
+    ) -> RequestOptions | None:
+        """Build request_options with merged default + extra headers."""
+        merged = dict(self.default_headers or {})
+        if extra_headers:
+            merged.update(extra_headers)
+        if not merged:
+            return None
+        return RequestOptions(additional_headers=merged)
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
     async def get_response(
@@ -88,9 +109,12 @@ class Cohere(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Cohere."""
-        return await self._get_response(user_prompt, system_prompt, temperature, top_p)
+        return await self._get_response(
+            user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+        )
 
     async def _get_response(
         self,
@@ -98,12 +122,15 @@ class Cohere(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from Cohere."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
+
+        request_options = self._cohere_request_options(extra_headers)
 
         start_time = time.time()
         try:
@@ -113,11 +140,13 @@ class Cohere(LLM):
                     messages=messages,
                     temperature=temperature,
                     p=top_p,
+                    request_options=request_options,
                 )
             else:
                 response = await self.client.chat(
                     model=self.model,
                     messages=messages,
+                    request_options=request_options,
                 )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(
@@ -149,6 +178,7 @@ class Cohere(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Cohere."""
         messages = []
@@ -157,6 +187,7 @@ class Cohere(LLM):
         messages.append({"role": "user", "content": user_prompt})
 
         state = _StreamState()
+        request_options = self._cohere_request_options(extra_headers)
 
         try:
             if self.supports_temperature_top_p:
@@ -165,11 +196,13 @@ class Cohere(LLM):
                     messages=messages,
                     temperature=temperature,
                     p=top_p,
+                    request_options=request_options,
                 )
             else:
                 response = self.client.chat_stream(
                     model=self.model,
                     messages=messages,
+                    request_options=request_options,
                 )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(
@@ -202,6 +235,7 @@ class Cohere(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Cohere-specific implementation using JSON mode for structured outputs.
 
@@ -222,6 +256,8 @@ class Cohere(LLM):
             UserChatMessageV2(content=user_prompt)
         ]
 
+        request_options = self._cohere_request_options(extra_headers)
+
         start_time = time.time()
         try:
             if self.supports_temperature_top_p:
@@ -230,13 +266,15 @@ class Cohere(LLM):
                     messages=messages,
                     temperature=temperature,
                     p=top_p,
-                    response_format=JsonObjectResponseFormatV2()
+                    response_format=JsonObjectResponseFormatV2(),
+                    request_options=request_options,
                 )
             else:
                 response = await self.client.chat(
                     model=self.model,
                     messages=messages,
-                    response_format=JsonObjectResponseFormatV2()
+                    response_format=JsonObjectResponseFormatV2(),
+                    request_options=request_options,
                 )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(

@@ -51,6 +51,8 @@ class OpenAI(LLM):
         *,
         api_key: str | None = None,
         api_key_alias: str | None = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         """Initialize the OpenAI provider.
 
@@ -61,6 +63,8 @@ class OpenAI(LLM):
             supports_temperature_top_p: Whether temperature/top_p are supported.
             api_key: Optional API key. Defaults to ``OPENAI_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
+            base_url: Optional custom base URL for routing through a proxy.
+            default_headers: Optional headers sent with every request.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
@@ -74,8 +78,14 @@ class OpenAI(LLM):
             supports_temperature_top_p=supports_temperature_top_p,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
+            base_url=base_url,
+            default_headers=default_headers,
         )
-        self.client = openai.AsyncOpenAI(api_key=resolved_api_key)
+        self.client = openai.AsyncOpenAI(
+            api_key=resolved_api_key,
+            base_url=self.base_url,
+            default_headers=self.default_headers,
+        )
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
     async def get_response(
@@ -84,9 +94,12 @@ class OpenAI(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from OpenAI."""
-        return await self._get_response(user_prompt, system_prompt, temperature, top_p)
+        return await self._get_response(
+            user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+        )
 
     async def _get_response(
         self,
@@ -94,6 +107,7 @@ class OpenAI(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from OpenAI."""
         start_time = time.time()
@@ -105,12 +119,14 @@ class OpenAI(LLM):
                     input=user_prompt,
                     temperature=temperature,
                     top_p=top_p,
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.responses.create(
                     model=self.model,
                     instructions=system_prompt,
                     input=user_prompt,
+                    extra_headers=extra_headers,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -141,6 +157,7 @@ class OpenAI(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from OpenAI."""
         state = _StreamState()
@@ -154,6 +171,7 @@ class OpenAI(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     stream=True,
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.responses.create(
@@ -161,6 +179,7 @@ class OpenAI(LLM):
                     instructions=system_prompt,
                     input=user_prompt,
                     stream=True,
+                    extra_headers=extra_headers,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -195,6 +214,7 @@ class OpenAI(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """OpenAI-specific implementation using structured outputs with JSON Schema."""
         start_time = time.time()
@@ -208,6 +228,7 @@ class OpenAI(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     text_format=response_model,
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.responses.parse(
@@ -215,6 +236,7 @@ class OpenAI(LLM):
                     instructions=system_prompt,
                     input=user_prompt,
                     text_format=response_model,
+                    extra_headers=extra_headers,
                 )
         except openai.APIError as e:
             raise ProviderError(

@@ -268,7 +268,7 @@ class TestCohereInit:
                 api_key="test-key",
             )
 
-            mock_client.assert_called_once_with(api_key="test-key")
+            mock_client.assert_called_once_with(api_key="test-key", base_url=None)
 
     def test_supports_temperature_by_default(self):
         """Should support temperature/top_p by default."""

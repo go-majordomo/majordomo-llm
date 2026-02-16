@@ -273,6 +273,7 @@ class TestDeepSeekInit:
             mock_client.assert_called_once_with(
                 api_key="test-key",
                 base_url="https://api.deepseek.com",
+                default_headers=None,
             )
 
     def test_supports_temperature_by_default(self):

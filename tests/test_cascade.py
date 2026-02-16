@@ -161,6 +161,7 @@ class TestLLMCascadeGetResponse:
             system_prompt="Be helpful",
             temperature=0.7,
             top_p=0.9,
+            extra_headers=None,
         )
 
 

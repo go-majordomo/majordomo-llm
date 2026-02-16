@@ -29,7 +29,13 @@ def _load_llm_config() -> dict[str, dict]:
 LLM_CONFIG: dict[str, dict] = _load_llm_config()
 
 
-def get_llm_instance(provider: str, model: str) -> LLM:
+def get_llm_instance(
+    provider: str,
+    model: str,
+    *,
+    base_url: str | None = None,
+    default_headers: dict[str, str] | None = None,
+) -> LLM:
     """Create an LLM instance for the specified provider and model.
 
     This is the primary factory function for creating LLM instances. It handles
@@ -39,6 +45,8 @@ def get_llm_instance(provider: str, model: str) -> LLM:
         provider: The LLM provider name. One of: "openai", "anthropic", "gemini",
             "deepseek", "cohere".
         model: The model identifier (e.g., "gpt-4o", "claude-sonnet-4-20250514").
+        base_url: Optional custom base URL for routing through a proxy.
+        default_headers: Optional headers sent with every request.
 
     Returns:
         An LLM instance configured for the specified provider and model.
@@ -69,6 +77,8 @@ def get_llm_instance(provider: str, model: str) -> LLM:
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            base_url=base_url,
+            default_headers=default_headers,
         )
     elif provider == "anthropic":
         return Anthropic(
@@ -76,12 +86,16 @@ def get_llm_instance(provider: str, model: str) -> LLM:
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            base_url=base_url,
+            default_headers=default_headers,
         )
     elif provider == "gemini":
         return Gemini(
             model=model,
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
+            base_url=base_url,
+            default_headers=default_headers,
         )
     elif provider == "deepseek":
         return DeepSeek(
@@ -89,6 +103,8 @@ def get_llm_instance(provider: str, model: str) -> LLM:
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            base_url=base_url,
+            default_headers=default_headers,
         )
     elif provider == "cohere":
         return Cohere(
@@ -96,6 +112,8 @@ def get_llm_instance(provider: str, model: str) -> LLM:
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            base_url=base_url,
+            default_headers=default_headers,
         )
     else:
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")

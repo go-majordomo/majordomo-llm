@@ -316,6 +316,8 @@ class LLM(ABC):
         use_web_search: bool = False,
         api_key: str | None = None,
         api_key_alias: str | None = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         """Initialize the LLM instance.
 
@@ -328,6 +330,8 @@ class LLM(ABC):
             use_web_search: Enable web search capability (Anthropic only).
             api_key: The API key (used to compute hash for logging).
             api_key_alias: Optional human-readable name for the API key.
+            base_url: Optional custom base URL for routing through a proxy.
+            default_headers: Optional headers sent with every request.
         """
         self.provider = provider
         self.model = model
@@ -337,6 +341,8 @@ class LLM(ABC):
         self.use_web_search = use_web_search
         self.api_key_hash = _hash_api_key(api_key) if api_key else None
         self.api_key_alias = api_key_alias
+        self.base_url = base_url
+        self.default_headers = default_headers
 
     def get_full_model_name(self) -> str:
         """Get the fully qualified model name.
@@ -369,6 +375,7 @@ class LLM(ABC):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from the LLM.
 
@@ -377,6 +384,7 @@ class LLM(ABC):
             system_prompt: Optional system prompt to set context/behavior.
             temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
             top_p: Nucleus sampling parameter (0.0-1.0).
+            extra_headers: Optional per-request headers merged with default_headers.
 
         Returns:
             LLMResponse containing the text content and usage metrics.
@@ -393,6 +401,7 @@ class LLM(ABC):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from the LLM.
 
@@ -401,6 +410,7 @@ class LLM(ABC):
             system_prompt: Optional system prompt to set context/behavior.
             temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
             top_p: Nucleus sampling parameter (0.0-1.0).
+            extra_headers: Optional per-request headers merged with default_headers.
 
         Returns:
             LLMStreamResponse that yields text chunks and provides usage after completion.
@@ -417,6 +427,7 @@ class LLM(ABC):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Get a JSON response from the LLM.
 
@@ -427,6 +438,7 @@ class LLM(ABC):
             system_prompt: Optional system prompt to set context/behavior.
             temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
             top_p: Nucleus sampling parameter (0.0-1.0).
+            extra_headers: Optional per-request headers merged with default_headers.
 
         Returns:
             LLMJSONResponse containing the parsed JSON dict and usage metrics.
@@ -435,7 +447,9 @@ class LLM(ABC):
             ResponseParsingError: If the response cannot be parsed as JSON.
             Exception: If the API request fails after retries.
         """
-        response = await self.get_response(user_prompt, system_prompt, temperature, top_p)
+        response = await self.get_response(
+            user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+        )
         # Strip markdown code fencing if present
         content = response.content.replace("```json", "").replace("```", "").strip()
         try:
@@ -463,6 +477,7 @@ class LLM(ABC):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStructuredResponse:
         """Get a structured response validated against a Pydantic model.
 
@@ -501,6 +516,7 @@ class LLM(ABC):
             system_prompt=system_prompt,
             temperature=temperature,
             top_p=top_p,
+            extra_headers=extra_headers,
         )
         parsed_content = response_model.model_validate(response.content)
 
@@ -522,6 +538,7 @@ class LLM(ABC):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Provider-specific implementation for structured responses.
 
@@ -534,6 +551,7 @@ class LLM(ABC):
             system_prompt: Optional system prompt to set context/behavior.
             temperature: Sampling temperature (0.0-2.0).
             top_p: Nucleus sampling parameter (0.0-1.0).
+            extra_headers: Optional per-request headers merged with default_headers.
 
         Returns:
             LLMJSONResponse containing the parsed JSON content.
@@ -543,7 +561,10 @@ class LLM(ABC):
 
         if self.supports_temperature_top_p:
             return await self.get_json_response(
-                user_prompt, combined_system_prompt, temperature, top_p
+                user_prompt, combined_system_prompt, temperature, top_p,
+                extra_headers=extra_headers,
             )
         else:
-            return await self.get_json_response(user_prompt, combined_system_prompt)
+            return await self.get_json_response(
+                user_prompt, combined_system_prompt, extra_headers=extra_headers,
+            )

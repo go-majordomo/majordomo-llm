@@ -133,6 +133,7 @@ class LoggingLLM(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from the LLM with logging."""
         request_body = {
@@ -144,7 +145,8 @@ class LoggingLLM(LLM):
 
         try:
             response = await self._llm.get_response(
-                user_prompt, system_prompt, temperature, top_p
+                user_prompt, system_prompt, temperature, top_p,
+                extra_headers=extra_headers,
             )
             self._fire_and_forget(
                 request_body=request_body,
@@ -170,6 +172,7 @@ class LoggingLLM(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from the LLM with logging."""
         request_body = {
@@ -181,7 +184,8 @@ class LoggingLLM(LLM):
 
         try:
             stream = await self._llm.get_response_stream(
-                user_prompt, system_prompt, temperature, top_p
+                user_prompt, system_prompt, temperature, top_p,
+                extra_headers=extra_headers,
             )
         except Exception as e:
             self._fire_and_forget(
@@ -221,6 +225,7 @@ class LoggingLLM(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Get a JSON response from the LLM with logging."""
         request_body = {
@@ -232,7 +237,8 @@ class LoggingLLM(LLM):
 
         try:
             response = await self._llm.get_json_response(
-                user_prompt, system_prompt, temperature, top_p
+                user_prompt, system_prompt, temperature, top_p,
+                extra_headers=extra_headers,
             )
             self._fire_and_forget(
                 request_body=request_body,
@@ -259,6 +265,7 @@ class LoggingLLM(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStructuredResponse:
         """Get a structured response validated against a Pydantic model with logging."""
         request_body = {
@@ -271,7 +278,8 @@ class LoggingLLM(LLM):
 
         try:
             response = await self._llm.get_structured_json_response(
-                response_model, user_prompt, system_prompt, temperature, top_p
+                response_model, user_prompt, system_prompt, temperature, top_p,
+                extra_headers=extra_headers,
             )
             self._fire_and_forget(
                 request_body=request_body,

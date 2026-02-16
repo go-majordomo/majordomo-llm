@@ -64,6 +64,8 @@ class Anthropic(LLM):
         *,
         api_key: str | None = None,
         api_key_alias: str | None = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         """Initialize the Anthropic provider.
 
@@ -75,6 +77,8 @@ class Anthropic(LLM):
             use_web_search: Enable web search (requires claude-sonnet-4-5-20250929).
             api_key: Optional API key. Defaults to ``ANTHROPIC_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
+            base_url: Optional custom base URL for routing through a proxy.
+            default_headers: Optional headers sent with every request.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
@@ -89,8 +93,14 @@ class Anthropic(LLM):
             use_web_search=use_web_search,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
+            base_url=base_url,
+            default_headers=default_headers,
         )
-        self.client = anthropic.AsyncAnthropic(api_key=resolved_api_key)
+        self.client = anthropic.AsyncAnthropic(
+            api_key=resolved_api_key,
+            base_url=self.base_url,
+            default_headers=self.default_headers,
+        )
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
     async def get_response(
@@ -99,6 +109,7 @@ class Anthropic(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Anthropic."""
         if system_prompt is None:
@@ -123,6 +134,7 @@ class Anthropic(LLM):
                     top_p=top_p,
                     tools=tools,
                     tool_choice=ToolChoiceAutoParam(type="auto"),
+                    extra_headers=extra_headers,
                 )
             else:
                 response_message = await self.client.messages.create(
@@ -132,6 +144,7 @@ class Anthropic(LLM):
                     messages=messages,
                     tools=tools,
                     tool_choice=ToolChoiceAutoParam(type="auto"),
+                    extra_headers=extra_headers,
                 )
         except anthropic.APIError as e:
             raise ProviderError(
@@ -164,6 +177,7 @@ class Anthropic(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Anthropic."""
         if system_prompt is None:
@@ -183,6 +197,7 @@ class Anthropic(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     stream=True,
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.messages.create(
@@ -191,6 +206,7 @@ class Anthropic(LLM):
                     system=system_message,
                     messages=messages,
                     stream=True,
+                    extra_headers=extra_headers,
                 )
         except anthropic.APIError as e:
             raise ProviderError(
@@ -226,6 +242,7 @@ class Anthropic(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Anthropic-specific implementation using tool calling for structured outputs."""
         if self.model == "claude-sonnet-4-5-20250929" and self.use_web_search:
@@ -233,6 +250,7 @@ class Anthropic(LLM):
                 response_model=response_model,
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,
+                extra_headers=extra_headers,
             )
 
         schema = response_model.model_json_schema()
@@ -266,6 +284,7 @@ class Anthropic(LLM):
                     top_p=top_p,
                     tools=tools,
                     tool_choice=ToolChoiceToolParam(type="tool", name="structured_response"),
+                    extra_headers=extra_headers,
                 )
             else:
                 response_message = await self.client.messages.create(
@@ -275,6 +294,7 @@ class Anthropic(LLM):
                     messages=messages,
                     tools=tools,
                     tool_choice=ToolChoiceToolParam(type="tool", name="structured_response"),
+                    extra_headers=extra_headers,
                 )
         except anthropic.APIError as e:
             raise ProviderError(
@@ -318,12 +338,14 @@ class Anthropic(LLM):
         response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Get structured response with web search enabled."""
         response, execution_time = await self._structured_response_with_web_search_helper(
             response_model=response_model,
             user_prompt=user_prompt,
             system_prompt=system_prompt,
+            extra_headers=extra_headers,
         )
 
         content = None
@@ -358,6 +380,7 @@ class Anthropic(LLM):
         response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple:
         """Helper for web search with structured response."""
         schema = response_model.model_json_schema()
@@ -394,6 +417,7 @@ class Anthropic(LLM):
                     messages=current_messages,
                     tools=tools,
                     tool_choice=ToolChoiceAutoParam(type="auto"),
+                    extra_headers=extra_headers,
                 )
 
                 # Check what tool was used
@@ -434,6 +458,7 @@ class Anthropic(LLM):
                 messages=current_messages,
                 tools=[structured_response_tool],
                 tool_choice=ToolChoiceToolParam(type="tool", name="structured_response"),
+                extra_headers=extra_headers,
             )
         except anthropic.APIError as e:
             raise ProviderError(

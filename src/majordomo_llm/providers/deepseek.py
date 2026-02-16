@@ -55,6 +55,8 @@ class DeepSeek(LLM):
         *,
         api_key: str | None = None,
         api_key_alias: str | None = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         """Initialize the DeepSeek provider.
 
@@ -65,6 +67,8 @@ class DeepSeek(LLM):
             supports_temperature_top_p: Whether temperature/top_p are supported.
             api_key: Optional API key. Defaults to ``DEEPSEEK_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
+            base_url: Optional custom base URL. Overrides DEEPSEEK_BASE_URL when set.
+            default_headers: Optional headers sent with every request.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
@@ -78,10 +82,13 @@ class DeepSeek(LLM):
             supports_temperature_top_p=supports_temperature_top_p,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
+            base_url=base_url,
+            default_headers=default_headers,
         )
         self.client = openai.AsyncOpenAI(
             api_key=resolved_api_key,
-            base_url=self.DEEPSEEK_BASE_URL,
+            base_url=self.base_url or self.DEEPSEEK_BASE_URL,
+            default_headers=self.default_headers,
         )
 
     @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
@@ -91,9 +98,12 @@ class DeepSeek(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from DeepSeek."""
-        return await self._get_response(user_prompt, system_prompt, temperature, top_p)
+        return await self._get_response(
+            user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+        )
 
     async def _get_response(
         self,
@@ -101,6 +111,7 @@ class DeepSeek(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from DeepSeek."""
         messages = []
@@ -116,11 +127,13 @@ class DeepSeek(LLM):
                     messages=messages,
                     temperature=temperature,
                     top_p=top_p,
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
+                    extra_headers=extra_headers,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -156,6 +169,7 @@ class DeepSeek(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from DeepSeek."""
         messages = []
@@ -174,6 +188,7 @@ class DeepSeek(LLM):
                     top_p=top_p,
                     stream=True,
                     stream_options={"include_usage": True},
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.chat.completions.create(
@@ -181,6 +196,7 @@ class DeepSeek(LLM):
                     messages=messages,
                     stream=True,
                     stream_options={"include_usage": True},
+                    extra_headers=extra_headers,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -218,6 +234,7 @@ class DeepSeek(LLM):
         system_prompt: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """DeepSeek-specific implementation using JSON mode for structured outputs."""
         schema = response_model.model_json_schema()
@@ -237,12 +254,14 @@ class DeepSeek(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     response_format={"type": "json_object"},
+                    extra_headers=extra_headers,
                 )
             else:
                 response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     response_format={"type": "json_object"},
+                    extra_headers=extra_headers,
                 )
         except openai.APIError as e:
             raise ProviderError(
