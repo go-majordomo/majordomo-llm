@@ -35,12 +35,14 @@ nav:
       - Structured Outputs: concepts/structured-outputs.md
       - Cost Tracking & Logging: concepts/cost-tracking.md
       - Cascade Failover: concepts/cascade-failover.md
+      - Custom Endpoints & Headers: concepts/custom-endpoints.md
   - Recipes:
       - Basic Usage: recipes/basic-usage.md
       - Streaming: recipes/streaming.md
       - Structured Outputs: recipes/structured-outputs.md
       - Cost Tracking & Logging: recipes/logging.md
       - Cascade Failover: recipes/cascade.md
+      - Proxy Routing & Custom Headers: recipes/proxy-routing.md
       - Offline Testing (Mocking): recipes/mocking.md
   - API Reference:
       - Base: api/base.md

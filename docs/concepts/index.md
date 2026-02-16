@@ -10,6 +10,8 @@ This section explains the key capabilities of majordomo-llm and the problems the
 
 - **[Cascade Failover](cascade-failover.md)**: Wrap multiple providers in priority order for automatic failover when one goes down. If your primary provider hits rate limits or experiences an outage, requests seamlessly fall back to the next provider in the chain.
 
+- **[Custom Endpoints & Headers](custom-endpoints.md)**: Route requests through a proxy or gateway by setting a custom `base_url` and attaching HTTP headers at instance level (`default_headers`) or per request (`extra_headers`). Works across all providers and composes with cascade, logging, and streaming.
+
 ## Composability
 
 These capabilities work together. You can use structured outputs through a cascade with full logging:

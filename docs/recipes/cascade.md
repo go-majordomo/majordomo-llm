@@ -23,6 +23,25 @@ async for chunk in stream:
     print(chunk, end="")
 ```
 
+Route all cascade providers through a gateway:
+
+```python
+cascade = LLMCascade(
+    [
+        ("anthropic", "claude-sonnet-4-20250514"),
+        ("openai", "gpt-4o"),
+        ("gemini", "gemini-2.5-flash"),
+    ],
+    base_url="https://gateway.example.com",
+    default_headers={"X-Majordomo-Key": "mdm_key_here"},
+)
+
+resp = await cascade.get_response(
+    "Hello!",
+    extra_headers={"X-Request-Id": "req_123"},
+)
+```
+
 Notes
 
 - Order defines priority; only `ProviderError` triggers a fallback.

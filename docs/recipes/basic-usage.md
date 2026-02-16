@@ -92,6 +92,25 @@ resp = await llm.get_json_response(
 print(resp.content)  # dict: {"countries": [...]}
 ```
 
+## Custom Base URL & Headers
+
+Route requests through a proxy or gateway:
+
+```python
+llm = get_llm_instance(
+    "anthropic", "claude-sonnet-4-20250514",
+    base_url="https://gateway.example.com",
+    default_headers={"X-Majordomo-Key": "mdm_key_here"},
+)
+
+resp = await llm.get_response(
+    "Hello!",
+    extra_headers={"X-Request-Id": "req_123"},
+)
+```
+
+`default_headers` are sent on every request. `extra_headers` are per-call and override defaults on conflict. See the [Proxy Routing recipe](proxy-routing.md) for more examples.
+
 ## With Logging
 
 Track all requests for analytics:
