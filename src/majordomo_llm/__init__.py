@@ -31,8 +31,13 @@ from majordomo_llm.exceptions import (
 )
 from majordomo_llm.factory import (
     LLM_CONFIG,
+    clear_aliases,
+    get_aliases,
     get_all_llm_instances,
+    get_llm_by_alias,
     get_llm_instance,
+    register_alias,
+    unregister_alias,
 )
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.cohere import Cohere
@@ -59,6 +64,12 @@ __all__ = [
     "get_llm_instance",
     "get_all_llm_instances",
     "LLM_CONFIG",
+    # Alias functions
+    "get_llm_by_alias",
+    "register_alias",
+    "unregister_alias",
+    "clear_aliases",
+    "get_aliases",
     # Cascade
     "LLMCascade",
     # Provider implementations
