@@ -33,6 +33,7 @@ def get_llm_instance(
     provider: str,
     model: str,
     *,
+    api_key: str | None = None,
     base_url: str | None = None,
     default_headers: dict[str, str] | None = None,
 ) -> LLM:
@@ -45,6 +46,8 @@ def get_llm_instance(
         provider: The LLM provider name. One of: "openai", "anthropic", "gemini",
             "deepseek", "cohere".
         model: The model identifier (e.g., "gpt-4o", "claude-sonnet-4-20250514").
+        api_key: Optional API key. If not provided, the provider will fall back
+            to its respective environment variable.
         base_url: Optional custom base URL for routing through a proxy.
         default_headers: Optional headers sent with every request.
 
@@ -77,6 +80,7 @@ def get_llm_instance(
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            api_key=api_key,
             base_url=base_url,
             default_headers=default_headers,
         )
@@ -86,6 +90,7 @@ def get_llm_instance(
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            api_key=api_key,
             base_url=base_url,
             default_headers=default_headers,
         )
@@ -94,6 +99,7 @@ def get_llm_instance(
             model=model,
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
+            api_key=api_key,
             base_url=base_url,
             default_headers=default_headers,
         )
@@ -103,6 +109,7 @@ def get_llm_instance(
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            api_key=api_key,
             base_url=base_url,
             default_headers=default_headers,
         )
@@ -112,6 +119,7 @@ def get_llm_instance(
             input_cost=model_attributes["input_cost"],
             output_cost=model_attributes["output_cost"],
             supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+            api_key=api_key,
             base_url=base_url,
             default_headers=default_headers,
         )

@@ -33,6 +33,7 @@ class LLMCascade(LLM):
         self,
         providers: list[tuple[str, str]],
         *,
+        api_key: str | None = None,
         base_url: str | None = None,
         default_headers: dict[str, str] | None = None,
     ) -> None:
@@ -41,6 +42,8 @@ class LLMCascade(LLM):
         Args:
             providers: List of (provider, model) tuples in priority order.
                 First provider is tried first.
+            api_key: Optional API key. If not provided, each provider will fall
+                back to its respective environment variable.
             base_url: Optional custom base URL for routing through a proxy.
             default_headers: Optional headers sent with every request.
 
@@ -51,7 +54,9 @@ class LLMCascade(LLM):
             raise ValueError("LLMCascade requires at least one provider")
 
         self.llms = [
-            get_llm_instance(p, m, base_url=base_url, default_headers=default_headers)
+            get_llm_instance(
+                p, m, api_key=api_key, base_url=base_url, default_headers=default_headers,
+            )
             for p, m in providers
         ]
 
