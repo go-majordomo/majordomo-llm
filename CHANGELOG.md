@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-19
+
+### Added
+
+- `api_key` parameter to `get_llm_instance()` and `LLMCascade` for passing API keys directly instead of relying on environment variables
+
 ## [0.2.0] - 2026-02-08
 
 ### Added
@@ -122,7 +128,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/superset-studio/majordomo-llm/compare/v0.2.0...v0.3.1
 [0.2.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...v0.1.5

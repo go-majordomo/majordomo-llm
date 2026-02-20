@@ -92,6 +92,16 @@ resp = await llm.get_json_response(
 print(resp.content)  # dict: {"countries": [...]}
 ```
 
+## Custom API Key
+
+Pass an API key directly instead of using environment variables:
+
+```python
+llm = get_llm_instance("openai", "gpt-4o", api_key="sk-...")
+```
+
+If `api_key` is not provided, the provider falls back to its respective environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.).
+
 ## Custom Base URL & Headers
 
 Route requests through a proxy or gateway:
@@ -99,6 +109,7 @@ Route requests through a proxy or gateway:
 ```python
 llm = get_llm_instance(
     "anthropic", "claude-sonnet-4-20250514",
+    api_key="sk-ant-...",
     base_url="https://gateway.example.com",
     default_headers={"X-Majordomo-Key": "mdm_key_here"},
 )
@@ -134,7 +145,7 @@ await storage.close()
 
 Notes
 
-- Set API keys via environment variables: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `CO_API_KEY`.
+- Set API keys via environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `CO_API_KEY`) or pass `api_key` directly to `get_llm_instance()`.
 - Model costs are loaded from `llm_config.yaml`; add new models there.
 - All methods are async; use `asyncio.run()` or an async context.
 - See the [Cascade recipe](cascade.md) for automatic provider failover.

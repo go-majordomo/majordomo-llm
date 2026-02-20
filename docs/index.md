@@ -102,11 +102,12 @@ response = await cascade.get_response("Hello!")  # Tries each until one succeeds
 
 ### Custom Endpoints & Proxy Routing
 
-Route requests through any gateway or proxy with custom base URLs and HTTP headers. Headers can be set at instance level (`default_headers`) or per request (`extra_headers`).
+Route requests through any gateway or proxy with custom base URLs and HTTP headers. Pass `api_key` directly or let providers read from environment variables. Headers can be set at instance level (`default_headers`) or per request (`extra_headers`).
 
 ```python
 llm = get_llm_instance(
     "anthropic", "claude-sonnet-4-20250514",
+    api_key="sk-ant-...",
     base_url="https://gateway.example.com",
     default_headers={"X-Majordomo-Key": "mdm_key_here"},
 )
