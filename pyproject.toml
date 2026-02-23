@@ -57,6 +57,7 @@ logging = [
     "aioboto3>=13.0.0",
     "aiosqlite>=0.20.0",
     "aiofiles>=24.0.0",
+    "gcloud-aio-storage>=9.0.0",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -71,6 +72,7 @@ dev = [
     "aioboto3>=13.0.0",
     "aiosqlite>=0.20.0",
     "aiofiles>=24.0.0",
+    "gcloud-aio-storage>=9.0.0",
 ]
 
 [build-system]
@@ -91,7 +93,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["asyncpg", "aiomysql", "aioboto3", "aiosqlite", "aiofiles"]
+module = ["asyncpg", "aiomysql", "aioboto3", "aiosqlite", "aiofiles", "gcloud", "gcloud.aio", "gcloud.aio.storage"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

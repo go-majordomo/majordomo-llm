@@ -22,6 +22,7 @@ Note:
 
 from majordomo_llm.logging.adapters import (
     FileStorageAdapter,
+    GCSAdapter,
     MySQLAdapter,
     PostgresAdapter,
     S3Adapter,
@@ -36,6 +37,7 @@ __all__ = [
     "DatabaseAdapter",
     "StorageAdapter",
     "FileStorageAdapter",
+    "GCSAdapter",
     "MySQLAdapter",
     "PostgresAdapter",
     "S3Adapter",
