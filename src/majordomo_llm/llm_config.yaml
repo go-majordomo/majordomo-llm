@@ -59,9 +59,11 @@ anthropic:
     claude-opus-4-6:
       input_cost: 5.00
       output_cost: 25.00
+      supports_temperature_top_p: false
     claude-sonnet-4-6:
       input_cost: 3.00
       output_cost: 15.00
+      supports_temperature_top_p: false
     # Claude 4.5 family
     claude-opus-4-5-20251101:
       input_cost: 5.00
