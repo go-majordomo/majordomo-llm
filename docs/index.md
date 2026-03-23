@@ -48,7 +48,7 @@ asyncio.run(main())
 Write once, run on any provider. Switch between OpenAI, Anthropic, Gemini, DeepSeek, and Cohere with a single line change.
 
 ```python
-llm = get_llm_instance("openai", "gpt-4o")
+llm = get_llm_instance("openai", "gpt-4.1")
 llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
 llm = get_llm_instance("gemini", "gemini-2.5-flash")
 ```
@@ -94,7 +94,7 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-4-20250514"),
-    ("openai", "gpt-4o"),
+    ("openai", "gpt-4.1"),
     ("gemini", "gemini-2.5-flash"),
 ])
 response = await cascade.get_response("Hello!")  # Tries each until one succeeds
@@ -130,9 +130,9 @@ logged_llm = LoggingLLM(llm, db, storage)
 
 | Provider | Recent Models |
 |----------|---------------|
-| OpenAI | gpt-5, gpt-5-mini, gpt-4.1, gpt-4.1-mini, gpt-4o |
-| Anthropic | claude-sonnet-4.5, claude-opus-4.1, claude-sonnet-4, claude-3.5-haiku |
-| Google Gemini | gemini-2.5-flash, gemini-2.0-flash |
+| OpenAI | gpt-5.4, gpt-5.4-mini, gpt-5, gpt-4.1, o3, o4-mini |
+| Anthropic | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, claude-sonnet-4 |
+| Google Gemini | gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-2.5-flash |
 | DeepSeek | deepseek-chat, deepseek-reasoner |
 | Cohere | command-a, command-r-plus, command-r |
 

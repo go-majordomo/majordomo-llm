@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deprecated model auto-replacement**: Passing a deprecated model to `get_llm_instance()` automatically resolves to the provider-recommended replacement with a logged warning
+- `deprecated_models` section in `llm_config.yaml` mapping old model IDs to replacements for OpenAI, Anthropic, and Gemini
+- `LLMResponse.deprecation_warning` field — set when a deprecated model was auto-replaced
+- `LLM.requested_model` and `LLM.deprecation_warning` attributes for programmatic detection
+- New OpenAI models: `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`
+- New Anthropic models: `claude-opus-4-6`, `claude-sonnet-4-6`
+- New Gemini models: `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`
+
+### Removed
+
+- Deprecated OpenAI models removed from active config: `gpt-4o`, `gpt-4o-mini`, `gpt-5-pro`, `o1`, `o3-mini`
+- Deprecated Anthropic models removed from active config: `claude-3-7-sonnet-20250219`, `claude-3-5-haiku-20241022`, `claude-3-haiku-20240307`
+- Deprecated Gemini models removed from active config: `gemini-3-pro-preview`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`
+
+### Changed
+
+- Updated aliases: `fast` → `claude-haiku-4-5-20251001`, `thinking` → `claude-sonnet-4-6`, `smart` → `claude-opus-4-6`, `resilient-sonnet` cascade uses `gpt-4.1` instead of `gpt-4o`
+- `Gemini.__init__()` now accepts `supports_temperature_top_p` for constructor consistency across providers
+
 ## [0.3.1] - 2026-02-19
 
 ### Added
@@ -128,7 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/superset-studio/majordomo-llm/compare/v0.2.0...v0.3.1
 [0.2.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...v0.1.6

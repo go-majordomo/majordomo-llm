@@ -13,7 +13,7 @@ class Country(BaseModel):
     capital: str
     population: int
 
-llm = get_llm_instance("openai", "gpt-4o")
+llm = get_llm_instance("openai", "gpt-4.1")
 resp = await llm.get_structured_json_response(
     response_model=Country,
     user_prompt="Return info about Japan as JSON",

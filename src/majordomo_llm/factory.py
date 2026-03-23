@@ -33,6 +33,10 @@ def _load_llm_config() -> dict[str, dict]:
 #: Costs are specified in USD per million tokens.
 LLM_CONFIG: dict[str, dict] = _load_llm_config()
 
+#: Mapping of deprecated model names to their recommended replacements,
+#: keyed by provider.
+_DEPRECATED_MODELS: dict[str, dict[str, str]] = LLM_CONFIG.pop("deprecated_models", {})
+
 
 def _validate_provider_model(provider: str, model: str, alias_name: str) -> None:
     """Validate that a provider/model pair exists in LLM_CONFIG."""
@@ -123,63 +127,55 @@ def get_llm_instance(
 
     llm_models = llm_config_entry["models"]
     model_attributes = llm_models.get(model)
+
+    # Check if the requested model is deprecated and resolve to its replacement.
+    deprecation_warning = None
+    requested_model = None
+    if model_attributes is None:
+        provider_deprecated = _DEPRECATED_MODELS.get(provider, {})
+        replacement = provider_deprecated.get(model)
+        if replacement is not None:
+            deprecation_warning = (
+                f"Model '{model}' for provider '{provider}' is deprecated. "
+                f"Automatically replaced with '{replacement}'."
+            )
+            logger.warning(deprecation_warning)
+            requested_model = model
+            model = replacement
+            model_attributes = llm_models.get(model)
+
     if model_attributes is None:
         available = ", ".join(llm_models.keys())
         raise ConfigurationError(
             f"Unknown model '{model}' for provider '{provider}'. Available: {available}"
         )
 
-    if provider == "openai":
-        return OpenAI(
-            model=model,
-            input_cost=model_attributes["input_cost"],
-            output_cost=model_attributes["output_cost"],
-            supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
-            api_key=api_key,
-            base_url=base_url,
-            default_headers=default_headers,
-        )
-    elif provider == "anthropic":
-        return Anthropic(
-            model=model,
-            input_cost=model_attributes["input_cost"],
-            output_cost=model_attributes["output_cost"],
-            supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
-            api_key=api_key,
-            base_url=base_url,
-            default_headers=default_headers,
-        )
-    elif provider == "gemini":
-        return Gemini(
-            model=model,
-            input_cost=model_attributes["input_cost"],
-            output_cost=model_attributes["output_cost"],
-            api_key=api_key,
-            base_url=base_url,
-            default_headers=default_headers,
-        )
-    elif provider == "deepseek":
-        return DeepSeek(
-            model=model,
-            input_cost=model_attributes["input_cost"],
-            output_cost=model_attributes["output_cost"],
-            supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
-            api_key=api_key,
-            base_url=base_url,
-            default_headers=default_headers,
-        )
-    elif provider == "cohere":
-        return Cohere(
-            model=model,
-            input_cost=model_attributes["input_cost"],
-            output_cost=model_attributes["output_cost"],
-            supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
-            api_key=api_key,
-            base_url=base_url,
-            default_headers=default_headers,
-        )
-    else:
+    _PROVIDER_CLASSES: dict[str, type] = {
+        "openai": OpenAI,
+        "anthropic": Anthropic,
+        "gemini": Gemini,
+        "deepseek": DeepSeek,
+        "cohere": Cohere,
+    }
+    cls = _PROVIDER_CLASSES.get(provider)
+    if cls is None:
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")
+
+    llm = cls(
+        model=model,
+        input_cost=model_attributes["input_cost"],
+        output_cost=model_attributes["output_cost"],
+        supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
+        api_key=api_key,
+        base_url=base_url,
+        default_headers=default_headers,
+    )
+
+    if deprecation_warning:
+        llm.deprecation_warning = deprecation_warning
+        llm.requested_model = requested_model
+
+    return llm
 
 
 def get_all_llm_instances() -> Iterator[LLM]:

@@ -52,6 +52,7 @@ class Gemini(LLM):
         input_cost: float,
         output_cost: float,
         *,
+        supports_temperature_top_p: bool = True,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -63,6 +64,7 @@ class Gemini(LLM):
             model: The Gemini model identifier (e.g., "gemini-2.5-flash").
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
+            supports_temperature_top_p: Whether the model supports temperature/top_p.
             api_key: Optional API key. Defaults to ``GEMINI_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -149,6 +151,7 @@ class Gemini(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            deprecation_warning=self.deprecation_warning,
         )
 
     async def get_response_stream(

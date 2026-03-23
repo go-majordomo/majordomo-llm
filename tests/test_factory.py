@@ -48,11 +48,11 @@ class TestGetLLMInstance:
 
     def test_creates_openai_provider(self, mock_all_clients):
         """Should create OpenAI instance for openai provider."""
-        llm = get_llm_instance("openai", "gpt-4o")
+        llm = get_llm_instance("openai", "gpt-4.1")
 
         assert isinstance(llm, OpenAI)
         assert llm.provider == "openai"
-        assert llm.model == "gpt-4o"
+        assert llm.model == "gpt-4.1"
 
     def test_creates_gemini_provider(self, mock_all_clients):
         """Should create Gemini instance for gemini provider."""
@@ -95,6 +95,36 @@ class TestGetLLMInstance:
 
         assert "Unknown model" in str(exc_info.value)
         assert "unknown-model" in str(exc_info.value)
+
+    def test_replaces_deprecated_model_with_warning(self, mock_all_clients):
+        """Should auto-replace a deprecated model and log a warning."""
+        llm = get_llm_instance("openai", "gpt-4o")
+
+        assert isinstance(llm, OpenAI)
+        assert llm.model == "gpt-4.1"
+
+    def test_replaces_deprecated_anthropic_model(self, mock_all_clients):
+        """Should auto-replace deprecated Anthropic models."""
+        llm = get_llm_instance("anthropic", "claude-3-5-haiku-20241022")
+
+        assert isinstance(llm, Anthropic)
+        assert llm.model == "claude-haiku-4-5-20251001"
+
+    def test_deprecated_model_sets_warning_and_requested_model(self, mock_all_clients):
+        """Should set deprecation_warning and requested_model on the LLM instance."""
+        llm = get_llm_instance("openai", "gpt-4o")
+
+        assert llm.requested_model == "gpt-4o"
+        assert llm.deprecation_warning is not None
+        assert "gpt-4o" in llm.deprecation_warning
+        assert "gpt-4.1" in llm.deprecation_warning
+
+    def test_non_deprecated_model_has_no_warning(self, mock_all_clients):
+        """Should not set deprecation info for active models."""
+        llm = get_llm_instance("openai", "gpt-4.1")
+
+        assert llm.deprecation_warning is None
+        assert llm.requested_model is None
 
 
 class TestGetAllLLMInstances:

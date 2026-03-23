@@ -2,14 +2,22 @@
 
 This document captures ideas for automating model deprecation handling in majordomo-llm.
 
-## Problem Statement
+## Current Implementation
 
-LLM providers regularly deprecate and retire models. Currently, developers must:
-1. Manually monitor deprecation announcements from each provider
-2. Update their code to use replacement models before retirement dates
-3. Risk service disruptions if they miss a deadline
+As of v0.4.0, majordomo-llm includes deprecated model handling:
 
-This creates operational burden and reliability risk.
+- A `deprecated_models` section in `llm_config.yaml` maps deprecated model IDs to their provider-recommended replacements
+- `get_llm_instance()` automatically resolves deprecated models to their replacements and logs a warning
+- `LLMResponse.deprecation_warning` contains the warning message when a deprecated model was auto-replaced
+- `LLM.requested_model` records the original model the user passed in (before replacement)
+- Deprecated models from all three major providers (OpenAI, Anthropic, Gemini) are tracked
+
+## Remaining Opportunities
+
+Beyond the current implementation, there are further automation opportunities:
+1. Monitoring deprecation announcements automatically via GitHub Actions
+2. Configurable behavior (strict vs. warn vs. auto) per deployment
+3. Webhook notifications for deprecation events
 
 ## Provider Deprecation Pages
 
@@ -171,7 +179,7 @@ aliases:
     claude-sonnet-stable: claude-sonnet-4-20250514  # Older but well-tested
     claude-smartest: claude-opus-4-5-20251101
   openai:
-    gpt-best-value: gpt-4o-mini
+    gpt-best-value: gpt-4.1-mini
     gpt-reasoning: o3
 ```
 
@@ -234,20 +242,17 @@ claude-3-7-sonnet-20250219:
 
 ## Implementation Phases
 
-### Phase 1: Config Schema
-- Add deprecation fields to `llm_config.yaml`
-- Update existing deprecated models with metadata
-- No runtime changes yet
+### Phase 1: Config Schema + Auto-Replacement + Response Warnings (**Done**)
+- Added `deprecated_models` section to `llm_config.yaml` mapping old → new model IDs
+- `get_llm_instance()` auto-replaces deprecated models with a logged warning
+- `LLMResponse.deprecation_warning` set on responses when a deprecated model was replaced
+- `LLM.requested_model` / `LLM.model` track original vs. actual model
 
-### Phase 2: Response Warnings
-- Add `deprecation_warning` to response objects
-- Warn when using deprecated models
-- No auto-replacement yet
-
-### Phase 3: Auto-Replacement
-- Add `on_deprecation` configuration option
-- Implement replacement logic for retired models
-- Add `requested_model` / `actual_model` to responses
+### Phase 2: Configurable Behavior
+- Add `on_deprecation` configuration option (`strict` | `warn` | `auto`)
+- `strict`: raise `ConfigurationError` for deprecated models
+- `warn`: auto-replace + warning (current behavior)
+- `auto`: silent auto-replace
 
 ### Phase 4: GitHub Automation
 - Create `scripts/check_deprecations.py`

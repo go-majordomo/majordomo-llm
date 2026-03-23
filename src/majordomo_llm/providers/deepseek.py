@@ -161,6 +161,7 @@ class DeepSeek(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            deprecation_warning=self.deprecation_warning,
         )
 
     async def get_response_stream(

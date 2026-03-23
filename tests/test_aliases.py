@@ -56,7 +56,7 @@ class TestGetLlmByAlias:
         llm = get_llm_by_alias("fast")
 
         assert isinstance(llm, Anthropic)
-        assert llm.model == "claude-3-5-haiku-20241022"
+        assert llm.model == "claude-haiku-4-5-20251001"
 
     def test_returns_cascade_for_cascade_alias(self, mock_all_clients):
         """Should return LLMCascade for a cascade alias."""
@@ -129,7 +129,7 @@ class TestRegisterAlias:
         """Should register a cascade alias."""
         register_alias("myfallback", [
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
         ])
 
         llm = get_llm_by_alias("myfallback")
@@ -229,7 +229,7 @@ class TestGetAliases:
     def test_returns_copy_not_reference(self):
         """Modifying the returned dict should not affect the registry."""
         aliases = get_aliases()
-        aliases["injected"] = ("openai", "gpt-4o")
+        aliases["injected"] = ("openai", "gpt-4.1")
 
         assert "injected" not in get_aliases()
 
@@ -240,6 +240,10 @@ class TestAliasYamlLoading:
     def test_aliases_not_in_llm_config(self):
         """aliases key should be popped from LLM_CONFIG after loading."""
         assert "aliases" not in LLM_CONFIG
+
+    def test_deprecated_models_not_in_llm_config(self):
+        """deprecated_models key should be popped from LLM_CONFIG after loading."""
+        assert "deprecated_models" not in LLM_CONFIG
 
     def test_llm_config_still_has_providers(self):
         """LLM_CONFIG should still contain all provider entries."""
@@ -252,7 +256,7 @@ class TestAliasYamlLoading:
     def test_single_alias_target_is_tuple(self):
         """Single-provider aliases should be stored as tuples."""
         aliases = get_aliases()
-        assert aliases["fast"] == ("anthropic", "claude-3-5-haiku-20241022")
+        assert aliases["fast"] == ("anthropic", "claude-haiku-4-5-20251001")
 
     def test_cascade_alias_target_is_list_of_tuples(self):
         """Cascade aliases should be stored as lists of tuples."""
@@ -261,6 +265,6 @@ class TestAliasYamlLoading:
         assert isinstance(target, list)
         assert target == [
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
             ("gemini", "gemini-2.5-pro"),
         ]

@@ -146,17 +146,19 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 ### Available Models
 
 #### OpenAI
+- `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`
 - `gpt-5`, `gpt-5-mini`, `gpt-5-nano`
-- `gpt-4o`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`
+- `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`
+- `o3`, `o4-mini`
 
 #### Anthropic
-- `claude-sonnet-4-5-20250929`, `claude-opus-4-1-20250805`
-- `claude-opus-4-20250514`, `claude-sonnet-4-20250514`
-- `claude-3-7-sonnet-latest`, `claude-3-5-haiku-latest`
+- `claude-opus-4-6`, `claude-sonnet-4-6`
+- `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
+- `claude-opus-4-1-20250805`, `claude-opus-4-20250514`, `claude-sonnet-4-20250514`
 
 #### Gemini
-- `gemini-2.5-flash`, `gemini-2.5-flash-lite`
-- `gemini-2.0-flash`, `gemini-2.0-flash-lite`
+- `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`
+- `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`
 
 #### DeepSeek
 - `deepseek-chat`, `deepseek-reasoner`
@@ -164,6 +166,22 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 #### Cohere
 - `command-a-03-2025`, `command-r-plus-08-2024`
 - `command-r-08-2024`, `command-r7b-12-2024`
+
+### Deprecated Model Handling
+
+If you pass a deprecated model to `get_llm_instance()`, it is automatically replaced with the provider-recommended replacement and a warning is logged. The response object includes a `deprecation_warning` field so you can detect this in your application:
+
+```python
+llm = get_llm_instance("openai", "gpt-4o")  # deprecated → auto-replaced with gpt-4.1
+
+response = await llm.get_response("Hello!")
+if response.deprecation_warning:
+    print(response.deprecation_warning)
+    # "Model 'gpt-4o' for provider 'openai' is deprecated.
+    #  Automatically replaced with 'gpt-4.1'."
+```
+
+See the `deprecated_models` section in `llm_config.yaml` for the full mapping.
 
 ## API Reference
 
@@ -176,7 +194,7 @@ Create an LLM instance for the specified provider and model.
 ```python
 from majordomo_llm import get_llm_instance
 
-llm = get_llm_instance("openai", "gpt-4o")
+llm = get_llm_instance("openai", "gpt-4.1")
 ```
 
 ### LLM Methods
@@ -213,6 +231,7 @@ All response objects include usage metrics:
 | `output_cost` | `float` | Cost for output tokens (USD) |
 | `total_cost` | `float` | Total cost (USD) |
 | `response_time` | `float` | Response time in seconds |
+| `deprecation_warning` | `str \| None` | Warning if a deprecated model was auto-replaced |
 
 ## Advanced Usage
 
@@ -226,7 +245,7 @@ from majordomo_llm import LLMCascade
 # Providers are tried in order - first is primary, rest are fallbacks
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-4-20250514"),  # Primary
-    ("openai", "gpt-4o"),                        # First fallback
+    ("openai", "gpt-4.1"),                        # First fallback
     ("gemini", "gemini-2.5-flash"),              # Last resort
 ])
 

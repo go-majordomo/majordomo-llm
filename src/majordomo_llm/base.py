@@ -144,9 +144,11 @@ class LLMResponse(Usage):
 
     Attributes:
         content: The text content of the LLM response.
+        deprecation_warning: Warning if a deprecated model was auto-replaced.
     """
 
     content: str
+    deprecation_warning: str | None = None
 
 
 @dataclass
@@ -274,6 +276,7 @@ class LLMStreamResponse:
             output_cost=self._usage.output_cost,
             total_cost=self._usage.total_cost,
             response_time=self._usage.response_time,
+            deprecation_warning=self._llm.deprecation_warning,
         )
 
 
@@ -343,6 +346,8 @@ class LLM(ABC):
         self.api_key_alias = api_key_alias
         self.base_url = base_url
         self.default_headers = default_headers
+        self.deprecation_warning: str | None = None
+        self.requested_model: str | None = None
 
     def get_full_model_name(self) -> str:
         """Get the fully qualified model name.

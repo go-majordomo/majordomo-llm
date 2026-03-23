@@ -26,7 +26,7 @@ Add headers to individual calls with `extra_headers`. These are merged with `def
 
 ```python
 llm = get_llm_instance(
-    "openai", "gpt-4o",
+    "openai", "gpt-4.1",
     base_url="https://gateway.example.com",
     default_headers={
         "X-Majordomo-Key": "mdm_key_here",
@@ -72,7 +72,7 @@ from majordomo_llm import LLMCascade
 cascade = LLMCascade(
     [
         ("anthropic", "claude-sonnet-4-20250514"),
-        ("openai", "gpt-4o"),
+        ("openai", "gpt-4.1"),
         ("gemini", "gemini-2.5-flash"),
     ],
     base_url="https://gateway.example.com",

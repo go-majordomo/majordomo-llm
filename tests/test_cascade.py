@@ -35,7 +35,7 @@ class TestLLMCascadeInit:
         """Should create LLM instances for all providers in list."""
         cascade = LLMCascade([
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
         ])
 
         assert len(cascade.llms) == 2
@@ -54,7 +54,7 @@ class TestLLMCascadeInit:
         """Should use first provider's attributes for metadata."""
         cascade = LLMCascade([
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
         ])
 
         assert cascade.model == "claude-sonnet-4-20250514"
@@ -77,7 +77,7 @@ class TestLLMCascadeGetResponse:
         """Create LLMCascade with mocked providers."""
         return LLMCascade([
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
             ("gemini", "gemini-2.5-flash"),
         ])
 
@@ -173,7 +173,7 @@ class TestLLMCascadeGetJSONResponse:
         """Create LLMCascade with mocked providers."""
         return LLMCascade([
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
         ])
 
     async def test_returns_json_response_from_primary(self, cascade):
@@ -210,7 +210,7 @@ class TestLLMCascadeStructuredResponse:
         """Create LLMCascade with mocked providers."""
         return LLMCascade([
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
         ])
 
     async def test_returns_structured_response_from_primary(self, cascade):
@@ -267,7 +267,7 @@ class TestLLMCascadeGetResponseStream:
         """Create LLMCascade with mocked providers."""
         return LLMCascade([
             ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4o"),
+            ("openai", "gpt-4.1"),
             ("gemini", "gemini-2.5-flash"),
         ])
 

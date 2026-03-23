@@ -7,7 +7,7 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-4-20250514"),  # Primary
-    ("openai", "gpt-4o"),                        # Fallback
+    ("openai", "gpt-4.1"),                        # Fallback
     ("gemini", "gemini-2.5-flash"),              # Last resort
 ])
 
@@ -29,7 +29,7 @@ Route all cascade providers through a gateway:
 cascade = LLMCascade(
     [
         ("anthropic", "claude-sonnet-4-20250514"),
-        ("openai", "gpt-4o"),
+        ("openai", "gpt-4.1"),
         ("gemini", "gemini-2.5-flash"),
     ],
     base_url="https://gateway.example.com",

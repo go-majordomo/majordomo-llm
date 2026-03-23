@@ -9,7 +9,7 @@ from majordomo_llm.base import LLMResponse
 
 @pytest.mark.asyncio
 async def test_mocked_response(monkeypatch):
-    llm = get_llm_instance("openai", "gpt-4o")
+    llm = get_llm_instance("openai", "gpt-4.1")
 
     async def fake_get_response(*args, **kwargs):
         return LLMResponse(

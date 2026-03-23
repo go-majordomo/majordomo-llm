@@ -59,7 +59,7 @@ Streaming works with `LLMCascade`. Failover happens on stream **creation** error
 ```python
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-4-20250514"),
-    ("openai", "gpt-4o"),
+    ("openai", "gpt-4.1"),
 ])
 stream = await cascade.get_response_stream("Hello!")
 ```

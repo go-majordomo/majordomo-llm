@@ -23,7 +23,7 @@ from majordomo_llm.logging import LoggingLLM, SqliteAdapter, FileStorageAdapter
 # Set up cascade
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-4-20250514"),
-    ("openai", "gpt-4o"),
+    ("openai", "gpt-4.1"),
 ])
 
 # Add logging

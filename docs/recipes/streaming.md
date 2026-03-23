@@ -39,7 +39,7 @@ Use `.collect()` when you want streaming's lower latency but need the full respo
 
 ```python
 async def main():
-    llm = get_llm_instance("openai", "gpt-4o")
+    llm = get_llm_instance("openai", "gpt-4.1")
 
     stream = await llm.get_response_stream(
         user_prompt="What are the three primary colors?",
@@ -62,7 +62,7 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-4-20250514"),
-    ("openai", "gpt-4o"),
+    ("openai", "gpt-4.1"),
     ("gemini", "gemini-2.5-flash"),
 ])
 
@@ -79,7 +79,7 @@ async for chunk in stream:
 from majordomo_llm import get_llm_instance
 from majordomo_llm.logging import LoggingLLM, SqliteAdapter, FileStorageAdapter
 
-llm = get_llm_instance("openai", "gpt-4o")
+llm = get_llm_instance("openai", "gpt-4.1")
 
 db = await SqliteAdapter.create("llm_logs.db")
 storage = await FileStorageAdapter.create("./request_logs")
