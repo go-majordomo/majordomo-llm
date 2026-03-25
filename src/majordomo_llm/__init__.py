@@ -36,6 +36,8 @@ from majordomo_llm.factory import (
     get_all_llm_instances,
     get_llm_by_alias,
     get_llm_instance,
+    get_supported_models,
+    get_supported_providers,
     register_alias,
     unregister_alias,
 )
@@ -45,7 +47,7 @@ from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 __all__ = [
     # Base classes and types
@@ -63,6 +65,8 @@ __all__ = [
     # Factory functions
     "get_llm_instance",
     "get_all_llm_instances",
+    "get_supported_providers",
+    "get_supported_models",
     "LLM_CONFIG",
     # Alias functions
     "get_llm_by_alias",

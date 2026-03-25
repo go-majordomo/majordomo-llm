@@ -88,6 +88,46 @@ def _load_aliases_from_config() -> dict[str, AliasTarget]:
 _ALIAS_REGISTRY: dict[str, AliasTarget] = _load_aliases_from_config()
 
 
+def get_supported_providers() -> list[str]:
+    """Return a list of all supported provider names.
+
+    Returns:
+        A list of provider name strings (e.g., ["openai", "anthropic", ...]).
+
+    Example:
+        >>> providers = get_supported_providers()
+        >>> "anthropic" in providers
+        True
+    """
+    return list(LLM_CONFIG.keys())
+
+
+def get_supported_models(provider: str) -> list[str]:
+    """Return a list of all supported model names for the given provider.
+
+    Args:
+        provider: The LLM provider name (e.g., "openai", "anthropic").
+
+    Returns:
+        A list of model identifier strings.
+
+    Raises:
+        ConfigurationError: If the provider is not recognized.
+
+    Example:
+        >>> models = get_supported_models("anthropic")
+        >>> "claude-sonnet-4-20250514" in models
+        True
+    """
+    provider_config = LLM_CONFIG.get(provider)
+    if provider_config is None:
+        available = ", ".join(LLM_CONFIG.keys())
+        raise ConfigurationError(
+            f"Unknown LLM provider '{provider}'. Available: {available}"
+        )
+    return list(provider_config.get("models", {}).keys())
+
+
 def get_llm_instance(
     provider: str,
     model: str,
