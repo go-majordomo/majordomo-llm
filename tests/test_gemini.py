@@ -1,12 +1,13 @@
 """Tests for the Gemini provider."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import BaseModel
 
-from majordomo_llm.providers import Gemini
 from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.providers import Gemini
 
 
 class CountryInfo(BaseModel):
@@ -15,6 +16,9 @@ class CountryInfo(BaseModel):
     name: str
     capital: str
     population: int
+
+
+COUNTRY_SCHEMA = CountryInfo.model_json_schema()
 
 
 class TestGeminiGetResponse:
@@ -161,6 +165,26 @@ class TestGeminiStructuredResponse:
         config = call_kwargs["config"]
         assert config.response_schema is not None
         assert config.response_mime_type == "application/json"
+
+    async def test_json_schema_response_returns_canonical_json(self, gemini_llm):
+        """Should pass raw schema and return canonical JSON string."""
+        mock_response = MagicMock()
+        mock_response.text = '{"name": "Germany", "capital": "Berlin", "population": 83000000}'
+        mock_response.usage_metadata.prompt_token_count = 30
+        mock_response.usage_metadata.candidates_token_count = 20
+
+        gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        response = await gemini_llm.get_json_schema_response(
+            user_prompt="Tell me about Germany",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        call_kwargs = gemini_llm.client.aio.models.generate_content.call_args.kwargs
+        config = call_kwargs["config"]
+        assert config.response_schema == COUNTRY_SCHEMA
+        assert response.content == '{"capital":"Berlin","name":"Germany","population":83000000}'
 
     async def test_returns_validated_pydantic_model(self, gemini_llm):
         """Should return a validated Pydantic model instance."""

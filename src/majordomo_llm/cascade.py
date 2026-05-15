@@ -6,7 +6,7 @@ from typing import Any, cast
 from tenacity import RetryError
 
 from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, LLMStreamResponse, T
-from majordomo_llm.exceptions import ProviderError
+from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 from majordomo_llm.factory import get_llm_instance
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,36 @@ class LLMCascade(LLM):
             ),
         )
 
+    async def get_json_schema_response(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Get a JSON-schema response, falling back to next provider on failure."""
+        return cast(
+            LLMResponse,
+            await self._cascade_call(
+                "get_json_schema_response",
+                user_prompt=user_prompt,
+                response_schema=response_schema,
+                system_prompt=system_prompt,
+                schema_name=schema_name,
+                schema_description=schema_description,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+                failover_exceptions=(ProviderError, ResponseParsingError),
+                **kwargs,
+            ),
+        )
+
     async def _get_structured_response(
         self,
         response_model: type[T],
@@ -164,7 +194,10 @@ class LLMCascade(LLM):
         )
 
     async def _cascade_call(
-        self, method_name: str, **kwargs: Any
+        self,
+        method_name: str,
+        failover_exceptions: tuple[type[Exception], ...] = (ProviderError,),
+        **kwargs: Any,
     ) -> LLMResponse | LLMJSONResponse | LLMStreamResponse:
         """Try each provider in order until one succeeds.
 
@@ -178,14 +211,14 @@ class LLMCascade(LLM):
         Raises:
             ProviderError: If all providers fail.
         """
-        last_error: ProviderError | None = None
+        last_error: Exception | None = None
 
         for llm in self.llms:
             try:
                 method = getattr(llm, method_name)
                 result = await method(**kwargs)
                 return cast(LLMResponse | LLMJSONResponse | LLMStreamResponse, result)
-            except ProviderError as e:
+            except failover_exceptions as e:
                 self._log_provider_failure(llm, e)
                 last_error = e
                 continue
@@ -204,7 +237,7 @@ class LLMCascade(LLM):
             original_error=last_error,
         )
 
-    def _log_provider_failure(self, llm: LLM, exc: ProviderError) -> None:
+    def _log_provider_failure(self, llm: LLM, exc: Exception) -> None:
         """Log a provider failure before trying the next cascade entry."""
         logger.warning(
             "Provider %s/%s failed: %s. Trying next provider.",

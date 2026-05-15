@@ -1,9 +1,8 @@
 """Google Gemini LLM provider implementation."""
 
-import json
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -11,14 +10,13 @@ from google.genai import types
 
 from majordomo_llm.base import (
     LLM,
-    LLMJSONResponse,
     LLMResponse,
     LLMStreamResponse,
-    T,
     _StreamState,
+    canonicalize_json_schema_output,
     resolve_api_key,
 )
-from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.retry import retry_provider_call
 
 
@@ -134,12 +132,11 @@ class Gemini(LLM):
             ) from e
         execution_time = time.time() - start_time
 
-        input_tokens = response.usage_metadata.prompt_token_count
-        output_tokens = response.usage_metadata.candidates_token_count
+        input_tokens, output_tokens = _gemini_token_counts(response)
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
         return LLMResponse(
-            content=response.text,
+            content=response.text or "",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=0,
@@ -198,24 +195,23 @@ class Gemini(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
-    @retry_provider_call
-    async def _get_structured_response(
+    async def _get_json_schema_response(
         self,
-        response_model: type[T],
         user_prompt: str,
+        response_schema: dict[str, Any],
         system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
+    ) -> LLMResponse:
         """Gemini-specific implementation using response schema for structured outputs."""
-        schema = response_model.model_json_schema()
-
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
             "temperature": temperature,
             "top_p": top_p,
-            "response_schema": schema,
+            "response_schema": _gemini_schema(response_schema),
             "response_mime_type": "application/json",
         }
         if extra_headers:
@@ -236,19 +232,11 @@ class Gemini(LLM):
             ) from e
         execution_time = time.time() - start_time
 
-        try:
-            content = json.loads(response.text)
-        except json.JSONDecodeError as e:
-            raise ResponseParsingError(
-                f"Failed to parse JSON response: {e}",
-                raw_content=response.text,
-            ) from e
-        input_tokens = response.usage_metadata.prompt_token_count
-        output_tokens = response.usage_metadata.candidates_token_count
+        input_tokens, output_tokens = _gemini_token_counts(response)
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
-        return LLMJSONResponse(
-            content=content,
+        return LLMResponse(
+            content=canonicalize_json_schema_output(response.text or "", response_schema),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=0,
@@ -257,3 +245,31 @@ class Gemini(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+
+def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a Gemini-compatible copy of a JSON schema."""
+    unsupported_keywords = {"$schema", "$id", "additionalProperties"}
+
+    def strip_unsupported(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: strip_unsupported(nested_value)
+                for key, nested_value in value.items()
+                if key not in unsupported_keywords
+            }
+        if isinstance(value, list):
+            return [strip_unsupported(item) for item in value]
+        return value
+
+    return cast(dict[str, Any], strip_unsupported(schema))
+
+
+def _gemini_token_counts(response: Any) -> tuple[int, int]:
+    """Extract Gemini token counts with typed non-None defaults."""
+    usage_metadata = response.usage_metadata
+    assert usage_metadata is not None
+    return (
+        int(usage_metadata.prompt_token_count or 0),
+        int(usage_metadata.candidates_token_count or 0),
+    )

@@ -1,12 +1,13 @@
 """Tests for the Cohere provider."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import BaseModel
 
-from majordomo_llm.providers import Cohere
 from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.providers import Cohere
 
 
 class CountryInfo(BaseModel):
@@ -15,6 +16,9 @@ class CountryInfo(BaseModel):
     name: str
     capital: str
     population: int
+
+
+COUNTRY_SCHEMA = CountryInfo.model_json_schema()
 
 
 @pytest.fixture
@@ -33,7 +37,9 @@ def mock_cohere_json_response():
     """Mock Cohere JSON response."""
     response = MagicMock()
     response.message.content = [MagicMock()]
-    response.message.content[0].text = '{"name": "France", "capital": "Paris", "population": 67000000}'
+    response.message.content[
+        0
+    ].text = '{"name": "France", "capital": "Paris", "population": 67000000}'
     response.usage.tokens.input_tokens = 50
     response.usage.tokens.output_tokens = 30
     return response
@@ -121,9 +127,9 @@ class TestCohereGetResponse:
         call_kwargs = cohere_llm.client.chat.call_args.kwargs
         messages = call_kwargs["messages"]
         assert len(messages) == 2
-        assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "You are a helpful assistant."
-        assert messages[1]["role"] == "user"
+        assert messages[0].role == "system"
+        assert messages[0].content == "You are a helpful assistant."
+        assert messages[1].role == "user"
 
 
 class TestCohereGetJSONResponse:
@@ -185,8 +191,8 @@ class TestCohereStructuredResponse:
             )
             return llm
 
-    async def test_uses_json_mode(self, cohere_llm, mock_cohere_json_response):
-        """Should use JSON mode for structured output."""
+    async def test_uses_json_schema_response_format(self, cohere_llm, mock_cohere_json_response):
+        """Should use JSON schema response format for structured output."""
         cohere_llm.client.chat = AsyncMock(
             return_value=mock_cohere_json_response
         )
@@ -198,8 +204,7 @@ class TestCohereStructuredResponse:
 
         call_kwargs = cohere_llm.client.chat.call_args.kwargs
         assert call_kwargs["response_format"].type == "json_object"
-        # Schema is injected into the system prompt instead
-        assert "json" in call_kwargs["messages"][0].content.lower()
+        assert call_kwargs["response_format"].json_schema == COUNTRY_SCHEMA
 
     async def test_returns_validated_pydantic_model(self, cohere_llm, mock_cohere_json_response):
         """Should return a validated Pydantic model instance."""
@@ -215,6 +220,20 @@ class TestCohereStructuredResponse:
         assert isinstance(response.content, CountryInfo)
         assert response.content.name == "France"
         assert response.content.capital == "Paris"
+
+    async def test_json_schema_response_returns_canonical_json(
+        self, cohere_llm, mock_cohere_json_response
+    ):
+        """Should return canonical JSON string for raw schema calls."""
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_json_response)
+
+        response = await cohere_llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
 
 
 class TestCohereInit:

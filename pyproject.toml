@@ -1,6 +1,6 @@
 [project]
 name = "majordomo-llm"
-version = "0.5.2"
+version = "0.6.0"
 description = "Unified Python interface for multiple LLM providers with cost tracking"
 readme = "README.md"
 license = {text = "MIT"}
@@ -36,6 +36,7 @@ dependencies = [
     "anthropic>=0.76.0",
     "cohere>=5.1.8",
     "google-genai>=1.60.0",
+    "jsonschema>=4.26.0",
     "openai>=2.15.0",
     "pre-commit>=4.5.1",
     "pydantic>=2.12.5",
@@ -92,6 +93,14 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 module = ["asyncpg", "aiomysql", "aioboto3", "aiosqlite", "aiofiles"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jsonschema"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

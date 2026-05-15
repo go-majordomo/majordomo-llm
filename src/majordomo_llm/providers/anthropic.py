@@ -3,6 +3,7 @@
 import logging
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import anthropic
 from anthropic.types import (
@@ -22,6 +23,7 @@ from majordomo_llm.base import (
     LLMStreamResponse,
     T,
     _StreamState,
+    canonicalize_json_schema_output,
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
@@ -115,7 +117,7 @@ class Anthropic(LLM):
         messages = _anthropic_user_message(user_prompt)
         system_message = _anthropic_system_prompt(system_prompt)
 
-        tools: list = []
+        tools: list[Any] = []
         if self.use_web_search:
             tools.append({"type": "web_search_tool", "name": "web_search_20250305"})
 
@@ -230,6 +232,95 @@ class Anthropic(LLM):
                 ) from e
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
+
+    async def _get_json_schema_response(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+    ) -> LLMResponse:
+        """Anthropic-specific implementation using forced tool calling."""
+        if self.model == "claude-sonnet-4-5-20250929" and self.use_web_search:
+            response, execution_time = await self._json_schema_response_with_web_search_helper(
+                user_prompt=user_prompt,
+                response_schema=response_schema,
+                system_prompt=system_prompt,
+                schema_name=schema_name,
+                schema_description=schema_description,
+                extra_headers=extra_headers,
+            )
+        else:
+            tool_instruction = f"Use the {schema_name} tool to provide your answer."
+            if system_prompt is None:
+                system_prompt = f"You are a helpful assistant. {tool_instruction}"
+            else:
+                system_prompt = f"{system_prompt}\n\n{tool_instruction}"
+
+            messages = _anthropic_user_message(user_prompt)
+            system_message = _anthropic_system_prompt(system_prompt)
+            tools = [
+                ToolParam(
+                    name=schema_name,
+                    description=schema_description
+                    or f"Provide a structured response using the {schema_name} JSON schema",
+                    input_schema=response_schema,
+                )
+            ]
+
+            start_time = time.time()
+            try:
+                if self.supports_temperature_top_p:
+                    response = await self.client.messages.create(
+                        model=self.model,
+                        max_tokens=4096,
+                        system=system_message,
+                        messages=messages,
+                        temperature=temperature,
+                        top_p=top_p,
+                        tools=tools,
+                        tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                        extra_headers=extra_headers,
+                    )
+                else:
+                    response = await self.client.messages.create(
+                        model=self.model,
+                        max_tokens=8192,
+                        system=system_message,
+                        messages=messages,
+                        tools=tools,
+                        tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                        extra_headers=extra_headers,
+                    )
+            except anthropic.APIError as e:
+                raise ProviderError(
+                    f"Anthropic API error: {e}",
+                    provider="anthropic",
+                    original_error=e,
+                ) from e
+
+            execution_time = time.time() - start_time
+
+        content = _extract_tool_use_content(response.content, schema_name)
+
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+
+        return LLMResponse(
+            content=canonicalize_json_schema_output(content, response_schema),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=response.usage.cache_read_input_tokens or 0,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            total_cost=total_cost,
+            response_time=execution_time,
+        )
 
     @retry_provider_call
     async def _get_structured_response(
@@ -378,7 +469,7 @@ class Anthropic(LLM):
         user_prompt: str,
         system_prompt: str | None = None,
         extra_headers: dict[str, str] | None = None,
-    ) -> tuple:
+    ) -> tuple[Any, float]:
         """Helper for web search with structured response."""
         schema = response_model.model_json_schema()
         structured_response_tool = ToolParam(
@@ -390,7 +481,7 @@ class Anthropic(LLM):
             name="web_search",
             type="web_search_20250305",
         )
-        tools = [structured_response_tool, web_search_tool]
+        tools: list[Any] = [structured_response_tool, web_search_tool]
 
         tool_instruction = "Use the structured_response tool to provide your answer."
         if system_prompt is None:
@@ -466,6 +557,103 @@ class Anthropic(LLM):
 
         execution_time = time.time() - start_time
         return final_response, execution_time
+
+    async def _json_schema_response_with_web_search_helper(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> tuple[Any, float]:
+        """Helper for web search with raw JSON-schema structured response."""
+        structured_response_tool = ToolParam(
+            name=schema_name,
+            description=schema_description
+            or f"Provide a structured response using the {schema_name} JSON schema",
+            input_schema=response_schema,
+        )
+        web_search_tool = WebSearchTool20250305Param(
+            name="web_search",
+            type="web_search_20250305",
+        )
+        tools: list[Any] = [structured_response_tool, web_search_tool]
+
+        tool_instruction = f"Use the {schema_name} tool to provide your answer."
+        if system_prompt is None:
+            system_prompt = f"You are a helpful assistant. {tool_instruction}"
+        else:
+            system_prompt = f"{system_prompt}\n\n{tool_instruction}"
+
+        messages = _anthropic_user_message(user_prompt)
+        system_message = _anthropic_system_prompt(system_prompt)
+
+        start_time = time.time()
+        current_messages = messages.copy()
+        search_count = 0
+
+        try:
+            while search_count < 3:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=8192,
+                    system=system_message,
+                    messages=current_messages,
+                    tools=tools,
+                    tool_choice=ToolChoiceAutoParam(type="auto"),
+                    extra_headers=extra_headers,
+                )
+
+                if response.stop_reason == "tool_use":
+                    tool_uses = [block for block in response.content if block.type == "tool_use"]
+                    if any(tool_use.name == schema_name for tool_use in tool_uses):
+                        execution_time = time.time() - start_time
+                        return response, execution_time
+
+                    if any(tool_use.name == "web_search" for tool_use in tool_uses):
+                        logger.info("Web search initiated (turn %d)", search_count + 1)
+                        search_count += 1
+                        current_messages.append({"role": "assistant", "content": response.content})
+                        current_messages.append({
+                            "role": "user",
+                            "content": (
+                                "Continue with your analysis. Use the structured response "
+                                "tool when ready to generate the final output."
+                            ),
+                        })
+                        continue
+                break
+
+            final_response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=_anthropic_system_prompt(system_prompt),
+                messages=current_messages,
+                tools=[structured_response_tool],
+                tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                extra_headers=extra_headers,
+            )
+        except anthropic.APIError as e:
+            raise ProviderError(
+                f"Anthropic API error: {e}",
+                provider="anthropic",
+                original_error=e,
+            ) from e
+
+        execution_time = time.time() - start_time
+        return final_response, execution_time
+
+
+def _extract_tool_use_content(content_blocks: list[Any], tool_name: str) -> Any:
+    """Extract a named Anthropic tool_use input from response content blocks."""
+    for block in content_blocks:
+        if block.type == "tool_use" and block.name == tool_name:
+            return block.input
+    raise ResponseParsingError(
+        f"No {tool_name} tool use found in Anthropic response",
+        raw_content=str(content_blocks),
+    )
 
 
 def _anthropic_system_prompt(system_prompt: str) -> list[TextBlockParam]:

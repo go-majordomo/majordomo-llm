@@ -7,11 +7,17 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
+from jsonschema import ValidationError as JSONSchemaValidationError
+from jsonschema import validate as validate_json_schema
 from pydantic import BaseModel
 
-from majordomo_llm.exceptions import ConfigurationError, ResponseParsingError
+from majordomo_llm.exceptions import (
+    ConfigurationError,
+    ResponseParsingError,
+    StructuredOutputUnsupported,
+)
 from majordomo_llm.retry import retry_provider_call
 
 
@@ -80,7 +86,7 @@ def inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
             return [resolve_refs(item) for item in obj]
         return obj
 
-    return resolve_refs(schema)
+    return cast(dict[str, Any], resolve_refs(schema))
 
 
 def build_schema_prompt(schema: dict[str, Any], system_prompt: str | None = None) -> str:
@@ -101,6 +107,139 @@ Important: Return only the JSON object, no additional text or markdown formattin
     if system_prompt:
         return f"{system_prompt}\n\n{schema_instruction}"
     return schema_instruction
+
+
+def canonical_json_dumps(content: Any) -> str:
+    """Serialize JSON content in canonical byte-comparable form."""
+    return json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _strip_markdown_fences(content: str) -> str:
+    """Strip markdown code fences from provider output."""
+    stripped = content.strip()
+    if not stripped.startswith("```") or not stripped.endswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _first_balanced_json_value(content: str) -> str | None:
+    """Return the first balanced JSON object or array from text."""
+    start_index = None
+    opening_char = ""
+    closing_char = ""
+
+    for index, char in enumerate(content):
+        if char == "{":
+            start_index = index
+            opening_char = "{"
+            closing_char = "}"
+            break
+        if char == "[":
+            start_index = index
+            opening_char = "["
+            closing_char = "]"
+            break
+
+    if start_index is None:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for index in range(start_index, len(content)):
+        char = content[index]
+
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == opening_char:
+            depth += 1
+        elif char == closing_char:
+            depth -= 1
+            if depth == 0:
+                return content[start_index : index + 1]
+
+    return None
+
+
+def _json_parse_candidates(raw_content: str) -> list[tuple[str, str]]:
+    """Build one normal parse candidate and repair candidates for provider output."""
+    candidates = [("raw", raw_content.strip())]
+
+    fenced = _strip_markdown_fences(raw_content)
+    if fenced != candidates[0][1]:
+        candidates.append(("markdown-fence-stripped", fenced))
+
+    balanced = _first_balanced_json_value(raw_content)
+    if balanced is not None and all(balanced != candidate for _, candidate in candidates):
+        candidates.append(("first-balanced-json", balanced))
+
+    return candidates
+
+
+def canonicalize_json_schema_output(content: Any, response_schema: dict[str, Any]) -> str:
+    """Validate provider output against a JSON schema and serialize canonically.
+
+    String outputs are parsed directly first, then repaired once by stripping markdown
+    fences or extracting the first balanced JSON object/array. The original raw output
+    is included in parsing errors for debugging.
+    """
+    if not isinstance(content, str):
+        try:
+            validate_json_schema(instance=content, schema=response_schema)
+            return canonical_json_dumps(content)
+        except JSONSchemaValidationError as e:
+            raise ResponseParsingError(
+                f"JSON response did not validate against schema: {e.message}",
+                raw_content=canonical_json_dumps(content),
+            ) from e
+        except (TypeError, ValueError) as e:
+            raise ResponseParsingError(
+                f"Failed to serialize JSON response: {e}",
+                raw_content=str(content),
+            ) from e
+
+    raw_content = content
+    last_error: Exception | None = None
+
+    for _, candidate in _json_parse_candidates(raw_content):
+        try:
+            parsed_content = json.loads(candidate)
+            validate_json_schema(instance=parsed_content, schema=response_schema)
+            return canonical_json_dumps(parsed_content)
+        except (json.JSONDecodeError, JSONSchemaValidationError) as e:
+            last_error = e
+
+    if isinstance(last_error, JSONSchemaValidationError):
+        raise ResponseParsingError(
+            f"JSON response did not validate against schema: {last_error.message}",
+            raw_content=raw_content,
+        ) from last_error
+
+    raise ResponseParsingError(
+        f"Failed to parse JSON schema response: {last_error}",
+        raw_content=raw_content,
+    ) from last_error
+
+
+def ensure_no_unexpected_kwargs(kwargs: dict[str, Any]) -> None:
+    """Reject unknown per-call keyword arguments consistently."""
+    if kwargs:
+        unexpected = ", ".join(sorted(kwargs))
+        raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
 
 #: Type variable for Pydantic model types used in structured responses.
 T = TypeVar("T", bound=BaseModel)
@@ -511,15 +650,19 @@ class LLM(ABC):
             >>> print(response.content.name)
             John
         """
-        response = await self._get_structured_response(
-            response_model=response_model,
+        response = await self.get_json_schema_response(
             user_prompt=user_prompt,
+            response_schema=response_model.model_json_schema(),
             system_prompt=system_prompt,
+            schema_name=response_model.__name__,
+            schema_description=(
+                f"Provide a structured response using the {response_model.__name__} schema"
+            ),
             temperature=temperature,
             top_p=top_p,
             extra_headers=extra_headers,
         )
-        parsed_content = response_model.model_validate(response.content)
+        parsed_content = response_model.model_validate_json(response.content)
 
         return LLMStructuredResponse(
             content=parsed_content,
@@ -531,6 +674,61 @@ class LLM(ABC):
             total_cost=response.total_cost,
             response_time=response.response_time,
         )
+
+    @retry_provider_call
+    async def get_json_schema_response(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Get a structured JSON response validated against a raw JSON schema.
+
+        Args:
+            user_prompt: The user's input prompt.
+            response_schema: Raw JSON schema dict defining the expected response.
+            system_prompt: Optional system prompt to set context/behavior.
+            schema_name: Provider-facing schema/tool name.
+            schema_description: Optional provider-facing schema/tool description.
+            temperature: Sampling temperature (0.0-2.0).
+            top_p: Nucleus sampling parameter (0.0-1.0).
+            extra_headers: Optional per-request headers merged with default_headers.
+            **kwargs: Reserved for future provider-specific passthrough arguments.
+
+        Returns:
+            LLMResponse whose content is canonical JSON with sorted keys and no extra whitespace.
+        """
+        ensure_no_unexpected_kwargs(kwargs)
+        return await self._get_json_schema_response(
+            user_prompt=user_prompt,
+            response_schema=response_schema,
+            system_prompt=system_prompt,
+            schema_name=schema_name,
+            schema_description=schema_description,
+            temperature=temperature,
+            top_p=top_p,
+            extra_headers=extra_headers,
+        )
+
+    async def _get_json_schema_response(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+    ) -> LLMResponse:
+        """Provider-specific implementation for raw JSON-schema structured responses."""
+        raise StructuredOutputUnsupported(self.provider, self.model)
 
     async def _get_structured_response(
         self,
@@ -557,15 +755,22 @@ class LLM(ABC):
         Returns:
             LLMJSONResponse containing the parsed JSON content.
         """
-        schema = response_model.model_json_schema()
-        combined_system_prompt = build_schema_prompt(schema, system_prompt)
-
-        if self.supports_temperature_top_p:
-            return await self.get_json_response(
-                user_prompt, combined_system_prompt, temperature, top_p,
-                extra_headers=extra_headers,
-            )
-        else:
-            return await self.get_json_response(
-                user_prompt, combined_system_prompt, extra_headers=extra_headers,
-            )
+        response = await self.get_json_schema_response(
+            user_prompt=user_prompt,
+            response_schema=response_model.model_json_schema(),
+            system_prompt=system_prompt,
+            schema_name=response_model.__name__,
+            temperature=temperature,
+            top_p=top_p,
+            extra_headers=extra_headers,
+        )
+        return LLMJSONResponse(
+            content=json.loads(response.content),
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cached_tokens=response.cached_tokens,
+            input_cost=response.input_cost,
+            output_cost=response.output_cost,
+            total_cost=response.total_cost,
+            response_time=response.response_time,
+        )

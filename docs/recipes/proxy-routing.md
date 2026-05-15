@@ -145,6 +145,6 @@ response = await llm.get_structured_json_response(
 ## Notes
 
 - `base_url` and `default_headers` are optional on both `get_llm_instance()` and `LLMCascade`. When omitted, requests go directly to the provider.
-- `extra_headers` is optional on every API method (`get_response`, `get_response_stream`, `get_json_response`, `get_structured_json_response`). When omitted, only `default_headers` are sent.
+- `extra_headers` is optional on every API method (`get_response`, `get_response_stream`, `get_json_response`, `get_structured_json_response`, `get_json_schema_response`). When omitted, only `default_headers` are sent.
 - For DeepSeek, a custom `base_url` overrides the default `https://api.deepseek.com` endpoint.
 - All providers are supported. The header merging logic is handled internally per SDK.

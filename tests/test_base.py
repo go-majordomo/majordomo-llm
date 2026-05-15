@@ -7,14 +7,62 @@ from pydantic import BaseModel
 
 from majordomo_llm.base import (
     LLM,
-    LLMResponse,
+    TOKENS_PER_MILLION,
     LLMJSONResponse,
+    LLMResponse,
     LLMStreamResponse,
     LLMStructuredResponse,
     Usage,
-    TOKENS_PER_MILLION,
     _StreamState,
+    canonicalize_json_schema_output,
 )
+from majordomo_llm.exceptions import ResponseParsingError
+
+COUNTRY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "population": {"type": "integer"},
+    },
+    "required": ["name", "population"],
+}
+
+
+class TestJSONSchemaOutputHelpers:
+    """Tests for JSON-schema output parsing and canonicalization."""
+
+    def test_serializes_canonical_json(self):
+        """Should sort keys and remove extra whitespace."""
+        content = '{"population": 125000000, "name": "Japan"}'
+
+        canonical = canonicalize_json_schema_output(content, COUNTRY_SCHEMA)
+
+        assert canonical == '{"name":"Japan","population":125000000}'
+
+    def test_repairs_markdown_fenced_json(self):
+        """Should strip markdown fences before parsing."""
+        content = '```json\n{"name":"Japan","population":125000000}\n```'
+
+        canonical = canonicalize_json_schema_output(content, COUNTRY_SCHEMA)
+
+        assert canonical == '{"name":"Japan","population":125000000}'
+
+    def test_repairs_first_balanced_object(self):
+        """Should extract the first balanced JSON object from surrounding text."""
+        content = 'Here is the answer: {"name":"Japan","population":125000000} thanks.'
+
+        canonical = canonicalize_json_schema_output(content, COUNTRY_SCHEMA)
+
+        assert canonical == '{"name":"Japan","population":125000000}'
+
+    def test_validation_error_includes_raw_content(self):
+        """Should include raw content when schema validation fails."""
+        raw_content = '{"name":"Japan","population":"many"}'
+
+        with pytest.raises(ResponseParsingError) as exc_info:
+            canonicalize_json_schema_output(raw_content, COUNTRY_SCHEMA)
+
+        assert exc_info.value.raw_content == raw_content
 
 
 class TestUsage:
@@ -117,7 +165,9 @@ class TestLLMCostCalculation:
         async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
             raise NotImplementedError()
 
-        async def get_response_stream(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+        async def get_response_stream(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0
+        ):
             raise NotImplementedError()
 
     def test_calculates_costs_correctly(self):
@@ -187,7 +237,9 @@ class TestLLMFullModelName:
         async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
             raise NotImplementedError()
 
-        async def get_response_stream(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+        async def get_response_stream(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0
+        ):
             raise NotImplementedError()
 
     def test_returns_provider_colon_model(self):
@@ -211,7 +263,9 @@ class TestLLMStreamResponse:
         async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
             raise NotImplementedError()
 
-        async def get_response_stream(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+        async def get_response_stream(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0
+        ):
             raise NotImplementedError()
 
     @staticmethod
@@ -230,7 +284,12 @@ class TestLLMStreamResponse:
 
     def _make_stream_response(self, stream=None):
         llm = self._make_llm()
-        state = _StreamState(input_tokens=10, output_tokens=5, cached_tokens=0, start_time=time.time())
+        state = _StreamState(
+            input_tokens=10,
+            output_tokens=5,
+            cached_tokens=0,
+            start_time=time.time(),
+        )
         if stream is None:
             stream = self._mock_stream()
         return LLMStreamResponse(stream=stream, state=state, llm=llm)

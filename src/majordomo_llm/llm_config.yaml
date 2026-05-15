@@ -61,6 +61,10 @@ openai:
 anthropic:
   models:
     # Claude 4.6 family (latest)
+    claude-opus-4-7:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
     claude-opus-4-6:
       input_cost: 5.00
       output_cost: 25.00

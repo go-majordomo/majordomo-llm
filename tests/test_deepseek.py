@@ -18,6 +18,9 @@ class CountryInfo(BaseModel):
     population: int
 
 
+COUNTRY_SCHEMA = CountryInfo.model_json_schema()
+
+
 @pytest.fixture
 def mock_deepseek_text_response():
     """Mock DeepSeek text response."""
@@ -213,8 +216,10 @@ class TestDeepSeekStructuredResponse:
             )
             return llm
 
-    async def test_uses_json_mode(self, deepseek_llm, mock_deepseek_json_response):
-        """Should use JSON mode for structured output."""
+    async def test_uses_json_schema_response_format(
+        self, deepseek_llm, mock_deepseek_json_response
+    ):
+        """Should use JSON schema response format for structured output."""
         deepseek_llm.client.chat.completions.create = AsyncMock(
             return_value=mock_deepseek_json_response
         )
@@ -225,7 +230,15 @@ class TestDeepSeekStructuredResponse:
         )
 
         call_kwargs = deepseek_llm.client.chat.completions.create.call_args.kwargs
-        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert call_kwargs["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {
+                "description": "Provide a structured response using the CountryInfo schema",
+                "name": "CountryInfo",
+                "schema": COUNTRY_SCHEMA,
+                "strict": True,
+            },
+        }
 
     async def test_structured_response_passes_deepseek_reasoning_options(
         self, mock_deepseek_json_response
@@ -267,6 +280,22 @@ class TestDeepSeekStructuredResponse:
         assert isinstance(response.content, CountryInfo)
         assert response.content.name == "France"
         assert response.content.capital == "Paris"
+
+    async def test_json_schema_response_returns_canonical_json(
+        self, deepseek_llm, mock_deepseek_json_response
+    ):
+        """Should return canonical JSON string for raw schema calls."""
+        deepseek_llm.client.chat.completions.create = AsyncMock(
+            return_value=mock_deepseek_json_response
+        )
+
+        response = await deepseek_llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
 
 
 class TestDeepSeekInit:

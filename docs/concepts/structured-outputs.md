@@ -18,12 +18,12 @@ This fragmentation creates problems:
 
 ## One Method, All Providers
 
-majordomo-llm provides a single method, `get_structured_json_response()`, that:
+majordomo-llm provides two structured-output methods:
 
-- Accepts a **Pydantic model** as the schema definition
-- Returns a **validated, typed Python object** (not raw JSON)
-- Works identically across **all supported providers**
-- Handles provider-specific implementation details internally
+- `get_structured_json_response()` accepts a **Pydantic model** and returns a validated, typed Python object
+- `get_json_schema_response()` accepts a **raw JSON Schema dict** and returns canonical JSON text
+- Both methods work identically across **all supported providers**
+- Both methods handle provider-specific implementation details internally
 
 ## Basic Usage
 
@@ -51,12 +51,39 @@ print(response.content.title)
 print(response.content.keywords)
 ```
 
+## Raw JSON Schema Usage
+
+Use `get_json_schema_response()` when your schema comes from a file, registry, runtime
+builder, or another system and you do not want to synthesize a Pydantic model:
+
+```python
+import json
+
+schema = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "keywords": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["title", "keywords"],
+}
+
+response = await llm.get_json_schema_response(
+    user_prompt="Extract info from: [your document text]",
+    response_schema=schema,
+    schema_name="ExtractedData",
+)
+
+# response.content is canonical JSON: sorted keys, no extra whitespace
+data = json.loads(response.content)
+```
+
 ## Under the Hood
 
-1. Pydantic model is converted to JSON schema via `model_json_schema()`
-2. Schema is translated to provider-specific format (tool definition for Anthropic, response_format for OpenAI, etc.)
-3. Provider response is parsed and validated by Pydantic
-4. Typed object is returned with full IDE autocomplete support
+1. Pydantic models are converted to JSON schema via `model_json_schema()` when needed
+2. Raw schemas are translated to provider-specific format (tool definition for Anthropic, response format for OpenAI/Cohere/DeepSeek, response schema for Gemini)
+3. Provider responses are parsed, lightly repaired when possible, and validated against the JSON schema
+4. Raw-schema responses are serialized canonically; Pydantic responses are validated into typed objects
 
 ## Next Steps
 

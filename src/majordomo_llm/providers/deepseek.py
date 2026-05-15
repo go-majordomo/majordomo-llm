@@ -1,6 +1,5 @@
 """DeepSeek LLM provider implementation."""
 
-import json
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -9,15 +8,13 @@ import openai
 
 from majordomo_llm.base import (
     LLM,
-    LLMJSONResponse,
     LLMResponse,
     LLMStreamResponse,
-    T,
     _StreamState,
-    build_schema_prompt,
+    canonicalize_json_schema_output,
     resolve_api_key,
 )
-from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.retry import retry_provider_call
 
 
@@ -138,7 +135,7 @@ class DeepSeek(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from DeepSeek."""
-        messages = []
+        messages: list[Any] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
@@ -170,6 +167,7 @@ class DeepSeek(LLM):
             ) from e
 
         execution_time = time.time() - start_time
+        assert response.usage is not None
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
         cached_tokens = (
@@ -183,7 +181,7 @@ class DeepSeek(LLM):
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
         return LLMResponse(
-            content=response.choices[0].message.content,
+            content=response.choices[0].message.content or "",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -203,7 +201,7 @@ class DeepSeek(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from DeepSeek."""
-        messages = []
+        messages: list[Any] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
@@ -264,24 +262,35 @@ class DeepSeek(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
-    @retry_provider_call
-    async def _get_structured_response(
+    async def _get_json_schema_response(
         self,
-        response_model: type[T],
         user_prompt: str,
+        response_schema: dict[str, Any],
         system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
-        """DeepSeek-specific implementation using JSON mode for structured outputs."""
-        schema = response_model.model_json_schema()
-        combined_system_prompt = build_schema_prompt(schema, system_prompt)
+    ) -> LLMResponse:
+        """DeepSeek-specific implementation using OpenAI-compatible JSON Schema."""
+        messages: list[Any] = []
+        if system_prompt is not None:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
 
-        messages = [
-            {"role": "system", "content": combined_system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        json_schema_payload: dict[str, object] = {
+            "name": schema_name,
+            "schema": response_schema,
+            "strict": True,
+        }
+        if schema_description is not None:
+            json_schema_payload["description"] = schema_description
+
+        response_format: Any = {
+            "type": "json_schema",
+            "json_schema": json_schema_payload,
+        }
 
         start_time = time.time()
         request_kwargs = self._deepseek_request_kwargs()
@@ -292,7 +301,7 @@ class DeepSeek(LLM):
                     messages=messages,
                     temperature=temperature,
                     top_p=top_p,
-                    response_format={"type": "json_object"},
+                    response_format=response_format,
                     extra_headers=extra_headers,
                     **request_kwargs,
                 )
@@ -300,7 +309,7 @@ class DeepSeek(LLM):
                 response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    response_format={"type": "json_object"},
+                    response_format=response_format,
                     extra_headers=extra_headers,
                     **request_kwargs,
                 )
@@ -313,14 +322,7 @@ class DeepSeek(LLM):
 
         execution_time = time.time() - start_time
 
-        try:
-            content = json.loads(response.choices[0].message.content)
-        except json.JSONDecodeError as e:
-            raise ResponseParsingError(
-                f"Failed to parse JSON response: {e}",
-                raw_content=response.choices[0].message.content,
-            ) from e
-
+        assert response.usage is not None
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
         cached_tokens = (
@@ -333,8 +335,11 @@ class DeepSeek(LLM):
         )
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
-        return LLMJSONResponse(
-            content=content,
+        return LLMResponse(
+            content=canonicalize_json_schema_output(
+                response.choices[0].message.content or "",
+                response_schema,
+            ),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,

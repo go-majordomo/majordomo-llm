@@ -1,12 +1,13 @@
 """Tests for the OpenAI provider."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import BaseModel
 
-from majordomo_llm.providers import OpenAI
 from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.providers import OpenAI
 
 
 class CountryInfo(BaseModel):
@@ -15,6 +16,9 @@ class CountryInfo(BaseModel):
     name: str
     capital: str
     population: int
+
+
+COUNTRY_SCHEMA = CountryInfo.model_json_schema()
 
 
 class TestOpenAIGetResponse:
@@ -137,32 +141,39 @@ class TestOpenAIStructuredResponse:
             )
             return llm
 
-    async def test_uses_parse_endpoint(self, openai_llm, mock_openai_structured_response):
-        """Should use responses.parse for structured output."""
-        openai_llm.client.responses.parse = AsyncMock(return_value=mock_openai_structured_response)
+    async def test_uses_create_endpoint(self, openai_llm, mock_openai_structured_response):
+        """Should use responses.create for structured output."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_structured_response)
 
         await openai_llm.get_structured_json_response(
             response_model=CountryInfo,
             user_prompt="Tell me about Japan",
         )
 
-        openai_llm.client.responses.parse.assert_called_once()
+        openai_llm.client.responses.create.assert_called_once()
 
-    async def test_passes_response_model_as_text_format(self, openai_llm, mock_openai_structured_response):
-        """Should pass Pydantic model as text_format."""
-        openai_llm.client.responses.parse = AsyncMock(return_value=mock_openai_structured_response)
+    async def test_passes_json_schema_response_format(
+        self, openai_llm, mock_openai_structured_response
+    ):
+        """Should pass raw JSON schema response format."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_structured_response)
 
         await openai_llm.get_structured_json_response(
             response_model=CountryInfo,
             user_prompt="Tell me about Japan",
         )
 
-        call_kwargs = openai_llm.client.responses.parse.call_args.kwargs
-        assert call_kwargs["text_format"] == CountryInfo
+        call_kwargs = openai_llm.client.responses.create.call_args.kwargs
+        assert call_kwargs["text"]["format"]["type"] == "json_schema"
+        assert call_kwargs["text"]["format"]["name"] == "CountryInfo"
+        assert call_kwargs["text"]["format"]["schema"] == COUNTRY_SCHEMA
+        assert call_kwargs["text"]["format"]["strict"] is True
 
-    async def test_returns_validated_pydantic_model(self, openai_llm, mock_openai_structured_response):
+    async def test_returns_validated_pydantic_model(
+        self, openai_llm, mock_openai_structured_response
+    ):
         """Should return a validated Pydantic model instance."""
-        openai_llm.client.responses.parse = AsyncMock(return_value=mock_openai_structured_response)
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_structured_response)
 
         response = await openai_llm.get_structured_json_response(
             response_model=CountryInfo,
@@ -172,6 +183,20 @@ class TestOpenAIStructuredResponse:
         assert isinstance(response.content, CountryInfo)
         assert response.content.name == "Japan"
         assert response.content.capital == "Tokyo"
+
+    async def test_json_schema_response_returns_canonical_json(
+        self, openai_llm, mock_openai_structured_response
+    ):
+        """Should return canonical JSON string for raw schema calls."""
+        openai_llm.client.responses.create = AsyncMock(return_value=mock_openai_structured_response)
+
+        response = await openai_llm.get_json_schema_response(
+            user_prompt="Tell me about Japan",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        assert response.content == '{"capital":"Tokyo","name":"Japan","population":125000000}'
 
 
 class TestOpenAIInit:

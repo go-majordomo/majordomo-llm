@@ -1,12 +1,13 @@
 """Tests for the Anthropic provider."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
 
-from majordomo_llm.providers import Anthropic
 from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.providers import Anthropic
 
 
 class CountryInfo(BaseModel):
@@ -15,6 +16,9 @@ class CountryInfo(BaseModel):
     name: str
     capital: str
     population: int
+
+
+COUNTRY_SCHEMA = CountryInfo.model_json_schema()
 
 
 class TestAnthropicGetResponse:
@@ -124,7 +128,9 @@ class TestAnthropicStructuredResponse:
         assert response.content.capital == "Paris"
         assert response.content.population == 67000000
 
-    async def test_returns_validated_pydantic_model(self, anthropic_llm, mock_anthropic_tool_response):
+    async def test_returns_validated_pydantic_model(
+        self, anthropic_llm, mock_anthropic_tool_response
+    ):
         """Should return a validated Pydantic model instance."""
         anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_tool_response)
 
@@ -136,7 +142,7 @@ class TestAnthropicStructuredResponse:
         assert isinstance(response.content, CountryInfo)
 
     async def test_forces_tool_choice(self, anthropic_llm, mock_anthropic_tool_response):
-        """Should force tool choice to structured_response."""
+        """Should force tool choice to the schema name."""
         anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_tool_response)
 
         await anthropic_llm.get_structured_json_response(
@@ -146,7 +152,24 @@ class TestAnthropicStructuredResponse:
 
         call_kwargs = anthropic_llm.client.messages.create.call_args.kwargs
         assert call_kwargs["tool_choice"]["type"] == "tool"
-        assert call_kwargs["tool_choice"]["name"] == "structured_response"
+        assert call_kwargs["tool_choice"]["name"] == "CountryInfo"
+
+    async def test_json_schema_response_uses_schema_tool(
+        self, anthropic_llm, mock_anthropic_tool_response
+    ):
+        """Should pass raw schema as the forced tool input schema."""
+        anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_tool_response)
+
+        response = await anthropic_llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        call_kwargs = anthropic_llm.client.messages.create.call_args.kwargs
+        assert call_kwargs["tools"][0]["name"] == "CountryInfo"
+        assert call_kwargs["tools"][0]["input_schema"] == COUNTRY_SCHEMA
+        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
 
 
 class TestAnthropicInit:
@@ -240,7 +263,9 @@ class TestAnthropicGetResponseStream:
 
         assert chunks == ["Hello", " world"]
 
-    async def test_usage_populated_after_iteration(self, anthropic_llm, mock_anthropic_stream_events):
+    async def test_usage_populated_after_iteration(
+        self, anthropic_llm, mock_anthropic_stream_events
+    ):
         """Should populate usage after stream is consumed."""
         anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_stream_events)
 

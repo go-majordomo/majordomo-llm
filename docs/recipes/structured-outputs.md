@@ -1,6 +1,6 @@
-# Structured Outputs with Pydantic
+# Structured Outputs
 
-Validate responses to Pydantic models using `get_structured_json_response`.
+Validate responses to Pydantic models using `get_structured_json_response`, or pass a raw JSON Schema dict directly with `get_json_schema_response`.
 
 ## Simple Model
 
@@ -20,6 +20,34 @@ resp = await llm.get_structured_json_response(
 )
 country: Country = resp.content
 print(country.capital)  # Tokyo
+```
+
+## Raw JSON Schema
+
+Use `get_json_schema_response` when the schema is loaded or built at runtime:
+
+```python
+import json
+
+schema = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "capital": {"type": "string"},
+        "population": {"type": "integer"},
+    },
+    "required": ["name", "capital", "population"],
+}
+
+resp = await llm.get_json_schema_response(
+    user_prompt="Return info about Japan as JSON",
+    response_schema=schema,
+    schema_name="Country",
+)
+
+# Canonical JSON string: sorted keys, no extra whitespace
+country = json.loads(resp.content)
+print(country["capital"])  # Tokyo
 ```
 
 ## Enum Fields
@@ -123,5 +151,6 @@ Notes
 
 - Pydantic validates and coerces types; handle `ValidationError` for bad outputs.
 - Use `Field(description=...)` to guide the LLM on expected values.
-- All providers support structured outputs; Anthropic uses tool calling, others use response schemas.
+- All providers support structured outputs; Anthropic uses forced tool calling, others use provider-native JSON schema response formats.
+- Raw JSON Schema responses return `LLMResponse.content` as canonical JSON so equivalent outputs are byte-comparable.
 - Response includes usage metrics: `resp.total_cost`, `resp.input_tokens`, `resp.output_tokens`.

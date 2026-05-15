@@ -6,7 +6,11 @@ import pytest
 from tenacity import Future, RetryError
 
 from majordomo_llm import LLMCascade
-from majordomo_llm.exceptions import ProviderError
+from majordomo_llm.exceptions import (
+    ProviderError,
+    ResponseParsingError,
+    StructuredOutputUnsupported,
+)
 
 
 def _retry_error_with_exception(exc: BaseException) -> RetryError:
@@ -283,9 +287,9 @@ class TestLLMCascadeStructuredResponse:
             name: str
 
         mock_response = MagicMock()
-        mock_response.content = TestModel(name="test")
+        mock_response.content = '{"name":"test"}'
 
-        cascade.llms[0].get_structured_json_response = AsyncMock(return_value=mock_response)
+        cascade.llms[0].get_json_schema_response = AsyncMock(return_value=mock_response)
 
         response = await cascade.get_structured_json_response(
             response_model=TestModel,
@@ -302,12 +306,12 @@ class TestLLMCascadeStructuredResponse:
             name: str
 
         mock_response = MagicMock()
-        mock_response.content = TestModel(name="fallback")
+        mock_response.content = '{"name":"fallback"}'
 
-        cascade.llms[0].get_structured_json_response = AsyncMock(
+        cascade.llms[0].get_json_schema_response = AsyncMock(
             side_effect=ProviderError("Anthropic down", provider="anthropic")
         )
-        cascade.llms[1].get_structured_json_response = AsyncMock(return_value=mock_response)
+        cascade.llms[1].get_json_schema_response = AsyncMock(return_value=mock_response)
 
         response = await cascade.get_structured_json_response(
             response_model=TestModel,
@@ -324,13 +328,13 @@ class TestLLMCascadeStructuredResponse:
             name: str
 
         mock_response = MagicMock()
-        mock_response.content = TestModel(name="fallback")
+        mock_response.content = '{"name":"fallback"}'
         provider_error = ProviderError("Anthropic down", provider="anthropic")
 
-        cascade.llms[0].get_structured_json_response = AsyncMock(
+        cascade.llms[0].get_json_schema_response = AsyncMock(
             side_effect=_retry_error_with_exception(provider_error)
         )
-        cascade.llms[1].get_structured_json_response = AsyncMock(return_value=mock_response)
+        cascade.llms[1].get_json_schema_response = AsyncMock(return_value=mock_response)
 
         response = await cascade.get_structured_json_response(
             response_model=TestModel,
@@ -338,8 +342,77 @@ class TestLLMCascadeStructuredResponse:
         )
 
         assert response.content.name == "fallback"
-        cascade.llms[0].get_structured_json_response.assert_called_once()
-        cascade.llms[1].get_structured_json_response.assert_called_once()
+        cascade.llms[0].get_json_schema_response.assert_called_once()
+        cascade.llms[1].get_json_schema_response.assert_called_once()
+
+
+class TestLLMCascadeJSONSchemaResponse:
+    """Tests for LLMCascade.get_json_schema_response method."""
+
+    @pytest.fixture
+    def cascade(self, mock_all_clients):
+        """Create LLMCascade with mocked providers."""
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ]
+        )
+
+    async def test_returns_schema_response_from_primary(self, cascade):
+        """Should return raw schema response from first provider."""
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        mock_response = MagicMock()
+        mock_response.content = '{"name":"primary"}'
+
+        cascade.llms[0].get_json_schema_response = AsyncMock(return_value=mock_response)
+
+        response = await cascade.get_json_schema_response(
+            user_prompt="Return structured data",
+            response_schema=schema,
+        )
+
+        assert response.content == '{"name":"primary"}'
+
+    async def test_falls_back_on_unsupported_schema_response(self, cascade):
+        """Should fall back when a provider/model does not support structured output."""
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        mock_response = MagicMock()
+        mock_response.content = '{"name":"fallback"}'
+
+        cascade.llms[0].get_json_schema_response = AsyncMock(
+            side_effect=StructuredOutputUnsupported("anthropic", "claude-test")
+        )
+        cascade.llms[1].get_json_schema_response = AsyncMock(return_value=mock_response)
+
+        response = await cascade.get_json_schema_response(
+            user_prompt="Return structured data",
+            response_schema=schema,
+        )
+
+        assert response.content == '{"name":"fallback"}'
+        cascade.llms[0].get_json_schema_response.assert_called_once()
+        cascade.llms[1].get_json_schema_response.assert_called_once()
+
+    async def test_falls_back_on_malformed_schema_response(self, cascade):
+        """Should fall back when a provider returns malformed structured output."""
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        mock_response = MagicMock()
+        mock_response.content = '{"name":"fallback"}'
+
+        cascade.llms[0].get_json_schema_response = AsyncMock(
+            side_effect=ResponseParsingError("Malformed output", raw_content="not json")
+        )
+        cascade.llms[1].get_json_schema_response = AsyncMock(return_value=mock_response)
+
+        response = await cascade.get_json_schema_response(
+            user_prompt="Return structured data",
+            response_schema=schema,
+        )
+
+        assert response.content == '{"name":"fallback"}'
+        cascade.llms[0].get_json_schema_response.assert_called_once()
+        cascade.llms[1].get_json_schema_response.assert_called_once()
 
 
 class TestLLMCascadeGetResponseStream:

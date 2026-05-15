@@ -24,7 +24,7 @@ def mock_anthropic_tool_response():
     """Mock Anthropic tool use response for structured output."""
     tool_block = MagicMock()
     tool_block.type = "tool_use"
-    tool_block.name = "structured_response"
+    tool_block.name = "CountryInfo"
     tool_block.input = {"name": "France", "capital": "Paris", "population": 67000000}
 
     response = MagicMock()
@@ -55,6 +55,7 @@ def mock_openai_structured_response():
     """Mock OpenAI structured response."""
     response = MagicMock()
     response.output_parsed = {"name": "Japan", "capital": "Tokyo", "population": 125000000}
+    response.output_text = '{"name":"Japan","capital":"Tokyo","population":125000000}'
     response.usage.input_tokens = 40
     response.usage.output_tokens = 25
     response.usage.input_tokens_details.cached_tokens = 10

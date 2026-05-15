@@ -2,16 +2,16 @@
 
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import openai
 
 from majordomo_llm.base import (
     LLM,
-    LLMJSONResponse,
     LLMResponse,
     LLMStreamResponse,
-    T,
     _StreamState,
+    canonicalize_json_schema_output,
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError
@@ -132,6 +132,7 @@ class OpenAI(LLM):
             ) from e
 
         execution_time = time.time() - start_time
+        assert response.usage is not None
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
@@ -191,6 +192,7 @@ class OpenAI(LLM):
                     if event.type == "response.output_text.delta":
                         yield event.delta
                     elif event.type == "response.completed":
+                        assert event.response.usage is not None
                         state.input_tokens = event.response.usage.input_tokens
                         state.output_tokens = event.response.usage.output_tokens
                         cached = event.response.usage.input_tokens_details
@@ -204,36 +206,46 @@ class OpenAI(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
-    @retry_provider_call
-    async def _get_structured_response(
+    async def _get_json_schema_response(
         self,
-        response_model: type[T],
         user_prompt: str,
+        response_schema: dict[str, object],
         system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
+    ) -> LLMResponse:
         """OpenAI-specific implementation using structured outputs with JSON Schema."""
         start_time = time.time()
+        response_format: dict[str, object] = {
+            "type": "json_schema",
+            "name": schema_name,
+            "schema": response_schema,
+            "strict": True,
+        }
+        if schema_description is not None:
+            response_format["description"] = schema_description
+        text_config: Any = {"format": response_format}
 
         try:
             if self.supports_temperature_top_p:
-                response = await self.client.responses.parse(
+                response = await self.client.responses.create(
                     model=self.model,
                     instructions=system_prompt,
                     input=user_prompt,
                     temperature=temperature,
                     top_p=top_p,
-                    text_format=response_model,
+                    text=text_config,
                     extra_headers=extra_headers,
                 )
             else:
-                response = await self.client.responses.parse(
+                response = await self.client.responses.create(
                     model=self.model,
                     instructions=system_prompt,
                     input=user_prompt,
-                    text_format=response_model,
+                    text=text_config,
                     extra_headers=extra_headers,
                 )
         except openai.APIError as e:
@@ -244,15 +256,21 @@ class OpenAI(LLM):
             ) from e
 
         execution_time = time.time() - start_time
+        assert response.usage is not None
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        cached_tokens = getattr(
+            getattr(response.usage, "input_tokens_details", None),
+            "cached_tokens",
+            0,
+        ) or 0
 
-        return LLMJSONResponse(
-            content=response.output_parsed,
+        return LLMResponse(
+            content=canonicalize_json_schema_output(response.output_text, response_schema),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cached_tokens=response.usage.input_tokens_details.cached_tokens,
+            cached_tokens=cached_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,

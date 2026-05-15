@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import logging
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -23,16 +23,16 @@ logger = logging.getLogger(__name__)
 AliasTarget = tuple[str, str] | list[tuple[str, str]]
 
 
-def _load_llm_config() -> dict[str, dict]:
+def _load_llm_config() -> dict[str, dict[str, Any]]:
     """Load LLM configuration from the bundled YAML file."""
     config_file = importlib.resources.files("majordomo_llm").joinpath("llm_config.yaml")
     with config_file.open("r") as f:
-        return yaml.safe_load(f)
+        return cast(dict[str, dict[str, Any]], yaml.safe_load(f))
 
 
 #: Configuration mapping for all supported providers and models.
 #: Costs are specified in USD per million tokens.
-LLM_CONFIG: dict[str, dict] = _load_llm_config()
+LLM_CONFIG: dict[str, dict[str, Any]] = _load_llm_config()
 
 #: Mapping of deprecated model names to their recommended replacements,
 #: keyed by provider.
@@ -189,7 +189,7 @@ def get_llm_instance(
             f"Unknown model '{model}' for provider '{provider}'. Available: {available}"
         )
 
-    _PROVIDER_CLASSES: dict[str, type] = {
+    _PROVIDER_CLASSES: dict[str, type[LLM]] = {
         "openai": OpenAI,
         "anthropic": Anthropic,
         "gemini": Gemini,

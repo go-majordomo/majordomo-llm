@@ -1,8 +1,8 @@
 """Cohere LLM provider implementation."""
 
-import json
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import cohere
 from cohere import JsonObjectResponseFormatV2, SystemChatMessageV2, UserChatMessageV2
@@ -10,16 +10,14 @@ from cohere.core.request_options import RequestOptions
 
 from majordomo_llm.base import (
     LLM,
-    LLMJSONResponse,
     LLMResponse,
     LLMStreamResponse,
-    T,
     _StreamState,
-    build_schema_prompt,
+    canonicalize_json_schema_output,
     inline_schema_refs,
     resolve_api_key,
 )
-from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.retry import retry_provider_call
 
 
@@ -121,10 +119,10 @@ class Cohere(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from Cohere."""
-        messages = []
+        messages: list[Any] = []
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
+            messages.append(SystemChatMessageV2(content=system_prompt))
+        messages.append(UserChatMessageV2(content=user_prompt))
 
         request_options = self._cohere_request_options(extra_headers)
 
@@ -152,13 +150,12 @@ class Cohere(LLM):
             ) from e
 
         execution_time = time.time() - start_time
-        input_tokens = int(response.usage.tokens.input_tokens or 0)
-        output_tokens = int(response.usage.tokens.output_tokens or 0)
+        input_tokens, output_tokens = _cohere_token_counts(response)
         cached_tokens = 0
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
         return LLMResponse(
-            content=response.message.content[0].text,
+            content=_cohere_text_content(response),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -178,10 +175,10 @@ class Cohere(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Cohere."""
-        messages = []
+        messages: list[Any] = []
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
+            messages.append(SystemChatMessageV2(content=system_prompt))
+        messages.append(UserChatMessageV2(content=user_prompt))
 
         state = _StreamState()
         request_options = self._cohere_request_options(extra_headers)
@@ -211,11 +208,12 @@ class Cohere(LLM):
         async def generator() -> AsyncIterator[str]:
             try:
                 async for event in response:
-                    if event.type == "content-delta":
-                        yield event.delta.message.content.text
-                    elif event.type == "message-end":
-                        state.input_tokens = int(event.delta.usage.tokens.input_tokens or 0)
-                        state.output_tokens = int(event.delta.usage.tokens.output_tokens or 0)
+                    event_any: Any = event
+                    if event_any.type == "content-delta":
+                        yield event_any.delta.message.content.text or ""
+                    elif event_any.type == "message-end":
+                        state.input_tokens = int(event_any.delta.usage.tokens.input_tokens or 0)
+                        state.output_tokens = int(event_any.delta.usage.tokens.output_tokens or 0)
             except cohere.core.api_error.ApiError as e:
                 raise ProviderError(
                     f"Cohere API error: {e}",
@@ -225,34 +223,23 @@ class Cohere(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
-    @retry_provider_call
-    async def _get_structured_response(
+    async def _get_json_schema_response(
         self,
-        response_model: type[T],
         user_prompt: str,
+        response_schema: dict[str, Any],
         system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
-        """Cohere-specific implementation using JSON mode for structured outputs.
-
-        Uses prompt-based schema injection with json_object mode since Cohere's
-        json_schema validation doesn't support all JSON Schema constraints
-        (e.g., minimum/maximum for numbers, enum values).
-
-        The schema is flattened via inline_schema_refs() to remove $defs/$ref
-        which Cohere's model handles poorly.
-        """
-        schema = response_model.model_json_schema()
-        # Inline $refs to flatten the schema - Cohere struggles with $defs/$ref
-        schema = inline_schema_refs(schema)
-        combined_system_prompt = build_schema_prompt(schema, system_prompt)
-
-        messages = [
-            SystemChatMessageV2(content=combined_system_prompt),
-            UserChatMessageV2(content=user_prompt)
-        ]
+    ) -> LLMResponse:
+        """Cohere-specific implementation using native JSON schema response format."""
+        schema = inline_schema_refs(response_schema)
+        messages: list[Any] = []
+        if system_prompt is not None:
+            messages.append(SystemChatMessageV2(content=system_prompt))
+        messages.append(UserChatMessageV2(content=user_prompt))
 
         request_options = self._cohere_request_options(extra_headers)
 
@@ -264,14 +251,14 @@ class Cohere(LLM):
                     messages=messages,
                     temperature=temperature,
                     p=top_p,
-                    response_format=JsonObjectResponseFormatV2(),
+                    response_format=JsonObjectResponseFormatV2(json_schema=schema),
                     request_options=request_options,
                 )
             else:
                 response = await self.client.chat(
                     model=self.model,
                     messages=messages,
-                    response_format=JsonObjectResponseFormatV2(),
+                    response_format=JsonObjectResponseFormatV2(json_schema=schema),
                     request_options=request_options,
                 )
         except cohere.core.api_error.ApiError as e:
@@ -283,21 +270,15 @@ class Cohere(LLM):
 
         execution_time = time.time() - start_time
 
-        try:
-            content = json.loads(response.message.content[0].text)
-        except json.JSONDecodeError as e:
-            raise ResponseParsingError(
-                f"Failed to parse JSON response: {e}",
-                raw_content=response.message.content[0].text,
-            ) from e
-
-        input_tokens = int(response.usage.tokens.input_tokens or 0)
-        output_tokens = int(response.usage.tokens.output_tokens or 0)
+        input_tokens, output_tokens = _cohere_token_counts(response)
         cached_tokens = 0
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
-        return LLMJSONResponse(
-            content=content,
+        return LLMResponse(
+            content=canonicalize_json_schema_output(
+                _cohere_text_content(response),
+                response_schema,
+            ),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -306,3 +287,20 @@ class Cohere(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+
+
+def _cohere_token_counts(response: Any) -> tuple[int, int]:
+    """Extract Cohere token counts with typed non-None defaults."""
+    usage = response.usage
+    assert usage is not None
+    tokens = usage.tokens
+    assert tokens is not None
+    return int(tokens.input_tokens or 0), int(tokens.output_tokens or 0)
+
+
+def _cohere_text_content(response: Any) -> str:
+    """Extract the first Cohere text content block."""
+    content = response.message.content
+    assert content is not None
+    text = content[0].text
+    return text or ""

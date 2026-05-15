@@ -28,6 +28,7 @@ from majordomo_llm.exceptions import (
     MajordomoError,
     ProviderError,
     ResponseParsingError,
+    StructuredOutputUnsupported,
 )
 from majordomo_llm.factory import (
     LLM_CONFIG,
@@ -47,7 +48,7 @@ from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     # Base classes and types
@@ -62,6 +63,7 @@ __all__ = [
     "ConfigurationError",
     "ProviderError",
     "ResponseParsingError",
+    "StructuredOutputUnsupported",
     # Factory functions
     "get_llm_instance",
     "get_all_llm_instances",

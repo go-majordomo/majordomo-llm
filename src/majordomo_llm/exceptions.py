@@ -53,6 +53,28 @@ class ProviderError(MajordomoError):
         self.original_error = original_error
 
 
+class StructuredOutputUnsupported(ProviderError):
+    """Raised when a provider/model does not support structured outputs.
+
+    Attributes:
+        provider: The provider that does not support structured outputs.
+        model: The model that does not support structured outputs.
+    """
+
+    def __init__(self, provider: str, model: str):
+        """Initialize the unsupported structured output error.
+
+        Args:
+            provider: The provider name (e.g., "openai", "anthropic").
+            model: The provider model identifier.
+        """
+        super().__init__(
+            f"Structured outputs are not supported by provider '{provider}' model '{model}'.",
+            provider=provider,
+        )
+        self.model = model
+
+
 class ResponseParsingError(MajordomoError):
     """Raised when response parsing fails.
 

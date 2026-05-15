@@ -12,7 +12,7 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 - **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, and Cohere
 - **Streaming** - Real-time token-by-token output via `get_response_stream()` with async iteration
 - **Cost Tracking** - Automatic calculation of input/output token costs per request
-- **Structured Outputs** - Native support for Pydantic models as response schemas
+- **Structured Outputs** - Native support for Pydantic models and raw JSON Schema dicts
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
 - **Automatic Fallback** - Cascade across providers with `LLMCascade` for resilience
 - **Request Logging** - Optional async logging to PostgreSQL/MySQL/SQLite with S3 or local file storage for request/response bodies
@@ -118,6 +118,32 @@ country = response.content
 print(f"{country.name}: {country.capital}, pop. {country.population:,}")
 ```
 
+### Structured Output with Raw JSON Schema
+
+```python
+import json
+
+schema = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "capital": {"type": "string"},
+        "population": {"type": "integer"},
+    },
+    "required": ["name", "capital", "population"],
+}
+
+response = await llm.get_json_schema_response(
+    user_prompt="Give me information about Japan",
+    response_schema=schema,
+    schema_name="CountryInfo",
+)
+
+# response.content is canonical JSON: sorted keys, no extra whitespace
+country = json.loads(response.content)
+print(country["capital"])
+```
+
 ## Configuration
 
 ### Environment Variables
@@ -218,6 +244,10 @@ Get a streaming text response. Yields chunks via async iteration; usage metrics 
 #### `get_structured_json_response(response_model, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0) -> LLMStructuredResponse`
 
 Get a response validated against a Pydantic model.
+
+#### `get_json_schema_response(user_prompt, response_schema, system_prompt=None, schema_name="Response", schema_description=None, temperature=0.3, top_p=1.0) -> LLMResponse`
+
+Get a response validated against a raw JSON Schema dict. `response.content` is canonical JSON.
 
 ### Response Objects
 

@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New OpenAI models: `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`
 - New Anthropic models: `claude-opus-4-6`, `claude-sonnet-4-6`
 - New Gemini models: `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`
+- `get_json_schema_response()` for raw JSON Schema structured outputs across providers and `LLMCascade`
+- Canonical JSON serialization for raw schema responses so equivalent outputs are byte-comparable
+- `StructuredOutputUnsupported` error for provider/model structured-output capability failures
+- New Anthropic model: `claude-opus-4-7`
 
 ### Removed
 
