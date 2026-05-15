@@ -1,6 +1,9 @@
 """Cascade LLM implementation for automatic fallback between providers."""
 
 import logging
+from typing import Any, cast
+
+from tenacity import RetryError
 
 from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, LLMStreamResponse, T
 from majordomo_llm.exceptions import ProviderError
@@ -55,7 +58,11 @@ class LLMCascade(LLM):
 
         self.llms = [
             get_llm_instance(
-                p, m, api_key=api_key, base_url=base_url, default_headers=default_headers,
+                p,
+                m,
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=default_headers,
             )
             for p, m in providers
         ]
@@ -79,13 +86,16 @@ class LLMCascade(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a response, falling back to next provider on failure."""
-        return await self._cascade_call(
-            "get_response",
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            top_p=top_p,
-            extra_headers=extra_headers,
+        return cast(
+            LLMResponse,
+            await self._cascade_call(
+                "get_response",
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+            ),
         )
 
     async def get_json_response(
@@ -97,13 +107,16 @@ class LLMCascade(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Get a JSON response, falling back to next provider on failure."""
-        return await self._cascade_call(
-            "get_json_response",
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            top_p=top_p,
-            extra_headers=extra_headers,
+        return cast(
+            LLMJSONResponse,
+            await self._cascade_call(
+                "get_json_response",
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+            ),
         )
 
     async def get_response_stream(
@@ -115,13 +128,16 @@ class LLMCascade(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming response, falling back to next provider on failure."""
-        return await self._cascade_call(
-            "get_response_stream",
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            top_p=top_p,
-            extra_headers=extra_headers,
+        return cast(
+            LLMStreamResponse,
+            await self._cascade_call(
+                "get_response_stream",
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+            ),
         )
 
     async def _get_structured_response(
@@ -134,18 +150,21 @@ class LLMCascade(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Get a structured response, falling back to next provider on failure."""
-        return await self._cascade_call(
-            "get_structured_json_response",
-            response_model=response_model,
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            top_p=top_p,
-            extra_headers=extra_headers,
+        return cast(
+            LLMJSONResponse,
+            await self._cascade_call(
+                "get_structured_json_response",
+                response_model=response_model,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+            ),
         )
 
     async def _cascade_call(
-        self, method_name: str, **kwargs
+        self, method_name: str, **kwargs: Any
     ) -> LLMResponse | LLMJSONResponse | LLMStreamResponse:
         """Try each provider in order until one succeeds.
 
@@ -164,19 +183,32 @@ class LLMCascade(LLM):
         for llm in self.llms:
             try:
                 method = getattr(llm, method_name)
-                return await method(**kwargs)
+                result = await method(**kwargs)
+                return cast(LLMResponse | LLMJSONResponse | LLMStreamResponse, result)
             except ProviderError as e:
-                logger.warning(
-                    "Provider %s/%s failed: %s. Trying next provider.",
-                    llm.provider,
-                    llm.model,
-                    e,
-                )
+                self._log_provider_failure(llm, e)
                 last_error = e
+                continue
+            except RetryError as e:
+                exc = e.last_attempt.exception()
+                if not isinstance(exc, ProviderError):
+                    raise
+
+                self._log_provider_failure(llm, exc)
+                last_error = exc
                 continue
 
         raise ProviderError(
             f"All providers in cascade failed. Last error: {last_error}",
             provider="cascade",
             original_error=last_error,
+        )
+
+    def _log_provider_failure(self, llm: LLM, exc: ProviderError) -> None:
+        """Log a provider failure before trying the next cascade entry."""
+        logger.warning(
+            "Provider %s/%s failed: %s. Trying next provider.",
+            llm.provider,
+            llm.model,
+            exc,
         )

@@ -8,11 +8,6 @@ from typing import Any
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from majordomo_llm.base import (
     LLM,
@@ -24,6 +19,7 @@ from majordomo_llm.base import (
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.retry import retry_provider_call
 
 
 class Gemini(LLM):
@@ -93,7 +89,7 @@ class Gemini(LLM):
             )
         self.client = genai.Client(api_key=resolved_api_key, http_options=http_options)
 
-    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
+    @retry_provider_call
     async def get_response(
         self,
         user_prompt: str,
@@ -202,6 +198,7 @@ class Gemini(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
+    @retry_provider_call
     async def _get_structured_response(
         self,
         response_model: type[T],

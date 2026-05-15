@@ -7,11 +7,6 @@ from collections.abc import AsyncIterator
 import cohere
 from cohere import JsonObjectResponseFormatV2, SystemChatMessageV2, UserChatMessageV2
 from cohere.core.request_options import RequestOptions
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from majordomo_llm.base import (
     LLM,
@@ -25,6 +20,7 @@ from majordomo_llm.base import (
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.retry import retry_provider_call
 
 
 class Cohere(LLM):
@@ -102,7 +98,7 @@ class Cohere(LLM):
             return None
         return RequestOptions(additional_headers=merged)
 
-    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
+    @retry_provider_call
     async def get_response(
         self,
         user_prompt: str,
@@ -229,6 +225,7 @@ class Cohere(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
+    @retry_provider_call
     async def _get_structured_response(
         self,
         response_model: type[T],

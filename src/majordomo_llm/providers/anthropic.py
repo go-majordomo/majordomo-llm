@@ -14,11 +14,6 @@ from anthropic.types import (
     ToolParam,
     WebSearchTool20250305Param,
 )
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from majordomo_llm.base import (
     LLM,
@@ -30,6 +25,7 @@ from majordomo_llm.base import (
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.retry import retry_provider_call
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +98,7 @@ class Anthropic(LLM):
             default_headers=self.default_headers,
         )
 
-    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
+    @retry_provider_call
     async def get_response(
         self,
         user_prompt: str,
@@ -235,7 +231,7 @@ class Anthropic(LLM):
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
-    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
+    @retry_provider_call
     async def _get_structured_response(
         self,
         response_model: type[T],

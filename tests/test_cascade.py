@@ -1,10 +1,16 @@
 """Tests for the LLMCascade class."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from tenacity import Future, RetryError
 
 from majordomo_llm import LLMCascade
 from majordomo_llm.exceptions import ProviderError
+
+
+def _retry_error_with_exception(exc: BaseException) -> RetryError:
+    return RetryError(Future.construct(attempt_number=3, value=exc, has_exception=True))
 
 
 @pytest.fixture
@@ -33,10 +39,12 @@ class TestLLMCascadeInit:
 
     def test_creates_llm_instances_for_all_providers(self, mock_all_clients):
         """Should create LLM instances for all providers in list."""
-        cascade = LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-        ])
+        cascade = LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ]
+        )
 
         assert len(cascade.llms) == 2
         assert cascade.llms[0].provider == "anthropic"
@@ -44,18 +52,22 @@ class TestLLMCascadeInit:
 
     def test_sets_provider_to_cascade(self, mock_all_clients):
         """Should set provider name to 'cascade'."""
-        cascade = LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-        ])
+        cascade = LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+            ]
+        )
 
         assert cascade.provider == "cascade"
 
     def test_uses_primary_provider_attributes(self, mock_all_clients):
         """Should use first provider's attributes for metadata."""
-        cascade = LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-        ])
+        cascade = LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ]
+        )
 
         assert cascade.model == "claude-sonnet-4-20250514"
         assert cascade.input_cost == 3.00
@@ -75,11 +87,13 @@ class TestLLMCascadeGetResponse:
     @pytest.fixture
     def cascade(self, mock_all_clients):
         """Create LLMCascade with mocked providers."""
-        return LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-            ("gemini", "gemini-2.5-flash"),
-        ])
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+                ("gemini", "gemini-2.5-flash"),
+            ]
+        )
 
     async def test_returns_response_from_primary_provider(self, cascade):
         """Should return response from first provider when it succeeds."""
@@ -108,6 +122,33 @@ class TestLLMCascadeGetResponse:
         assert response.content == "Response from OpenAI"
         cascade.llms[0].get_response.assert_called_once()
         cascade.llms[1].get_response.assert_called_once()
+
+    async def test_falls_back_when_retry_error_wraps_provider_error(self, cascade):
+        """Should fall back when provider retries exhaust with ProviderError."""
+        mock_response = MagicMock()
+        mock_response.content = "Response from OpenAI"
+        provider_error = ProviderError("Anthropic down", provider="anthropic")
+
+        cascade.llms[0].get_response = AsyncMock(
+            side_effect=_retry_error_with_exception(provider_error)
+        )
+        cascade.llms[1].get_response = AsyncMock(return_value=mock_response)
+
+        response = await cascade.get_response("Test prompt")
+
+        assert response.content == "Response from OpenAI"
+        cascade.llms[0].get_response.assert_called_once()
+        cascade.llms[1].get_response.assert_called_once()
+
+    async def test_reraises_retry_error_with_non_provider_error(self, cascade):
+        """Should not swallow retry failures caused by non-provider exceptions."""
+        retry_error = _retry_error_with_exception(RuntimeError("bug"))
+        cascade.llms[0].get_response = AsyncMock(side_effect=retry_error)
+
+        with pytest.raises(RetryError) as exc_info:
+            await cascade.get_response("Test prompt")
+
+        assert exc_info.value is retry_error
 
     async def test_falls_back_through_all_providers(self, cascade):
         """Should try all providers in order until one succeeds."""
@@ -171,10 +212,12 @@ class TestLLMCascadeGetJSONResponse:
     @pytest.fixture
     def cascade(self, mock_all_clients):
         """Create LLMCascade with mocked providers."""
-        return LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-        ])
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ]
+        )
 
     async def test_returns_json_response_from_primary(self, cascade):
         """Should return JSON response from first provider."""
@@ -201,6 +244,23 @@ class TestLLMCascadeGetJSONResponse:
 
         assert response.content == {"fallback": "data"}
 
+    async def test_falls_back_when_json_retry_error_wraps_provider_error(self, cascade):
+        """Should fall back when JSON provider retries exhaust with ProviderError."""
+        mock_response = MagicMock()
+        mock_response.content = {"fallback": "data"}
+        provider_error = ProviderError("Anthropic down", provider="anthropic")
+
+        cascade.llms[0].get_json_response = AsyncMock(
+            side_effect=_retry_error_with_exception(provider_error)
+        )
+        cascade.llms[1].get_json_response = AsyncMock(return_value=mock_response)
+
+        response = await cascade.get_json_response("Return JSON")
+
+        assert response.content == {"fallback": "data"}
+        cascade.llms[0].get_json_response.assert_called_once()
+        cascade.llms[1].get_json_response.assert_called_once()
+
 
 class TestLLMCascadeStructuredResponse:
     """Tests for LLMCascade.get_structured_json_response method."""
@@ -208,10 +268,12 @@ class TestLLMCascadeStructuredResponse:
     @pytest.fixture
     def cascade(self, mock_all_clients):
         """Create LLMCascade with mocked providers."""
-        return LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-        ])
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ]
+        )
 
     async def test_returns_structured_response_from_primary(self, cascade):
         """Should return structured response from first provider."""
@@ -223,9 +285,7 @@ class TestLLMCascadeStructuredResponse:
         mock_response = MagicMock()
         mock_response.content = TestModel(name="test")
 
-        cascade.llms[0].get_structured_json_response = AsyncMock(
-            return_value=mock_response
-        )
+        cascade.llms[0].get_structured_json_response = AsyncMock(return_value=mock_response)
 
         response = await cascade.get_structured_json_response(
             response_model=TestModel,
@@ -247,9 +307,7 @@ class TestLLMCascadeStructuredResponse:
         cascade.llms[0].get_structured_json_response = AsyncMock(
             side_effect=ProviderError("Anthropic down", provider="anthropic")
         )
-        cascade.llms[1].get_structured_json_response = AsyncMock(
-            return_value=mock_response
-        )
+        cascade.llms[1].get_structured_json_response = AsyncMock(return_value=mock_response)
 
         response = await cascade.get_structured_json_response(
             response_model=TestModel,
@@ -258,6 +316,31 @@ class TestLLMCascadeStructuredResponse:
 
         assert response.content.name == "fallback"
 
+    async def test_falls_back_when_structured_retry_error_wraps_provider_error(self, cascade):
+        """Should fall back when structured retries exhaust with ProviderError."""
+        from pydantic import BaseModel
+
+        class TestModel(BaseModel):
+            name: str
+
+        mock_response = MagicMock()
+        mock_response.content = TestModel(name="fallback")
+        provider_error = ProviderError("Anthropic down", provider="anthropic")
+
+        cascade.llms[0].get_structured_json_response = AsyncMock(
+            side_effect=_retry_error_with_exception(provider_error)
+        )
+        cascade.llms[1].get_structured_json_response = AsyncMock(return_value=mock_response)
+
+        response = await cascade.get_structured_json_response(
+            response_model=TestModel,
+            user_prompt="Return structured data",
+        )
+
+        assert response.content.name == "fallback"
+        cascade.llms[0].get_structured_json_response.assert_called_once()
+        cascade.llms[1].get_structured_json_response.assert_called_once()
+
 
 class TestLLMCascadeGetResponseStream:
     """Tests for LLMCascade.get_response_stream method."""
@@ -265,11 +348,13 @@ class TestLLMCascadeGetResponseStream:
     @pytest.fixture
     def cascade(self, mock_all_clients):
         """Create LLMCascade with mocked providers."""
-        return LLMCascade([
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-            ("gemini", "gemini-2.5-flash"),
-        ])
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+                ("gemini", "gemini-2.5-flash"),
+            ]
+        )
 
     async def test_returns_stream_from_primary_provider(self, cascade):
         """Should return stream from first provider when it succeeds."""

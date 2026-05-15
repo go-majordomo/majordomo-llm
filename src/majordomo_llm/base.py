@@ -10,13 +10,9 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from majordomo_llm.exceptions import ConfigurationError, ResponseParsingError
+from majordomo_llm.retry import retry_provider_call
 
 
 def _hash_api_key(api_key: str) -> str:
@@ -425,7 +421,7 @@ class LLM(ABC):
         """
         raise NotImplementedError()
 
-    @retry(wait=wait_random_exponential(min=0.2, max=1), stop=stop_after_attempt(3))
+    @retry_provider_call
     async def get_json_response(
         self,
         user_prompt: str,
