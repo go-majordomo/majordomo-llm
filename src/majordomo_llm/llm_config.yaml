@@ -3,7 +3,12 @@
 
 openai:
   models:
-    # GPT-5.4 family (latest)
+    # GPT-5.5 family (latest)
+    gpt-5.5:
+      input_cost: 5.00
+      output_cost: 30.00
+      supports_temperature_top_p: false
+    # GPT-5.4 family
     gpt-5.4:
       input_cost: 2.50
       output_cost: 15.00
@@ -112,6 +117,16 @@ gemini:
 
 deepseek:
   models:
+    deepseek-v4-flash:
+      input_cost: 0.14
+      output_cost: 0.28
+      reasoning_effort: medium
+      thinking: disabled
+    deepseek-v4-pro:
+      input_cost: 0.435
+      output_cost: 0.87
+      reasoning_effort: medium
+      thinking: disabled
     deepseek-chat:
       input_cost: 0.28
       output_cost: 0.42

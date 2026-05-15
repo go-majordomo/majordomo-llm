@@ -1,12 +1,13 @@
 """Tests for the DeepSeek provider."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import BaseModel
 
-from majordomo_llm.providers import DeepSeek
 from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.providers import DeepSeek
 
 
 class CountryInfo(BaseModel):
@@ -34,7 +35,9 @@ def mock_deepseek_json_response():
     """Mock DeepSeek JSON response."""
     response = MagicMock()
     response.choices = [MagicMock()]
-    response.choices[0].message.content = '{"name": "France", "capital": "Paris", "population": 67000000}'
+    response.choices[
+        0
+    ].message.content = '{"name": "France", "capital": "Paris", "population": 67000000}'
     response.usage.prompt_tokens = 50
     response.usage.completion_tokens = 30
     response.usage.prompt_tokens_details = None
@@ -109,7 +112,9 @@ class TestDeepSeekGetResponse:
         assert call_kwargs["temperature"] == 0.8
         assert call_kwargs["top_p"] == 0.95
 
-    async def test_includes_system_prompt_in_messages(self, deepseek_llm, mock_deepseek_text_response):
+    async def test_includes_system_prompt_in_messages(
+        self, deepseek_llm, mock_deepseek_text_response
+    ):
         """Should include system prompt in messages."""
         deepseek_llm.client.chat.completions.create = AsyncMock(
             return_value=mock_deepseek_text_response
@@ -126,6 +131,25 @@ class TestDeepSeekGetResponse:
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "You are a helpful assistant."
         assert messages[1]["role"] == "user"
+
+    async def test_passes_deepseek_reasoning_options(self, mock_deepseek_text_response):
+        """Should pass configured DeepSeek reasoning options to chat completions."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"):
+            llm = DeepSeek(
+                model="deepseek-v4-pro",
+                input_cost=0.435,
+                output_cost=0.87,
+                api_key="test-key",
+                reasoning_effort="medium",
+                thinking="disabled",
+            )
+        llm.client.chat.completions.create = AsyncMock(return_value=mock_deepseek_text_response)
+
+        await llm.get_response("Test prompt")
+
+        call_kwargs = llm.client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "medium"
+        assert call_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 class TestDeepSeekGetJSONResponse:
@@ -203,7 +227,33 @@ class TestDeepSeekStructuredResponse:
         call_kwargs = deepseek_llm.client.chat.completions.create.call_args.kwargs
         assert call_kwargs["response_format"] == {"type": "json_object"}
 
-    async def test_returns_validated_pydantic_model(self, deepseek_llm, mock_deepseek_json_response):
+    async def test_structured_response_passes_deepseek_reasoning_options(
+        self, mock_deepseek_json_response
+    ):
+        """Should pass configured DeepSeek reasoning options to structured calls."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"):
+            llm = DeepSeek(
+                model="deepseek-v4-flash",
+                input_cost=0.14,
+                output_cost=0.28,
+                api_key="test-key",
+                reasoning_effort="medium",
+                thinking="disabled",
+            )
+        llm.client.chat.completions.create = AsyncMock(return_value=mock_deepseek_json_response)
+
+        await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        call_kwargs = llm.client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "medium"
+        assert call_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    async def test_returns_validated_pydantic_model(
+        self, deepseek_llm, mock_deepseek_json_response
+    ):
         """Should return a validated Pydantic model instance."""
         deepseek_llm.client.chat.completions.create = AsyncMock(
             return_value=mock_deepseek_json_response
@@ -288,6 +338,43 @@ class TestDeepSeekInit:
 
             assert llm.supports_temperature_top_p is True
 
+    def test_sets_deepseek_reasoning_options(self):
+        """Should set DeepSeek reasoning options."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"):
+            llm = DeepSeek(
+                model="deepseek-v4-pro",
+                input_cost=0.435,
+                output_cost=0.87,
+                api_key="test-key",
+                reasoning_effort="medium",
+                thinking="disabled",
+            )
+
+            assert llm.reasoning_effort == "medium"
+            assert llm.thinking == "disabled"
+
+    @pytest.mark.parametrize(
+        ("reasoning_effort", "thinking", "error_match"),
+        [
+            ("extreme", "disabled", "Invalid DeepSeek reasoning_effort"),
+            ("medium", "maybe", "Invalid DeepSeek thinking mode"),
+        ],
+    )
+    def test_rejects_invalid_reasoning_options(self, reasoning_effort, thinking, error_match):
+        """Should reject invalid DeepSeek reasoning configuration."""
+        with (
+            patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"),
+            pytest.raises(ValueError, match=error_match),
+        ):
+            DeepSeek(
+                model="deepseek-v4-pro",
+                input_cost=0.435,
+                output_cost=0.87,
+                api_key="test-key",
+                reasoning_effort=reasoning_effort,
+                thinking=thinking,
+            )
+
 
 class TestDeepSeekGetResponseStream:
     """Tests for DeepSeek.get_response_stream method."""
@@ -367,3 +454,22 @@ class TestDeepSeekGetResponseStream:
         call_kwargs = deepseek_llm.client.chat.completions.create.call_args.kwargs
         assert call_kwargs["stream"] is True
         assert call_kwargs["stream_options"] == {"include_usage": True}
+
+    async def test_stream_passes_deepseek_reasoning_options(self, mock_deepseek_stream_chunks):
+        """Should pass configured DeepSeek reasoning options to streaming calls."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"):
+            llm = DeepSeek(
+                model="deepseek-v4-flash",
+                input_cost=0.14,
+                output_cost=0.28,
+                api_key="test-key",
+                reasoning_effort="medium",
+                thinking="disabled",
+            )
+        llm.client.chat.completions.create = AsyncMock(return_value=mock_deepseek_stream_chunks)
+
+        await llm.get_response_stream("Hello")
+
+        call_kwargs = llm.client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "medium"
+        assert call_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}

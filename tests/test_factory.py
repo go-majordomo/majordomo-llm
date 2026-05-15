@@ -1,17 +1,19 @@
 """Tests for the factory module."""
 
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from majordomo_llm import (
-    get_llm_instance,
-    get_all_llm_instances,
     LLM_CONFIG,
+    get_all_llm_instances,
+    get_llm_instance,
 )
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers.anthropic import Anthropic
-from majordomo_llm.providers.openai import OpenAI
+from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
+from majordomo_llm.providers.openai import OpenAI
 
 
 @pytest.fixture
@@ -61,6 +63,18 @@ class TestGetLLMInstance:
         assert isinstance(llm, Gemini)
         assert llm.provider == "gemini"
         assert llm.model == "gemini-2.5-flash"
+
+    def test_creates_deepseek_v4_with_reasoning_options(self, mock_all_clients):
+        """Should create DeepSeek V4 models with configured reasoning options."""
+        llm = get_llm_instance("deepseek", "deepseek-v4-pro")
+
+        assert isinstance(llm, DeepSeek)
+        assert llm.provider == "deepseek"
+        assert llm.model == "deepseek-v4-pro"
+        assert llm.input_cost == 0.435
+        assert llm.output_cost == 0.87
+        assert llm.reasoning_effort == "medium"
+        assert llm.thinking == "disabled"
 
     def test_sets_correct_costs_from_config(self, mock_all_clients):
         """Should set input/output costs from LLM_CONFIG."""
@@ -136,8 +150,7 @@ class TestGetAllLLMInstances:
 
         # Count expected models
         expected_count = sum(
-            len(provider_config["models"])
-            for provider_config in LLM_CONFIG.values()
+            len(provider_config["models"]) for provider_config in LLM_CONFIG.values()
         )
 
         assert len(instances) == expected_count

@@ -146,6 +146,7 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 ### Available Models
 
 #### OpenAI
+- `gpt-5.5`
 - `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`
 - `gpt-5`, `gpt-5-mini`, `gpt-5-nano`
 - `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`
@@ -161,6 +162,7 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 - `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`
 
 #### DeepSeek
+- `deepseek-v4-flash`, `deepseek-v4-pro`
 - `deepseek-chat`, `deepseek-reasoner`
 
 #### Cohere

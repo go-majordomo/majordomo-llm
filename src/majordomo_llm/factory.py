@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import logging
 from collections.abc import Iterator
+from typing import Any
 
 import yaml
 
@@ -122,9 +123,7 @@ def get_supported_models(provider: str) -> list[str]:
     provider_config = LLM_CONFIG.get(provider)
     if provider_config is None:
         available = ", ".join(LLM_CONFIG.keys())
-        raise ConfigurationError(
-            f"Unknown LLM provider '{provider}'. Available: {available}"
-        )
+        raise ConfigurationError(f"Unknown LLM provider '{provider}'. Available: {available}")
     return list(provider_config.get("models", {}).keys())
 
 
@@ -201,6 +200,13 @@ def get_llm_instance(
     if cls is None:
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")
 
+    provider_kwargs: dict[str, Any] = {}
+    if provider == "deepseek":
+        provider_kwargs = {
+            "reasoning_effort": model_attributes.get("reasoning_effort"),
+            "thinking": model_attributes.get("thinking"),
+        }
+
     llm = cls(
         model=model,
         input_cost=model_attributes["input_cost"],
@@ -209,6 +215,7 @@ def get_llm_instance(
         api_key=api_key,
         base_url=base_url,
         default_headers=default_headers,
+        **provider_kwargs,
     )
 
     if deprecation_warning:

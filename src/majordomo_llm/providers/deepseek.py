@@ -3,6 +3,7 @@
 import json
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import openai
 
@@ -41,6 +42,8 @@ class DeepSeek(LLM):
     """
 
     DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+    REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
+    THINKING_MODES = frozenset({"enabled", "disabled"})
 
     def __init__(
         self,
@@ -53,6 +56,8 @@ class DeepSeek(LLM):
         api_key_alias: str | None = None,
         base_url: str | None = None,
         default_headers: dict[str, str] | None = None,
+        reasoning_effort: str | None = None,
+        thinking: str | None = None,
     ) -> None:
         """Initialize the DeepSeek provider.
 
@@ -65,10 +70,22 @@ class DeepSeek(LLM):
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL. Overrides DEEPSEEK_BASE_URL when set.
             default_headers: Optional headers sent with every request.
+            reasoning_effort: Optional reasoning effort for supported DeepSeek models.
+            thinking: Optional thinking mode ("enabled" or "disabled") for supported models.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
+            ValueError: If reasoning_effort or thinking is invalid.
         """
+        if reasoning_effort is not None and reasoning_effort not in self.REASONING_EFFORTS:
+            valid = ", ".join(sorted(self.REASONING_EFFORTS))
+            raise ValueError(
+                f"Invalid DeepSeek reasoning_effort '{reasoning_effort}'. Valid: {valid}"
+            )
+        if thinking is not None and thinking not in self.THINKING_MODES:
+            valid = ", ".join(sorted(self.THINKING_MODES))
+            raise ValueError(f"Invalid DeepSeek thinking mode '{thinking}'. Valid: {valid}")
+
         resolved_api_key = resolve_api_key(api_key, "DEEPSEEK_API_KEY", "DeepSeek")
         super().__init__(
             provider="deepseek",
@@ -86,6 +103,17 @@ class DeepSeek(LLM):
             base_url=self.base_url or self.DEEPSEEK_BASE_URL,
             default_headers=self.default_headers,
         )
+        self.reasoning_effort = reasoning_effort
+        self.thinking = thinking
+
+    def _deepseek_request_kwargs(self) -> dict[str, Any]:
+        """Build DeepSeek-specific request options for supported models."""
+        kwargs: dict[str, Any] = {}
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.thinking is not None:
+            kwargs["extra_body"] = {"thinking": {"type": self.thinking}}
+        return kwargs
 
     @retry_provider_call
     async def get_response(
@@ -116,6 +144,7 @@ class DeepSeek(LLM):
         messages.append({"role": "user", "content": user_prompt})
 
         start_time = time.time()
+        request_kwargs = self._deepseek_request_kwargs()
         try:
             if self.supports_temperature_top_p:
                 response = await self.client.chat.completions.create(
@@ -124,12 +153,14 @@ class DeepSeek(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     extra_headers=extra_headers,
+                    **request_kwargs,
                 )
             else:
                 response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     extra_headers=extra_headers,
+                    **request_kwargs,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -141,11 +172,14 @@ class DeepSeek(LLM):
         execution_time = time.time() - start_time
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
-        cached_tokens = getattr(
-            getattr(response.usage, "prompt_tokens_details", None),
-            "cached_tokens",
-            0,
-        ) or 0
+        cached_tokens = (
+            getattr(
+                getattr(response.usage, "prompt_tokens_details", None),
+                "cached_tokens",
+                0,
+            )
+            or 0
+        )
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
         return LLMResponse(
@@ -175,6 +209,7 @@ class DeepSeek(LLM):
         messages.append({"role": "user", "content": user_prompt})
 
         state = _StreamState()
+        request_kwargs = self._deepseek_request_kwargs()
 
         try:
             if self.supports_temperature_top_p:
@@ -186,6 +221,7 @@ class DeepSeek(LLM):
                     stream=True,
                     stream_options={"include_usage": True},
                     extra_headers=extra_headers,
+                    **request_kwargs,
                 )
             else:
                 response = await self.client.chat.completions.create(
@@ -194,6 +230,7 @@ class DeepSeek(LLM):
                     stream=True,
                     stream_options={"include_usage": True},
                     extra_headers=extra_headers,
+                    **request_kwargs,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -210,11 +247,14 @@ class DeepSeek(LLM):
                     if chunk.usage:
                         state.input_tokens = chunk.usage.prompt_tokens
                         state.output_tokens = chunk.usage.completion_tokens
-                        state.cached_tokens = getattr(
-                            getattr(chunk.usage, "prompt_tokens_details", None),
-                            "cached_tokens",
-                            0,
-                        ) or 0
+                        state.cached_tokens = (
+                            getattr(
+                                getattr(chunk.usage, "prompt_tokens_details", None),
+                                "cached_tokens",
+                                0,
+                            )
+                            or 0
+                        )
             except openai.APIError as e:
                 raise ProviderError(
                     f"DeepSeek API error: {e}",
@@ -244,6 +284,7 @@ class DeepSeek(LLM):
         ]
 
         start_time = time.time()
+        request_kwargs = self._deepseek_request_kwargs()
         try:
             if self.supports_temperature_top_p:
                 response = await self.client.chat.completions.create(
@@ -253,6 +294,7 @@ class DeepSeek(LLM):
                     top_p=top_p,
                     response_format={"type": "json_object"},
                     extra_headers=extra_headers,
+                    **request_kwargs,
                 )
             else:
                 response = await self.client.chat.completions.create(
@@ -260,6 +302,7 @@ class DeepSeek(LLM):
                     messages=messages,
                     response_format={"type": "json_object"},
                     extra_headers=extra_headers,
+                    **request_kwargs,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -280,11 +323,14 @@ class DeepSeek(LLM):
 
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
-        cached_tokens = getattr(
-            getattr(response.usage, "prompt_tokens_details", None),
-            "cached_tokens",
-            0,
-        ) or 0
+        cached_tokens = (
+            getattr(
+                getattr(response.usage, "prompt_tokens_details", None),
+                "cached_tokens",
+                0,
+            )
+            or 0
+        )
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
         return LLMJSONResponse(

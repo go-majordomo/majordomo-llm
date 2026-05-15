@@ -130,10 +130,10 @@ logged_llm = LoggingLLM(llm, db, storage)
 
 | Provider | Recent Models |
 |----------|---------------|
-| OpenAI | gpt-5.4, gpt-5.4-mini, gpt-5, gpt-4.1, o3, o4-mini |
+| OpenAI | gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5, gpt-4.1, o3, o4-mini |
 | Anthropic | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, claude-sonnet-4 |
 | Google Gemini | gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-2.5-flash |
-| DeepSeek | deepseek-chat, deepseek-reasoner |
+| DeepSeek | deepseek-v4-flash, deepseek-v4-pro, deepseek-chat, deepseek-reasoner |
 | Cohere | command-a, command-r-plus, command-r |
 
 All providers support structured outputs and streaming. Additional models are available—see `llm_config.yaml` for the complete list with pricing.
