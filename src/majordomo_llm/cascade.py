@@ -5,9 +5,10 @@ from typing import Any, cast
 
 from tenacity import RetryError
 
-from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, LLMStreamResponse, T
+from majordomo_llm.base import LLM, LLMJSONResponse, LLMResponse, LLMStreamResponse
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 from majordomo_llm.factory import get_llm_instance
+from majordomo_llm.hooks.pipeline import HookPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class LLMCascade(LLM):
         api_key: str | None = None,
         base_url: str | None = None,
         default_headers: dict[str, str] | None = None,
+        hook_pipeline: HookPipeline | None = None,
     ) -> None:
         """Initialize the cascade with a list of providers.
 
@@ -49,6 +51,10 @@ class LLMCascade(LLM):
                 back to its respective environment variable.
             base_url: Optional custom base URL for routing through a proxy.
             default_headers: Optional headers sent with every request.
+            hook_pipeline: Optional pipeline that fires once at the cascade
+                boundary. The pipeline is intentionally not propagated to
+                child providers — hooks evaluate the eventual response from
+                whichever provider succeeded, not each failover attempt.
 
         Raises:
             ValueError: If providers list is empty.
@@ -75,9 +81,10 @@ class LLMCascade(LLM):
             input_cost=primary.input_cost,
             output_cost=primary.output_cost,
             supports_temperature_top_p=primary.supports_temperature_top_p,
+            hook_pipeline=hook_pipeline,
         )
 
-    async def get_response(
+    async def _get_response_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
@@ -85,7 +92,7 @@ class LLMCascade(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Get a response, falling back to next provider on failure."""
+        """Dispatch to the first child provider that succeeds."""
         return cast(
             LLMResponse,
             await self._cascade_call(
@@ -98,28 +105,7 @@ class LLMCascade(LLM):
             ),
         )
 
-    async def get_json_response(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
-        extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
-        """Get a JSON response, falling back to next provider on failure."""
-        return cast(
-            LLMJSONResponse,
-            await self._cascade_call(
-                "get_json_response",
-                user_prompt=user_prompt,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                top_p=top_p,
-                extra_headers=extra_headers,
-            ),
-        )
-
-    async def get_response_stream(
+    async def _get_response_stream_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
@@ -127,7 +113,7 @@ class LLMCascade(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
-        """Get a streaming response, falling back to next provider on failure."""
+        """Dispatch streaming to the first child provider that succeeds."""
         return cast(
             LLMStreamResponse,
             await self._cascade_call(
@@ -140,7 +126,7 @@ class LLMCascade(LLM):
             ),
         )
 
-    async def get_json_schema_response(
+    async def _get_json_schema_response_retried(
         self,
         user_prompt: str,
         response_schema: dict[str, Any],
@@ -150,9 +136,15 @@ class LLMCascade(LLM):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
-        **kwargs: Any,
     ) -> LLMResponse:
-        """Get a JSON-schema response, falling back to next provider on failure."""
+        """Cascade overrides the retried wrapper to skip outer retries.
+
+        Each child provider already retries via its own ``_get_response_impl``
+        / ``_get_json_schema_response_retried``. Adding another retry layer
+        at the cascade boundary would multiply attempts; the cascade's job
+        is failover, not retry. Failover behavior is preserved by
+        ``_cascade_call``.
+        """
         return cast(
             LLMResponse,
             await self._cascade_call(
@@ -166,31 +158,23 @@ class LLMCascade(LLM):
                 top_p=top_p,
                 extra_headers=extra_headers,
                 failover_exceptions=(ProviderError, ResponseParsingError),
-                **kwargs,
             ),
         )
 
-    async def _get_structured_response(
+    async def _get_json_schema_response(
         self,
-        response_model: type[T],
         user_prompt: str,
+        response_schema: dict[str, Any],
         system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
-        """Get a structured response, falling back to next provider on failure."""
-        return cast(
-            LLMJSONResponse,
-            await self._cascade_call(
-                "get_structured_json_response",
-                response_model=response_model,
-                user_prompt=user_prompt,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                top_p=top_p,
-                extra_headers=extra_headers,
-            ),
+    ) -> LLMResponse:
+        """Unused on the cascade — ``_get_json_schema_response_retried`` dispatches directly."""
+        raise NotImplementedError(
+            "LLMCascade dispatches via _get_json_schema_response_retried"
         )
 
     async def _cascade_call(

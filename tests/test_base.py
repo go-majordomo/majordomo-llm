@@ -162,11 +162,15 @@ class TestLLMCostCalculation:
     class ConcreteLLM(LLM):
         """Concrete implementation for testing abstract base class."""
 
-        async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+        async def _get_response_impl(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            extra_headers=None,
+        ):
             raise NotImplementedError()
 
-        async def get_response_stream(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0
+        async def _get_response_stream_impl(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            extra_headers=None,
         ):
             raise NotImplementedError()
 
@@ -234,11 +238,15 @@ class TestLLMFullModelName:
     class ConcreteLLM(LLM):
         """Concrete implementation for testing."""
 
-        async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+        async def _get_response_impl(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            extra_headers=None,
+        ):
             raise NotImplementedError()
 
-        async def get_response_stream(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0
+        async def _get_response_stream_impl(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            extra_headers=None,
         ):
             raise NotImplementedError()
 
@@ -260,11 +268,15 @@ class TestLLMStreamResponse:
     class ConcreteLLM(LLM):
         """Concrete implementation for testing abstract base class."""
 
-        async def get_response(self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0):
+        async def _get_response_impl(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            extra_headers=None,
+        ):
             raise NotImplementedError()
 
-        async def get_response_stream(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0
+        async def _get_response_stream_impl(
+            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            extra_headers=None,
         ):
             raise NotImplementedError()
 
@@ -386,3 +398,173 @@ class TestLLMStreamResponse:
         assert "exception" in error_args
         assert isinstance(error_args["exception"], RuntimeError)
         assert str(error_args["exception"]) == "stream failed"
+
+
+class _RecordingLLM(LLM):
+    """Test double that returns a canned LLMResponse and records prompts."""
+
+    def __init__(self, content: str = "response", **kwargs):
+        super().__init__(
+            provider="test", model="test-model", input_cost=1.0, output_cost=2.0,
+            **kwargs,
+        )
+        self.canned_content = content
+        self.calls: list[str] = []
+        self.schema_calls: list[str] = []
+
+    async def _get_response_impl(
+        self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+        extra_headers=None,
+    ):
+        self.calls.append(user_prompt)
+        return LLMResponse(
+            content=self.canned_content,
+            input_tokens=10, output_tokens=20, cached_tokens=0,
+            input_cost=0.01, output_cost=0.02, total_cost=0.03,
+            response_time=0.1,
+        )
+
+    async def _get_response_stream_impl(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    async def _get_json_schema_response(
+        self, user_prompt, response_schema, system_prompt=None,
+        schema_name="Response", schema_description=None,
+        temperature=0.3, top_p=1.0, extra_headers=None,
+    ):
+        self.schema_calls.append(user_prompt)
+        return LLMResponse(
+            content=self.canned_content,
+            input_tokens=10, output_tokens=20, cached_tokens=0,
+            input_cost=0.01, output_cost=0.02, total_cost=0.03,
+            response_time=0.1,
+        )
+
+
+class TestLLMWithoutHooks:
+    """Regression guard: an LLM with no hook_pipeline behaves identically to today."""
+
+    @pytest.mark.asyncio
+    async def test_get_response_passes_through(self):
+        llm = _RecordingLLM(content="hello")
+        response = await llm.get_response("prompt")
+        assert response.content == "hello"
+        assert response.input_tokens == 10
+        assert llm.calls == ["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_get_json_schema_response_passes_through(self):
+        llm = _RecordingLLM(content='{"name":"x","population":1}')
+        response = await llm.get_json_schema_response(
+            user_prompt="prompt", response_schema=COUNTRY_SCHEMA,
+        )
+        assert response.content == '{"name":"x","population":1}'
+        assert llm.schema_calls == ["prompt"]
+
+
+class TestLLMWithHooks:
+    """Hooks attached to the LLM base class wrap text-producing calls."""
+
+    @pytest.mark.asyncio
+    async def test_redact_in_after_replaces_content_preserving_usage(self):
+        from majordomo_llm import HookOutcome, HookPipeline
+
+        class Hook:
+            name = "redactor"
+
+            async def before_call(self, prompt, ctx):
+                return HookOutcome.pass_through(self.name)
+
+            async def after_call(self, prompt, response, ctx):
+                return HookOutcome.redact(self.name, "REDACTED", "test")
+
+        pipeline = HookPipeline([Hook()])
+        llm = _RecordingLLM(content="secret stuff", hook_pipeline=pipeline)
+        response = await llm.get_response("prompt")
+        assert response.content == "REDACTED"
+        # usage preserved
+        assert response.input_tokens == 10
+        assert response.output_tokens == 20
+        assert response.total_cost == 0.03
+
+    @pytest.mark.asyncio
+    async def test_block_in_before_prevents_impl_call(self):
+        from majordomo_llm import HookBlocked, HookOutcome, HookPipeline
+
+        class Hook:
+            name = "blocker"
+
+            async def before_call(self, prompt, ctx):
+                return HookOutcome.block(self.name, "no")
+
+            async def after_call(self, prompt, response, ctx):
+                return HookOutcome.pass_through(self.name)
+
+        pipeline = HookPipeline([Hook()])
+        llm = _RecordingLLM(hook_pipeline=pipeline)
+        with pytest.raises(HookBlocked):
+            await llm.get_response("prompt")
+        assert llm.calls == []
+
+    @pytest.mark.asyncio
+    async def test_caller_metadata_propagates_to_hook(self):
+        from majordomo_llm import HookContext, HookOutcome, HookPipeline
+
+        seen: list[HookContext] = []
+
+        class Hook:
+            name = "spy"
+
+            async def before_call(self, prompt, ctx):
+                seen.append(ctx)
+                return HookOutcome.pass_through(self.name)
+
+            async def after_call(self, prompt, response, ctx):
+                return HookOutcome.pass_through(self.name)
+
+        pipeline = HookPipeline([Hook()])
+        llm = _RecordingLLM(hook_pipeline=pipeline)
+        await llm.get_response("prompt", caller_metadata={"feature": "drafting"})
+        assert seen[0].caller_metadata == {"feature": "drafting"}
+
+    @pytest.mark.asyncio
+    async def test_get_json_response_runs_hooks_through_get_response(self):
+        from majordomo_llm import HookOutcome, HookPipeline
+
+        class Hook:
+            name = "rewriter"
+
+            async def before_call(self, prompt, ctx):
+                return HookOutcome.pass_through(self.name)
+
+            async def after_call(self, prompt, response, ctx):
+                return HookOutcome.redact(self.name, '{"final": true}', "rewrite")
+
+        pipeline = HookPipeline([Hook()])
+        llm = _RecordingLLM(content='{"initial": true}', hook_pipeline=pipeline)
+        response = await llm.get_json_response("prompt")
+        assert response.content == {"final": True}
+
+    @pytest.mark.asyncio
+    async def test_get_json_schema_response_runs_hooks(self):
+        from majordomo_llm import HookOutcome, HookPipeline
+
+        class Hook:
+            name = "rewriter"
+
+            async def before_call(self, prompt, ctx):
+                return HookOutcome.pass_through(self.name)
+
+            async def after_call(self, prompt, response, ctx):
+                return HookOutcome.redact(
+                    self.name, '{"name":"y","population":2}', "rewrite"
+                )
+
+        pipeline = HookPipeline([Hook()])
+        llm = _RecordingLLM(
+            content='{"name":"x","population":1}', hook_pipeline=pipeline,
+        )
+        response = await llm.get_json_schema_response(
+            user_prompt="prompt", response_schema=COUNTRY_SCHEMA,
+        )
+        assert response.content == '{"name":"y","population":2}'

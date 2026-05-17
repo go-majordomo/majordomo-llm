@@ -29,8 +29,11 @@ from shared import get_available_providers
 from majordomo_llm import get_llm_instance
 
 
-async def demo_streaming(provider: str, model: str, prompt: str) -> None:
-    """Stream a response and print chunks as they arrive."""
+async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
+    """Stream a response and print chunks as they arrive.
+
+    Returns True on success, False if the provider raised an error.
+    """
     llm = get_llm_instance(provider, model)
 
     print(f"\n  [{provider}/{model}]")
@@ -43,29 +46,42 @@ async def demo_streaming(provider: str, model: str, prompt: str) -> None:
         )
 
         first_chunk_time = None
+        chunk_count = 0
         start = time.time()
 
         async for chunk in stream:
             if first_chunk_time is None:
                 first_chunk_time = time.time() - start
+            chunk_count += 1
             print(chunk, end="", flush=True)
 
         print()
 
         usage = stream.usage
+        assert usage is not None, "usage should be finalized after iteration"
         ttfc = first_chunk_time or 0
         print(f"  Time to first chunk: {ttfc:.2f}s | "
               f"Total: {usage.response_time:.2f}s")
         print(f"  Tokens: {usage.input_tokens} in / "
               f"{usage.output_tokens} out | "
               f"Cost: ${usage.total_cost:.6f}")
+        if chunk_count <= 1:
+            print(
+                f"  Warning: only {chunk_count} chunk(s) — provider may have "
+                "buffered the response instead of streaming."
+            )
+        return True
 
     except Exception as e:
         print(f"\n  Error: {e}")
+        return False
 
 
-async def demo_collect(provider: str, model: str) -> None:
-    """Demonstrate .collect() to get a full LLMResponse from a stream."""
+async def demo_collect(provider: str, model: str) -> bool:
+    """Demonstrate .collect() to get a full LLMResponse from a stream.
+
+    Returns True on success, False if the provider raised an error.
+    """
     llm = get_llm_instance(provider, model)
 
     print(f"\n  [{provider}/{model}]")
@@ -81,10 +97,13 @@ async def demo_collect(provider: str, model: str) -> None:
         print(f"  Content: {response.content}")
         print(f"  Tokens: {response.input_tokens} in / "
               f"{response.output_tokens} out | "
-              f"Cost: ${response.total_cost:.6f}")
+              f"Cost: ${response.total_cost:.6f} | "
+              f"Time: {response.response_time:.2f}s")
+        return True
 
     except Exception as e:
         print(f"  Error: {e}")
+        return False
 
 
 async def main() -> None:
@@ -102,16 +121,21 @@ async def main() -> None:
 
     print(f"Available providers: {', '.join(p[0] for p in available_providers)}")
 
+    streaming_failures = 0
+    collect_failures = 0
+
     # Demo 1: Streaming with real-time output
     print("\n" + "-" * 80)
     print("Demo 1: Streaming with real-time output")
     print("-" * 80)
 
     for provider, model in available_providers:
-        await demo_streaming(
+        ok = await demo_streaming(
             provider, model,
             "Explain why the sky is blue.",
         )
+        if not ok:
+            streaming_failures += 1
 
     # Demo 2: Collect stream into LLMResponse
     print("\n" + "-" * 80)
@@ -119,10 +143,16 @@ async def main() -> None:
     print("-" * 80)
 
     for provider, model in available_providers:
-        await demo_collect(provider, model)
+        ok = await demo_collect(provider, model)
+        if not ok:
+            collect_failures += 1
 
     print("\n" + "=" * 80)
-    print("Done!")
+    total = len(available_providers)
+    print(
+        f"Done! Streaming: {total - streaming_failures}/{total} succeeded, "
+        f"Collect: {total - collect_failures}/{total} succeeded."
+    )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import json
 import os
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar, cast
 
@@ -18,6 +18,7 @@ from majordomo_llm.exceptions import (
     ResponseParsingError,
     StructuredOutputUnsupported,
 )
+from majordomo_llm.hooks.pipeline import HookPipeline
 from majordomo_llm.retry import retry_provider_call
 
 
@@ -456,6 +457,7 @@ class LLM(ABC):
         api_key_alias: str | None = None,
         base_url: str | None = None,
         default_headers: dict[str, str] | None = None,
+        hook_pipeline: HookPipeline | None = None,
     ) -> None:
         """Initialize the LLM instance.
 
@@ -470,6 +472,9 @@ class LLM(ABC):
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
             default_headers: Optional headers sent with every request.
+            hook_pipeline: Optional :class:`HookPipeline` that wraps every
+                text-producing call. ``get_response_stream`` does not run
+                hooks; streaming-chunk interception is deferred.
         """
         self.provider = provider
         self.model = model
@@ -481,6 +486,7 @@ class LLM(ABC):
         self.api_key_alias = api_key_alias
         self.base_url = base_url
         self.default_headers = default_headers
+        self.hook_pipeline = hook_pipeline
         self.deprecation_warning: str | None = None
         self.requested_model: str | None = None
 
@@ -509,7 +515,7 @@ class LLM(ABC):
         return input_cost, output_cost, input_cost + output_cost
 
     @abstractmethod
-    async def get_response(
+    async def _get_response_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
@@ -517,25 +523,15 @@ class LLM(ABC):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Get a plain text response from the LLM.
+        """Provider-specific implementation of ``get_response``.
 
-        Args:
-            user_prompt: The user's input prompt.
-            system_prompt: Optional system prompt to set context/behavior.
-            temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
-            top_p: Nucleus sampling parameter (0.0-1.0).
-            extra_headers: Optional per-request headers merged with default_headers.
-
-        Returns:
-            LLMResponse containing the text content and usage metrics.
-
-        Raises:
-            Exception: If the API request fails after retries.
+        Providers apply ``@retry_provider_call`` here. The public
+        :meth:`get_response` wraps this with the optional hook pipeline.
         """
         raise NotImplementedError()
 
     @abstractmethod
-    async def get_response_stream(
+    async def _get_response_stream_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
@@ -543,7 +539,23 @@ class LLM(ABC):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
-        """Get a streaming text response from the LLM.
+        """Provider-specific implementation of ``get_response_stream``."""
+        raise NotImplementedError()
+
+    async def get_response(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """Get a plain text response from the LLM.
+
+        Runs the optional :attr:`hook_pipeline` around the provider call.
+        Hooks see the prompt before the call and the response text after.
 
         Args:
             user_prompt: The user's input prompt.
@@ -551,16 +563,84 @@ class LLM(ABC):
             temperature: Sampling temperature (0.0-2.0). Lower is more deterministic.
             top_p: Nucleus sampling parameter (0.0-1.0).
             extra_headers: Optional per-request headers merged with default_headers.
+            caller_metadata: Free-form dict forwarded to every hook via
+                :class:`HookContext`. Unused when no pipeline is configured.
 
         Returns:
-            LLMStreamResponse that yields text chunks and provides usage after completion.
+            LLMResponse containing the text content and usage metrics.
 
         Raises:
-            ProviderError: If the API request fails.
+            HookBlocked: If a hook in the pipeline blocks the call.
+            Exception: If the API request fails after retries.
         """
-        raise NotImplementedError()
+        async def impl(prompt: str) -> LLMResponse:
+            return await self._get_response_impl(
+                prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+            )
 
-    @retry_provider_call
+        return await self._run_hooks_returning_response(
+            user_prompt, caller_metadata, impl
+        )
+
+    async def get_response_stream(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
+    ) -> LLMStreamResponse:
+        """Get a streaming text response from the LLM.
+
+        Hooks do not run on streaming responses; ``caller_metadata`` is
+        accepted for API symmetry and ignored.
+        """
+        del caller_metadata
+        return await self._get_response_stream_impl(
+            user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+        )
+
+    async def _run_hooks_returning_response(
+        self,
+        prompt: str,
+        caller_metadata: dict[str, Any] | None,
+        impl: Callable[[str], Awaitable[LLMResponse]],
+    ) -> LLMResponse:
+        """Run the configured hook pipeline around an LLMResponse-returning call.
+
+        Hooks operate on text. We capture the underlying ``LLMResponse`` so
+        usage metrics survive even when the pipeline rewrites the content.
+        """
+        if self.hook_pipeline is None:
+            return await impl(prompt)
+
+        captured: LLMResponse | None = None
+
+        async def call(modified_prompt: str) -> str:
+            nonlocal captured
+            captured = await impl(modified_prompt)
+            return captured.content
+
+        final_text = await self.hook_pipeline.run(
+            prompt, call, caller_metadata=caller_metadata
+        )
+        assert captured is not None
+        if final_text == captured.content:
+            return captured
+        return LLMResponse(
+            content=final_text,
+            input_tokens=captured.input_tokens,
+            output_tokens=captured.output_tokens,
+            cached_tokens=captured.cached_tokens,
+            input_cost=captured.input_cost,
+            output_cost=captured.output_cost,
+            total_cost=captured.total_cost,
+            response_time=captured.response_time,
+            deprecation_warning=captured.deprecation_warning,
+        )
+
     async def get_json_response(
         self,
         user_prompt: str,
@@ -568,6 +648,8 @@ class LLM(ABC):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
     ) -> LLMJSONResponse:
         """Get a JSON response from the LLM.
 
@@ -584,11 +666,17 @@ class LLM(ABC):
             LLMJSONResponse containing the parsed JSON dict and usage metrics.
 
         Raises:
+            HookBlocked: If a hook in the pipeline blocks the call.
             ResponseParsingError: If the response cannot be parsed as JSON.
             Exception: If the API request fails after retries.
         """
         response = await self.get_response(
-            user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
+            user_prompt,
+            system_prompt,
+            temperature,
+            top_p,
+            extra_headers=extra_headers,
+            caller_metadata=caller_metadata,
         )
         # Strip markdown code fencing if present
         content = response.content.replace("```json", "").replace("```", "").strip()
@@ -618,6 +706,8 @@ class LLM(ABC):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
     ) -> LLMStructuredResponse:
         """Get a structured response validated against a Pydantic model.
 
@@ -661,6 +751,7 @@ class LLM(ABC):
             temperature=temperature,
             top_p=top_p,
             extra_headers=extra_headers,
+            caller_metadata=caller_metadata,
         )
         parsed_content = response_model.model_validate_json(response.content)
 
@@ -675,7 +766,6 @@ class LLM(ABC):
             response_time=response.response_time,
         )
 
-    @retry_provider_call
     async def get_json_schema_response(
         self,
         user_prompt: str,
@@ -686,9 +776,15 @@ class LLM(ABC):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         """Get a structured JSON response validated against a raw JSON schema.
+
+        Runs the optional :attr:`hook_pipeline` around the provider call.
+        Hooks see the raw provider JSON text in ``after_call`` before
+        downstream pydantic/JSON-schema parsing.
 
         Args:
             user_prompt: The user's input prompt.
@@ -699,12 +795,49 @@ class LLM(ABC):
             temperature: Sampling temperature (0.0-2.0).
             top_p: Nucleus sampling parameter (0.0-1.0).
             extra_headers: Optional per-request headers merged with default_headers.
+            caller_metadata: Free-form dict forwarded to every hook.
             **kwargs: Reserved for future provider-specific passthrough arguments.
 
         Returns:
             LLMResponse whose content is canonical JSON with sorted keys and no extra whitespace.
+
+        Raises:
+            HookBlocked: If a hook in the pipeline blocks the call.
         """
         ensure_no_unexpected_kwargs(kwargs)
+
+        async def impl(prompt: str) -> LLMResponse:
+            return await self._get_json_schema_response_retried(
+                user_prompt=prompt,
+                response_schema=response_schema,
+                system_prompt=system_prompt,
+                schema_name=schema_name,
+                schema_description=schema_description,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+            )
+
+        return await self._run_hooks_returning_response(
+            user_prompt, caller_metadata, impl
+        )
+
+    @retry_provider_call
+    async def _get_json_schema_response_retried(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None = None,
+        schema_name: str = "Response",
+        schema_description: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+    ) -> LLMResponse:
+        """Retry-wrapped delegate to the provider override.
+
+        Sits inside the hook boundary so retries do not re-fire hooks.
+        """
         return await self._get_json_schema_response(
             user_prompt=user_prompt,
             response_schema=response_schema,

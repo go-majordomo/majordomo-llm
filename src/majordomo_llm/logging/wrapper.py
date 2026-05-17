@@ -66,6 +66,34 @@ class LoggingLLM(LLM):
         self._storage = storage
         self._pending_tasks: set[asyncio.Task[None]] = set()
 
+    async def _get_response_impl(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+    ) -> LLMResponse:
+        """Unused — :meth:`get_response` overrides the public method directly."""
+        raise NotImplementedError(
+            "LoggingLLM logs at the public method layer; _get_response_impl "
+            "is never called"
+        )
+
+    async def _get_response_stream_impl(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.3,
+        top_p: float = 1.0,
+        extra_headers: dict[str, str] | None = None,
+    ) -> LLMStreamResponse:
+        """Unused — :meth:`get_response_stream` overrides the public method directly."""
+        raise NotImplementedError(
+            "LoggingLLM logs at the public method layer; _get_response_stream_impl "
+            "is never called"
+        )
+
     async def _log_request(
         self,
         request_body: dict[str, Any],
@@ -134,6 +162,8 @@ class LoggingLLM(LLM):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from the LLM with logging."""
         request_body = {
@@ -147,6 +177,7 @@ class LoggingLLM(LLM):
             response = await self._llm.get_response(
                 user_prompt, system_prompt, temperature, top_p,
                 extra_headers=extra_headers,
+                caller_metadata=caller_metadata,
             )
             self._fire_and_forget(
                 request_body=request_body,
@@ -173,8 +204,11 @@ class LoggingLLM(LLM):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from the LLM with logging."""
+        del caller_metadata
         request_body = {
             "user_prompt": user_prompt,
             "system_prompt": system_prompt,
@@ -226,6 +260,8 @@ class LoggingLLM(LLM):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
     ) -> LLMJSONResponse:
         """Get a JSON response from the LLM with logging."""
         request_body = {
@@ -239,6 +275,7 @@ class LoggingLLM(LLM):
             response = await self._llm.get_json_response(
                 user_prompt, system_prompt, temperature, top_p,
                 extra_headers=extra_headers,
+                caller_metadata=caller_metadata,
             )
             self._fire_and_forget(
                 request_body=request_body,
@@ -266,6 +303,8 @@ class LoggingLLM(LLM):
         temperature: float = 0.3,
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
+        *,
+        caller_metadata: dict[str, Any] | None = None,
     ) -> LLMStructuredResponse:
         """Get a structured response validated against a Pydantic model with logging."""
         request_body = {
@@ -280,6 +319,7 @@ class LoggingLLM(LLM):
             response = await self._llm.get_structured_json_response(
                 response_model, user_prompt, system_prompt, temperature, top_p,
                 extra_headers=extra_headers,
+                caller_metadata=caller_metadata,
             )
             self._fire_and_forget(
                 request_body=request_body,

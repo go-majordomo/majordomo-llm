@@ -97,7 +97,7 @@ class Cohere(LLM):
         return RequestOptions(additional_headers=merged)
 
     @retry_provider_call
-    async def get_response(
+    async def _get_response_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
@@ -166,7 +166,7 @@ class Cohere(LLM):
             deprecation_warning=self.deprecation_warning,
         )
 
-    async def get_response_stream(
+    async def _get_response_stream_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,

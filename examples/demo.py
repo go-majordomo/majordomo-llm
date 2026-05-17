@@ -23,7 +23,7 @@ import asyncio
 import json
 import traceback
 
-from shared import EXAMPLES_DIR, get_available_providers, print_summary
+from shared import EXAMPLES_DIR, clear_database, get_available_providers, print_summary
 
 from majordomo_llm import get_llm_instance
 from majordomo_llm.logging import FileStorageAdapter, LoggingLLM, SqliteAdapter
@@ -99,6 +99,10 @@ async def main() -> None:
     for p in prompts:
         print(f"  - [{p['category']}] {p['name']}")
     print()
+
+    # Reset previous run's database and stored bodies so the summary
+    # reflects only this run.
+    await clear_database(DB_PATH, STORAGE_DIR)
 
     # Initialize logging
     print(f"Logging to: {DB_PATH}")

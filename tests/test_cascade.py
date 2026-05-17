@@ -224,46 +224,71 @@ class TestLLMCascadeGetJSONResponse:
         )
 
     async def test_returns_json_response_from_primary(self, cascade):
-        """Should return JSON response from first provider."""
-        mock_response = MagicMock()
-        mock_response.content = {"key": "value"}
+        """Should return JSON response from first provider.
 
-        cascade.llms[0].get_json_response = AsyncMock(return_value=mock_response)
+        Cascade dispatches at the text layer; base parses JSON at the
+        cascade boundary, so mocks attach to ``get_response``.
+        """
+        text_response = MagicMock()
+        text_response.content = '{"key": "value"}'
+        text_response.input_tokens = 10
+        text_response.output_tokens = 5
+        text_response.cached_tokens = 0
+        text_response.input_cost = 0.0
+        text_response.output_cost = 0.0
+        text_response.total_cost = 0.0
+        text_response.response_time = 0.0
+
+        cascade.llms[0].get_response = AsyncMock(return_value=text_response)
 
         response = await cascade.get_json_response("Return JSON")
 
         assert response.content == {"key": "value"}
 
     async def test_falls_back_on_json_response_failure(self, cascade):
-        """Should fall back when first provider fails for JSON response."""
-        mock_response = MagicMock()
-        mock_response.content = {"fallback": "data"}
+        """Should fall back when first provider fails."""
+        text_response = MagicMock()
+        text_response.content = '{"fallback": "data"}'
+        text_response.input_tokens = 10
+        text_response.output_tokens = 5
+        text_response.cached_tokens = 0
+        text_response.input_cost = 0.0
+        text_response.output_cost = 0.0
+        text_response.total_cost = 0.0
+        text_response.response_time = 0.0
 
-        cascade.llms[0].get_json_response = AsyncMock(
+        cascade.llms[0].get_response = AsyncMock(
             side_effect=ProviderError("Anthropic down", provider="anthropic")
         )
-        cascade.llms[1].get_json_response = AsyncMock(return_value=mock_response)
+        cascade.llms[1].get_response = AsyncMock(return_value=text_response)
 
         response = await cascade.get_json_response("Return JSON")
 
         assert response.content == {"fallback": "data"}
 
     async def test_falls_back_when_json_retry_error_wraps_provider_error(self, cascade):
-        """Should fall back when JSON provider retries exhaust with ProviderError."""
-        mock_response = MagicMock()
-        mock_response.content = {"fallback": "data"}
+        """Should fall back when provider retries exhaust with ProviderError."""
+        text_response = MagicMock()
+        text_response.content = '{"fallback": "data"}'
+        text_response.input_tokens = 10
+        text_response.output_tokens = 5
+        text_response.cached_tokens = 0
+        text_response.input_cost = 0.0
+        text_response.output_cost = 0.0
+        text_response.total_cost = 0.0
+        text_response.response_time = 0.0
         provider_error = ProviderError("Anthropic down", provider="anthropic")
 
-        cascade.llms[0].get_json_response = AsyncMock(
+        cascade.llms[0].get_response = AsyncMock(
             side_effect=_retry_error_with_exception(provider_error)
         )
-        cascade.llms[1].get_json_response = AsyncMock(return_value=mock_response)
+        cascade.llms[1].get_response = AsyncMock(return_value=text_response)
 
         response = await cascade.get_json_response("Return JSON")
 
         assert response.content == {"fallback": "data"}
-        cascade.llms[0].get_json_response.assert_called_once()
-        cascade.llms[1].get_json_response.assert_called_once()
+        cascade.llms[0].get_response.assert_called_once()
+        cascade.llms[1].get_response.assert_called_once()
 
 
 class TestLLMCascadeStructuredResponse:
@@ -467,3 +492,89 @@ class TestLLMCascadeGetResponseStream:
             await cascade.get_response_stream("Test prompt")
 
         assert "All providers in cascade failed" in str(exc_info.value)
+
+
+class TestLLMCascadeHooks:
+    """Hooks attached to LLMCascade fire once at the cascade boundary."""
+
+    @pytest.fixture
+    def cascade_with_hooks(self, mock_all_clients):
+        from majordomo_llm import HookOutcome, HookPipeline
+
+        self.before_calls = 0
+        self.after_calls = 0
+        outer = self
+
+        class CountingHook:
+            name = "counter"
+
+            async def before_call(self_inner, prompt, ctx):
+                outer.before_calls += 1
+                return HookOutcome.pass_through(self_inner.name)
+
+            async def after_call(self_inner, prompt, response, ctx):
+                outer.after_calls += 1
+                return HookOutcome.pass_through(self_inner.name)
+
+        pipeline = HookPipeline([CountingHook()])
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ],
+            hook_pipeline=pipeline,
+        )
+
+    async def test_hooks_fire_once_across_failover(self, cascade_with_hooks):
+        cascade = cascade_with_hooks
+        text_response = MagicMock()
+        text_response.content = "ok"
+        text_response.input_tokens = 1
+        text_response.output_tokens = 1
+        text_response.cached_tokens = 0
+        text_response.input_cost = 0.0
+        text_response.output_cost = 0.0
+        text_response.total_cost = 0.0
+        text_response.response_time = 0.0
+        text_response.deprecation_warning = None
+
+        cascade.llms[0].get_response = AsyncMock(
+            side_effect=ProviderError("primary down", provider="anthropic")
+        )
+        cascade.llms[1].get_response = AsyncMock(return_value=text_response)
+
+        await cascade.get_response("prompt")
+
+        # Hooks fire at the cascade boundary, not per failover attempt
+        assert self.before_calls == 1
+        assert self.after_calls == 1
+
+    async def test_block_at_cascade_prevents_provider_calls(
+        self, mock_all_clients
+    ):
+        from majordomo_llm import HookBlocked, HookOutcome, HookPipeline
+
+        class Blocker:
+            name = "blocker"
+
+            async def before_call(self, prompt, ctx):
+                return HookOutcome.block(self.name, "no")
+
+            async def after_call(self, prompt, response, ctx):
+                return HookOutcome.pass_through(self.name)
+
+        cascade = LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ],
+            hook_pipeline=HookPipeline([Blocker()]),
+        )
+        cascade.llms[0].get_response = AsyncMock()
+        cascade.llms[1].get_response = AsyncMock()
+
+        with pytest.raises(HookBlocked):
+            await cascade.get_response("prompt")
+
+        cascade.llms[0].get_response.assert_not_called()
+        cascade.llms[1].get_response.assert_not_called()

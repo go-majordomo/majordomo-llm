@@ -42,6 +42,16 @@ from majordomo_llm.factory import (
     register_alias,
     unregister_alias,
 )
+from majordomo_llm.hooks import (
+    HookBlocked,
+    HookContext,
+    HookOutcome,
+    HookPipeline,
+    HookVerdict,
+    LLMHook,
+    LLMJudgeHook,
+    RegexHook,
+)
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.bedrock import Bedrock
 from majordomo_llm.providers.cohere import Cohere
@@ -49,7 +59,7 @@ from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     # Base classes and types
@@ -62,9 +72,18 @@ __all__ = [
     # Exceptions
     "MajordomoError",
     "ConfigurationError",
+    "HookBlocked",
     "ProviderError",
     "ResponseParsingError",
     "StructuredOutputUnsupported",
+    # Hooks
+    "HookContext",
+    "HookOutcome",
+    "HookPipeline",
+    "HookVerdict",
+    "LLMHook",
+    "LLMJudgeHook",
+    "RegexHook",
     # Factory functions
     "get_llm_instance",
     "get_all_llm_instances",
