@@ -9,13 +9,30 @@ from dotenv import load_dotenv
 # Load API keys from .env file
 load_dotenv()
 
-# One model per provider with their API key environment variable
-PROVIDERS = [
-    ("openai", "gpt-4.1-mini", "OPENAI_API_KEY"),
-    ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
-    ("gemini", "gemini-2.5-flash", "GEMINI_API_KEY"),
-    ("deepseek", "deepseek-chat", "DEEPSEEK_API_KEY"),
-    ("cohere", "command-r-08-2024", "CO_API_KEY"),
+# Provider/model pairs with their required environment variables.
+# Each entry is (provider, model, (env_var, ...)) — all listed env vars must
+# be set for the entry to be selected.
+PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
+    # Native provider SDKs — using the latest fast/small model from each.
+    ("openai", "gpt-5.4-mini", ("OPENAI_API_KEY",)),
+    ("anthropic", "claude-haiku-4-5-20251001", ("ANTHROPIC_API_KEY",)),
+    ("gemini", "gemini-3-flash-preview", ("GEMINI_API_KEY",)),
+    ("deepseek", "deepseek-v4-flash", ("DEEPSEEK_API_KEY",)),
+    ("cohere", "command-a-03-2025", ("CO_API_KEY",)),
+    # Amazon Bedrock — one model per upstream provider.
+    (
+        "bedrock",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"),
+    ),
+    ("bedrock", "moonshotai.kimi-k2.5", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
+    ("bedrock", "nvidia.nemotron-nano-12b-v2", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
+    (
+        "bedrock",
+        "us.meta.llama4-scout-17b-instruct-v1:0",
+        ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"),
+    ),
+    ("bedrock", "deepseek.v3.2", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
 ]
 
 # Base directory for examples
@@ -26,20 +43,22 @@ def get_available_providers() -> list[tuple[str, str]]:
     """Get all providers with API keys configured.
 
     Returns:
-        List of (provider, model) tuples for providers with valid API keys.
+        List of (provider, model) tuples for providers whose required
+        environment variables are all set.
     """
     available = []
     missing = []
-    for provider, model, env_var in PROVIDERS:
-        if os.environ.get(env_var):
+    for provider, model, env_vars in PROVIDERS:
+        unset = [var for var in env_vars if not os.environ.get(var)]
+        if not unset:
             available.append((provider, model))
         else:
-            missing.append((provider, env_var))
+            missing.append((provider, model, unset))
 
     if missing:
-        print("Missing API keys (these providers will be skipped):")
-        for provider, env_var in missing:
-            print(f"  - {provider}: set {env_var}")
+        print("Missing environment variables (these entries will be skipped):")
+        for provider, model, unset in missing:
+            print(f"  - {provider}:{model} requires {', '.join(unset)}")
         print()
 
     return available

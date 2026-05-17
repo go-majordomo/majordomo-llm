@@ -29,7 +29,7 @@ uv run ruff check --fix src/majordomo_llm
 
 ## Architecture
 
-Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Cohere) with cost tracking and structured output support.
+Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Cohere, Amazon Bedrock) with cost tracking and structured output support.
 
 ### Core Components
 
@@ -72,3 +72,5 @@ Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, 
 - `GEMINI_API_KEY` - Google Gemini API key
 - `DEEPSEEK_API_KEY` - DeepSeek API key
 - `CO_API_KEY` - Cohere API key
+- `AWS_BEARER_TOKEN_BEDROCK` - Amazon Bedrock API key (long-term bearer token)
+- `AWS_REGION` (or `AWS_DEFAULT_REGION`) - AWS region for Bedrock requests (e.g., `us-east-1`)

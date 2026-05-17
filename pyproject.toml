@@ -1,6 +1,6 @@
 [project]
 name = "majordomo-llm"
-version = "0.6.0"
+version = "0.7.0"
 description = "Unified Python interface for multiple LLM providers with cost tracking"
 readme = "README.md"
 license = {text = "MIT"}
@@ -33,6 +33,7 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "aioboto3>=13.0.0",
     "anthropic>=0.76.0",
     "cohere>=5.1.8",
     "google-genai>=1.60.0",
@@ -55,7 +56,6 @@ Changelog = "https://github.com/superset-studio/majordomo-llm/blob/main/CHANGELO
 logging = [
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
-    "aioboto3>=13.0.0",
     "aiosqlite>=0.20.0",
     "aiofiles>=24.0.0",
 ]
@@ -69,7 +69,6 @@ dev = [
     # Include logging deps for development
     "asyncpg>=0.29.0",
     "aiomysql>=0.2.0",
-    "aioboto3>=13.0.0",
     "aiosqlite>=0.20.0",
     "aiofiles>=24.0.0",
 ]
@@ -92,7 +91,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["asyncpg", "aiomysql", "aioboto3", "aiosqlite", "aiofiles"]
+module = ["asyncpg", "aiomysql", "aioboto3", "aiosqlite", "aiofiles", "botocore", "botocore.exceptions"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

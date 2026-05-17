@@ -25,6 +25,8 @@ def mock_all_clients():
         "GEMINI_API_KEY": "test-key",
         "DEEPSEEK_API_KEY": "test-key",
         "CO_API_KEY": "test-key",
+        "AWS_BEARER_TOKEN_BEDROCK": "test-key",
+        "AWS_REGION": "us-east-1",
     }
     with (
         patch.dict("os.environ", env_vars),
@@ -74,7 +76,7 @@ class TestGetLLMInstance:
         assert llm.input_cost == 0.435
         assert llm.output_cost == 0.87
         assert llm.reasoning_effort == "medium"
-        assert llm.thinking == "disabled"
+        assert llm.thinking is None
 
     def test_sets_correct_costs_from_config(self, mock_all_clients):
         """Should set input/output costs from LLM_CONFIG."""
@@ -160,7 +162,7 @@ class TestGetAllLLMInstances:
         instances = list(get_all_llm_instances())
 
         providers = {llm.provider for llm in instances}
-        assert providers == {"openai", "anthropic", "gemini", "deepseek", "cohere"}
+        assert providers == {"openai", "anthropic", "gemini", "deepseek", "cohere", "bedrock"}
 
 
 class TestLLMConfig:

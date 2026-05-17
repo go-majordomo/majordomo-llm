@@ -1030,9 +1030,10 @@ wheels = [
 
 [[package]]
 name = "majordomo-llm"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aioboto3" },
     { name = "anthropic" },
     { name = "cohere" },
     { name = "google-genai" },
@@ -1046,7 +1047,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "aioboto3" },
     { name = "aiofiles" },
     { name = "aiomysql" },
     { name = "aiosqlite" },
@@ -1059,7 +1059,6 @@ dev = [
     { name = "ruff" },
 ]
 logging = [
-    { name = "aioboto3" },
     { name = "aiofiles" },
     { name = "aiomysql" },
     { name = "aiosqlite" },
@@ -1076,8 +1075,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aioboto3", marker = "extra == 'dev'", specifier = ">=13.0.0" },
-    { name = "aioboto3", marker = "extra == 'logging'", specifier = ">=13.0.0" },
+    { name = "aioboto3", specifier = ">=13.0.0" },
     { name = "aiofiles", marker = "extra == 'dev'", specifier = ">=24.0.0" },
     { name = "aiofiles", marker = "extra == 'logging'", specifier = ">=24.0.0" },
     { name = "aiomysql", marker = "extra == 'dev'", specifier = ">=0.2.0" },

@@ -12,6 +12,7 @@ import yaml
 from majordomo_llm.base import LLM
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers.anthropic import Anthropic
+from majordomo_llm.providers.bedrock import Bedrock
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
@@ -134,6 +135,7 @@ def get_llm_instance(
     api_key: str | None = None,
     base_url: str | None = None,
     default_headers: dict[str, str] | None = None,
+    region: str | None = None,
 ) -> LLM:
     """Create an LLM instance for the specified provider and model.
 
@@ -148,6 +150,9 @@ def get_llm_instance(
             to its respective environment variable.
         base_url: Optional custom base URL for routing through a proxy.
         default_headers: Optional headers sent with every request.
+        region: AWS region for the Bedrock provider (e.g., "us-east-1").
+            Ignored by other providers. Defaults to ``AWS_REGION`` /
+            ``AWS_DEFAULT_REGION`` env vars when not specified.
 
     Returns:
         An LLM instance configured for the specified provider and model.
@@ -195,6 +200,7 @@ def get_llm_instance(
         "gemini": Gemini,
         "deepseek": DeepSeek,
         "cohere": Cohere,
+        "bedrock": Bedrock,
     }
     cls = _PROVIDER_CLASSES.get(provider)
     if cls is None:
@@ -206,6 +212,8 @@ def get_llm_instance(
             "reasoning_effort": model_attributes.get("reasoning_effort"),
             "thinking": model_attributes.get("thinking"),
         }
+    elif provider == "bedrock":
+        provider_kwargs = {"region": region}
 
     llm = cls(
         model=model,

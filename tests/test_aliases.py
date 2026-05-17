@@ -1,15 +1,16 @@
 """Tests for the alias feature."""
 
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from majordomo_llm import (
+    LLM_CONFIG,
+    clear_aliases,
+    get_aliases,
     get_llm_by_alias,
     register_alias,
     unregister_alias,
-    clear_aliases,
-    get_aliases,
-    LLM_CONFIG,
 )
 from majordomo_llm.cascade import LLMCascade
 from majordomo_llm.exceptions import ConfigurationError

@@ -43,12 +43,13 @@ from majordomo_llm.factory import (
     unregister_alias,
 )
 from majordomo_llm.providers.anthropic import Anthropic
+from majordomo_llm.providers.bedrock import Bedrock
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     # Base classes and types
@@ -80,6 +81,7 @@ __all__ = [
     "LLMCascade",
     # Provider implementations
     "Anthropic",
+    "Bedrock",
     "Cohere",
     "DeepSeek",
     "Gemini",

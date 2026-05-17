@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-16
+
 ### Added
 
+- **Amazon Bedrock provider** using the Converse API. Authenticates with long-term Bedrock API keys (`AWS_BEARER_TOKEN_BEDROCK`) and an AWS region (`AWS_REGION` / `AWS_DEFAULT_REGION` or `region=` constructor/factory kwarg). Supports text responses, streaming, raw JSON-schema structured output, and Pydantic-validated structured output via Converse tool calling
+- 16 Bedrock models in `llm_config.yaml` (us-east-1 on-demand pricing): Claude 4.x family, Moonshot Kimi K2/K2.5, NVIDIA Nemotron Nano/Nano-3/Super-3, Meta Llama 4 Maverick/Scout, DeepSeek R1/v3.2
+- `aioboto3` promoted to a core dependency
 - **Deprecated model auto-replacement**: Passing a deprecated model to `get_llm_instance()` automatically resolves to the provider-recommended replacement with a logged warning
 - `deprecated_models` section in `llm_config.yaml` mapping old model IDs to replacements for OpenAI, Anthropic, and Gemini
 - `LLMResponse.deprecation_warning` field — set when a deprecated model was auto-replaced
@@ -31,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated aliases: `fast` → `claude-haiku-4-5-20251001`, `thinking` → `claude-sonnet-4-6`, `smart` → `claude-opus-4-6`, `resilient-sonnet` cascade uses `gpt-4.1` instead of `gpt-4o`
 - `Gemini.__init__()` now accepts `supports_temperature_top_p` for constructor consistency across providers
+- `get_llm_instance()` accepts a new `region` kwarg, forwarded to the Bedrock provider only
+- `examples/shared.py` `PROVIDERS` list now requires a tuple of env vars per entry and includes Bedrock entries (one per upstream model family)
+
+### Fixed
+
+- DeepSeek v4 models (`deepseek-v4-flash`, `deepseek-v4-pro`) no longer send `thinking: disabled` alongside `reasoning_effort: medium`, which the DeepSeek API rejects as mutually exclusive
 
 ## [0.3.1] - 2026-02-19
 

@@ -125,12 +125,10 @@ deepseek:
       input_cost: 0.14
       output_cost: 0.28
       reasoning_effort: medium
-      thinking: disabled
     deepseek-v4-pro:
       input_cost: 0.435
       output_cost: 0.87
       reasoning_effort: medium
-      thinking: disabled
     deepseek-chat:
       input_cost: 0.28
       output_cost: 0.42
@@ -152,6 +150,75 @@ cohere:
     command-r7b-12-2024:
       input_cost: 0.0375
       output_cost: 0.15
+
+# Amazon Bedrock (Converse API). us-east-1 on-demand pricing.
+# Model IDs use the "us." cross-region inference profile prefix when AWS
+# publishes one for the model (required for on-demand throughput on most
+# Claude models). For providers without a cross-region profile (Moonshot,
+# NVIDIA Nemotron, DeepSeek v3.2), the bare model ID is used and the call
+# is region-pinned.
+bedrock:
+  models:
+    # Anthropic on Bedrock (cross-region inference profiles)
+    us.anthropic.claude-opus-4-7:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    us.anthropic.claude-sonnet-4-6:
+      input_cost: 3.00
+      output_cost: 15.00
+      supports_temperature_top_p: false
+    us.anthropic.claude-opus-4-6-v1:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    us.anthropic.claude-opus-4-5-20251101-v1:0:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    us.anthropic.claude-haiku-4-5-20251001-v1:0:
+      input_cost: 1.00
+      output_cost: 5.00
+      supports_temperature_top_p: false
+    us.anthropic.claude-sonnet-4-5-20250929-v1:0:
+      input_cost: 3.00
+      output_cost: 15.00
+      supports_temperature_top_p: false
+    us.anthropic.claude-sonnet-4-20250514-v1:0:
+      input_cost: 3.00
+      output_cost: 15.00
+    # Moonshot (Kimi) on Bedrock — base model IDs, no cross-region profile.
+    # Note AWS uses different prefixes ("moonshot." vs "moonshotai.") per model.
+    moonshot.kimi-k2-thinking:
+      input_cost: 0.60
+      output_cost: 2.50
+    moonshotai.kimi-k2.5:
+      input_cost: 0.60
+      output_cost: 3.00
+    # NVIDIA Nemotron on Bedrock — base model IDs.
+    nvidia.nemotron-nano-12b-v2:
+      input_cost: 0.06
+      output_cost: 0.23
+    nvidia.nemotron-nano-3-30b:
+      input_cost: 0.06
+      output_cost: 0.24
+    nvidia.nemotron-super-3-120b:
+      input_cost: 0.15
+      output_cost: 0.65
+    # Meta Llama 4 on Bedrock (cross-region inference profiles)
+    us.meta.llama4-maverick-17b-instruct-v1:0:
+      input_cost: 0.24
+      output_cost: 0.97
+    us.meta.llama4-scout-17b-instruct-v1:0:
+      input_cost: 0.17
+      output_cost: 0.66
+    # DeepSeek on Bedrock (Standard tier)
+    us.deepseek.r1-v1:0:
+      input_cost: 1.35
+      output_cost: 5.40
+    deepseek.v3.2:
+      input_cost: 0.62
+      output_cost: 1.85
 
 # Deprecated model mappings
 # When a user requests a deprecated model, it is automatically replaced with

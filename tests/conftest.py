@@ -1,8 +1,8 @@
 """Shared test fixtures for majordomo-llm tests."""
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 
 # --- Anthropic Mock Fixtures ---
 
