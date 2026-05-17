@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-import aioboto3
+import aiobotocore.session
 from botocore.exceptions import BotoCoreError, ClientError
 
 from majordomo_llm.base import (
@@ -110,14 +110,14 @@ class Bedrock(LLM):
         # bedrock-runtime requests. Set it so explicit constructor keys work
         # even when the env var was not pre-set.
         os.environ["AWS_BEARER_TOKEN_BEDROCK"] = resolved_api_key
-        self._session = aioboto3.Session(region_name=resolved_region)
+        self._session = aiobotocore.session.AioSession()
 
     def _client(self) -> Any:
         """Open an async bedrock-runtime client context manager."""
         kwargs: dict[str, Any] = {"region_name": self.region}
         if self.base_url:
             kwargs["endpoint_url"] = self.base_url
-        return self._session.client("bedrock-runtime", **kwargs)
+        return self._session.create_client("bedrock-runtime", **kwargs)
 
     def _inference_config(
         self, temperature: float, top_p: float, max_tokens: int
