@@ -212,3 +212,5 @@ examples/request_logs/
 examples/structured_logs.db
 examples/structured_request_logs/
 prod-docs/
+examples/flagship_demo.db
+examples/flagship_request_logs/

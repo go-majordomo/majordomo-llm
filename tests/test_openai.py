@@ -166,8 +166,13 @@ class TestOpenAIStructuredResponse:
         call_kwargs = openai_llm.client.responses.create.call_args.kwargs
         assert call_kwargs["text"]["format"]["type"] == "json_schema"
         assert call_kwargs["text"]["format"]["name"] == "CountryInfo"
-        assert call_kwargs["text"]["format"]["schema"] == COUNTRY_SCHEMA
         assert call_kwargs["text"]["format"]["strict"] is True
+        # Schema is normalized for OpenAI strict mode: additionalProperties must
+        # be false and every defined property must be required.
+        sent_schema = call_kwargs["text"]["format"]["schema"]
+        assert sent_schema["additionalProperties"] is False
+        assert set(sent_schema["required"]) == set(COUNTRY_SCHEMA["properties"].keys())
+        assert sent_schema["properties"] == COUNTRY_SCHEMA["properties"]
 
     async def test_returns_validated_pydantic_model(
         self, openai_llm, mock_openai_structured_response
@@ -197,6 +202,91 @@ class TestOpenAIStructuredResponse:
         )
 
         assert response.content == '{"capital":"Tokyo","name":"Japan","population":125000000}'
+
+
+class TestEnforceOpenAIStrictSchema:
+    """Tests for the strict-mode schema normalizer."""
+
+    def _strict(self, schema: dict) -> dict:
+        from majordomo_llm.providers.openai import _enforce_openai_strict_schema
+
+        return _enforce_openai_strict_schema(schema)
+
+    def test_adds_additional_properties_false_to_objects(self):
+        result = self._strict({
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        })
+        assert result["additionalProperties"] is False
+
+    def test_marks_all_properties_required(self):
+        result = self._strict({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+        })
+        assert set(result["required"]) == {"name", "age"}
+
+    def test_recurses_into_nested_objects(self):
+        result = self._strict({
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        })
+        assert result["additionalProperties"] is False
+        nested = result["properties"]["person"]
+        assert nested["additionalProperties"] is False
+        assert nested["required"] == ["name"]
+
+    def test_recurses_into_array_items(self):
+        result = self._strict({
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer"}},
+                    },
+                },
+            },
+        })
+        item_schema = result["properties"]["items"]["items"]
+        assert item_schema["additionalProperties"] is False
+        assert item_schema["required"] == ["id"]
+
+    def test_inlines_refs_then_normalizes(self):
+        """Pydantic-style $defs should be inlined and then strict-normalized."""
+
+        class Address(BaseModel):
+            street: str
+
+        class Person(BaseModel):
+            name: str
+            address: Address
+
+        result = self._strict(Person.model_json_schema())
+
+        # $defs should be gone after inlining.
+        assert "$defs" not in result
+        assert result["additionalProperties"] is False
+        assert set(result["required"]) == {"name", "address"}
+        # The nested Address object should also be strict-normalized.
+        address_schema = result["properties"]["address"]
+        assert address_schema["additionalProperties"] is False
+        assert address_schema["required"] == ["street"]
+
+    def test_does_not_mutate_input(self):
+        original = {"type": "object", "properties": {"name": {"type": "string"}}}
+        original_copy = {"type": "object", "properties": {"name": {"type": "string"}}}
+        self._strict(original)
+        assert original == original_copy
 
 
 class TestOpenAIInit:

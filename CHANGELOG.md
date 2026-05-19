@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-05-18
+
+### Fixed
+
+- **OpenAI structured outputs** now normalize Pydantic-derived schemas to satisfy OpenAI's strict-mode requirements. Every object node in the schema gets `additionalProperties: false` and every property is added to `required`, with `$ref`/`$defs` inlined first. Previously, calling `get_structured_json_response()` against any current OpenAI model failed with `Invalid schema for response_format ...: 'additionalProperties' is required to be supplied and to be false`
+
 ## [0.7.0] - 2026-05-16
 
 ### Added

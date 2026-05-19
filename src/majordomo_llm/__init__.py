@@ -59,7 +59,7 @@ from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 __all__ = [
     # Base classes and types
