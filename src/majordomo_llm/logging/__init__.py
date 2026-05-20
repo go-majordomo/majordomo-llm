@@ -2,6 +2,7 @@
 
 Provides asynchronous request logging with support for:
 - PostgreSQL, MySQL, and SQLite for metrics storage
+- Mixpanel for analytics
 - S3 or local file system for request/response body storage
 
 Usage:
@@ -10,6 +11,7 @@ Usage:
     >>>
     >>> llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
     >>> db = await SqliteAdapter.create("llm_logs.db")
+    >>> # or: db = await MixpanelAdapter.create("your_mixpanel_token")
     >>> storage = await FileStorageAdapter.create("./llm_logs")
     >>> logged_llm = LoggingLLM(llm, db, storage)
     >>>
@@ -17,11 +19,12 @@ Usage:
     >>> response = await logged_llm.get_response("Hello!")
 
 Note:
-    Requires optional dependencies: pip install majordomo-llm[logging]
+    Requires optional dependencies: pip install 'majordomo-llm[logging]'
 """
 
 from majordomo_llm.logging.adapters import (
     FileStorageAdapter,
+    MixpanelAdapter,
     MySQLAdapter,
     PostgresAdapter,
     S3Adapter,
@@ -36,6 +39,7 @@ __all__ = [
     "DatabaseAdapter",
     "StorageAdapter",
     "FileStorageAdapter",
+    "MixpanelAdapter",
     "MySQLAdapter",
     "PostgresAdapter",
     "S3Adapter",
