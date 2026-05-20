@@ -64,9 +64,7 @@ class HookPipeline:
         metadata = caller_metadata if caller_metadata is not None else {}
 
         current_prompt = prompt
-        before_ctx = HookContext(
-            request_id=request_id, phase="before", caller_metadata=metadata
-        )
+        before_ctx = HookContext(request_id=request_id, phase="before", caller_metadata=metadata)
         for hook in self._hooks:
             outcome = await self._run_hook(
                 hook.before_call(current_prompt, before_ctx),
@@ -81,9 +79,7 @@ class HookPipeline:
 
         response = await call(current_prompt)
 
-        after_ctx = HookContext(
-            request_id=request_id, phase="after", caller_metadata=metadata
-        )
+        after_ctx = HookContext(request_id=request_id, phase="after", caller_metadata=metadata)
         current_response = response
         for hook in self._hooks:
             outcome = await self._run_hook(
@@ -144,9 +140,7 @@ class HookPipeline:
             )
         return outcome
 
-    async def _emit_verdicts(
-        self, request_id: uuid.UUID, verdicts: list[HookVerdict]
-    ) -> None:
+    async def _emit_verdicts(self, request_id: uuid.UUID, verdicts: list[HookVerdict]) -> None:
         if self._on_verdicts is None:
             return
         try:

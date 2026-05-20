@@ -42,9 +42,7 @@ class LLMJudgeHook:
         rendered = self._render(prompt=prompt, response=None)
         return await self._judge(rendered)
 
-    async def after_call(
-        self, prompt: str, response: str, ctx: HookContext
-    ) -> HookOutcome:
+    async def after_call(self, prompt: str, response: str, ctx: HookContext) -> HookOutcome:
         if self.phase != "after":
             return HookOutcome.pass_through(self.name)
         rendered = self._render(prompt=prompt, response=response)
@@ -57,15 +55,14 @@ class LLMJudgeHook:
 
     async def _judge(self, rendered: str) -> HookOutcome:
         try:
-            raw = await asyncio.wait_for(
-                self.judge_call(rendered), timeout=self.timeout_seconds
-            )
+            raw = await asyncio.wait_for(self.judge_call(rendered), timeout=self.timeout_seconds)
         except TimeoutError:
             logger.warning("Judge hook %s timed out; passing through", self.name)
             return HookOutcome.pass_through(self.name, reason="judge timeout")
         except Exception:
             logger.warning(
-                "Judge hook %s raised an exception; passing through", self.name,
+                "Judge hook %s raised an exception; passing through",
+                self.name,
                 exc_info=True,
             )
             return HookOutcome.pass_through(self.name, reason="judge exception")

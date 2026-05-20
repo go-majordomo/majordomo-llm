@@ -523,19 +523,23 @@ class Anthropic(LLM):
                         search_count += 1
 
                         # Add assistant response
-                        current_messages.append({
-                            "role": "assistant",
-                            "content": response.content,
-                        })
+                        current_messages.append(
+                            {
+                                "role": "assistant",
+                                "content": response.content,
+                            }
+                        )
 
                         # Add continuation prompt
-                        current_messages.append({
-                            "role": "user",
-                            "content": (
-                            "Continue with your analysis. Use the structured_response "
-                            "tool when ready to generate the final output."
-                        ),
-                        })
+                        current_messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Continue with your analysis. Use the structured_response "
+                                    "tool when ready to generate the final output."
+                                ),
+                            }
+                        )
                         continue
                 break
 
@@ -615,13 +619,15 @@ class Anthropic(LLM):
                         logger.info("Web search initiated (turn %d)", search_count + 1)
                         search_count += 1
                         current_messages.append({"role": "assistant", "content": response.content})
-                        current_messages.append({
-                            "role": "user",
-                            "content": (
-                                "Continue with your analysis. Use the structured response "
-                                "tool when ready to generate the final output."
-                            ),
-                        })
+                        current_messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Continue with your analysis. Use the structured response "
+                                    "tool when ready to generate the final output."
+                                ),
+                            }
+                        )
                         continue
                 break
 

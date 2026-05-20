@@ -242,6 +242,7 @@ def ensure_no_unexpected_kwargs(kwargs: dict[str, Any]) -> None:
         unexpected = ", ".join(sorted(kwargs))
         raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
 
+
 #: Type variable for Pydantic model types used in structured responses.
 T = TypeVar("T", bound=BaseModel)
 
@@ -498,9 +499,7 @@ class LLM(ABC):
         """
         return f"{self.provider}:{self.model}"
 
-    def _calculate_costs(
-        self, input_tokens: int, output_tokens: int
-    ) -> tuple[float, float, float]:
+    def _calculate_costs(self, input_tokens: int, output_tokens: int) -> tuple[float, float, float]:
         """Calculate costs for a request.
 
         Args:
@@ -573,14 +572,13 @@ class LLM(ABC):
             HookBlocked: If a hook in the pipeline blocks the call.
             Exception: If the API request fails after retries.
         """
+
         async def impl(prompt: str) -> LLMResponse:
             return await self._get_response_impl(
                 prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
             )
 
-        return await self._run_hooks_returning_response(
-            user_prompt, caller_metadata, impl
-        )
+        return await self._run_hooks_returning_response(user_prompt, caller_metadata, impl)
 
     async def get_response_stream(
         self,
@@ -623,9 +621,7 @@ class LLM(ABC):
             captured = await impl(modified_prompt)
             return captured.content
 
-        final_text = await self.hook_pipeline.run(
-            prompt, call, caller_metadata=caller_metadata
-        )
+        final_text = await self.hook_pipeline.run(prompt, call, caller_metadata=caller_metadata)
         assert captured is not None
         if final_text == captured.content:
             return captured
@@ -818,9 +814,7 @@ class LLM(ABC):
                 extra_headers=extra_headers,
             )
 
-        return await self._run_hooks_returning_response(
-            user_prompt, caller_metadata, impl
-        )
+        return await self._run_hooks_returning_response(user_prompt, caller_metadata, impl)
 
     @retry_provider_call
     async def _get_json_schema_response_retried(
