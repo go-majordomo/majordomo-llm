@@ -58,6 +58,7 @@ logging = [
     "aiomysql>=0.2.0",
     "aiosqlite>=0.20.0",
     "aiofiles>=24.0.0",
+    "mixpanel>=5.0.0",
 ]
 dev = [
     "pytest>=8.0.0",
