@@ -62,9 +62,7 @@ class TestCohereGetResponse:
 
     async def test_returns_text_content(self, cohere_llm, mock_cohere_text_response):
         """Should extract text content from response."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_text_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_text_response)
 
         response = await cohere_llm.get_response("Say hello")
 
@@ -72,9 +70,7 @@ class TestCohereGetResponse:
 
     async def test_returns_correct_token_counts(self, cohere_llm, mock_cohere_text_response):
         """Should return correct token counts."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_text_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_text_response)
 
         response = await cohere_llm.get_response("Test prompt")
 
@@ -84,9 +80,7 @@ class TestCohereGetResponse:
 
     async def test_calculates_costs_correctly(self, cohere_llm, mock_cohere_text_response):
         """Should calculate costs based on token counts and rates."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_text_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_text_response)
 
         response = await cohere_llm.get_response("Test prompt")
 
@@ -99,9 +93,7 @@ class TestCohereGetResponse:
 
     async def test_passes_temperature_and_top_p(self, cohere_llm, mock_cohere_text_response):
         """Should pass temperature and top_p to API."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_text_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_text_response)
 
         await cohere_llm.get_response(
             "Test prompt",
@@ -115,9 +107,7 @@ class TestCohereGetResponse:
 
     async def test_includes_system_prompt_in_messages(self, cohere_llm, mock_cohere_text_response):
         """Should include system prompt in messages."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_text_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_text_response)
 
         await cohere_llm.get_response(
             "Test prompt",
@@ -193,9 +183,7 @@ class TestCohereStructuredResponse:
 
     async def test_uses_json_schema_response_format(self, cohere_llm, mock_cohere_json_response):
         """Should use JSON schema response format for structured output."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_json_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_json_response)
 
         await cohere_llm.get_structured_json_response(
             response_model=CountryInfo,
@@ -208,9 +196,7 @@ class TestCohereStructuredResponse:
 
     async def test_returns_validated_pydantic_model(self, cohere_llm, mock_cohere_json_response):
         """Should return a validated Pydantic model instance."""
-        cohere_llm.client.chat = AsyncMock(
-            return_value=mock_cohere_json_response
-        )
+        cohere_llm.client.chat = AsyncMock(return_value=mock_cohere_json_response)
 
         response = await cohere_llm.get_structured_json_response(
             response_model=CountryInfo,
@@ -319,9 +305,7 @@ class TestCohereGetResponseStream:
 
     async def test_yields_text_chunks(self, cohere_llm, mock_cohere_stream_events):
         """Should yield text chunks from stream."""
-        cohere_llm.client.chat_stream = MagicMock(
-            return_value=mock_cohere_stream_events
-        )
+        cohere_llm.client.chat_stream = MagicMock(return_value=mock_cohere_stream_events)
 
         stream = await cohere_llm.get_response_stream("Hello")
         chunks = [chunk async for chunk in stream]
@@ -330,9 +314,7 @@ class TestCohereGetResponseStream:
 
     async def test_usage_populated_after_iteration(self, cohere_llm, mock_cohere_stream_events):
         """Should populate usage after stream is consumed."""
-        cohere_llm.client.chat_stream = MagicMock(
-            return_value=mock_cohere_stream_events
-        )
+        cohere_llm.client.chat_stream = MagicMock(return_value=mock_cohere_stream_events)
 
         stream = await cohere_llm.get_response_stream("Hello")
         async for _ in stream:
@@ -344,9 +326,7 @@ class TestCohereGetResponseStream:
 
     async def test_calculates_costs_correctly(self, cohere_llm, mock_cohere_stream_events):
         """Should calculate costs from stream usage."""
-        cohere_llm.client.chat_stream = MagicMock(
-            return_value=mock_cohere_stream_events
-        )
+        cohere_llm.client.chat_stream = MagicMock(return_value=mock_cohere_stream_events)
 
         stream = await cohere_llm.get_response_stream("Hello")
         async for _ in stream:
@@ -359,9 +339,7 @@ class TestCohereGetResponseStream:
 
     async def test_collect_returns_llm_response(self, cohere_llm, mock_cohere_stream_events):
         """Should return LLMResponse from collect()."""
-        cohere_llm.client.chat_stream = MagicMock(
-            return_value=mock_cohere_stream_events
-        )
+        cohere_llm.client.chat_stream = MagicMock(return_value=mock_cohere_stream_events)
 
         stream = await cohere_llm.get_response_stream("Hello")
         response = await stream.collect()

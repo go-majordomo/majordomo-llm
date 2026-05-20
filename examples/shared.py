@@ -130,9 +130,7 @@ async def print_summary(db_path: Path, title: str = "COST SUMMARY") -> None:
         print(f"{'TOTAL':<12} {'':<28} {'':<8} {'':<10} {'':<11} {total_cost:>10.6f}")
 
         # Error count
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM llm_requests WHERE status = 'error'"
-        )
+        cursor = await db.execute("SELECT COUNT(*) FROM llm_requests WHERE status = 'error'")
         error_count = (await cursor.fetchone())[0]
         if error_count > 0:
             print(f"\nErrors: {error_count} request(s) failed")

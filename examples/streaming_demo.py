@@ -60,11 +60,12 @@ async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
         usage = stream.usage
         assert usage is not None, "usage should be finalized after iteration"
         ttfc = first_chunk_time or 0
-        print(f"  Time to first chunk: {ttfc:.2f}s | "
-              f"Total: {usage.response_time:.2f}s")
-        print(f"  Tokens: {usage.input_tokens} in / "
-              f"{usage.output_tokens} out | "
-              f"Cost: ${usage.total_cost:.6f}")
+        print(f"  Time to first chunk: {ttfc:.2f}s | Total: {usage.response_time:.2f}s")
+        print(
+            f"  Tokens: {usage.input_tokens} in / "
+            f"{usage.output_tokens} out | "
+            f"Cost: ${usage.total_cost:.6f}"
+        )
         if chunk_count <= 1:
             print(
                 f"  Warning: only {chunk_count} chunk(s) — provider may have "
@@ -95,10 +96,12 @@ async def demo_collect(provider: str, model: str) -> bool:
         response = await stream.collect()
 
         print(f"  Content: {response.content}")
-        print(f"  Tokens: {response.input_tokens} in / "
-              f"{response.output_tokens} out | "
-              f"Cost: ${response.total_cost:.6f} | "
-              f"Time: {response.response_time:.2f}s")
+        print(
+            f"  Tokens: {response.input_tokens} in / "
+            f"{response.output_tokens} out | "
+            f"Cost: ${response.total_cost:.6f} | "
+            f"Time: {response.response_time:.2f}s"
+        )
         return True
 
     except Exception as e:
@@ -131,7 +134,8 @@ async def main() -> None:
 
     for provider, model in available_providers:
         ok = await demo_streaming(
-            provider, model,
+            provider,
+            model,
             "Explain why the sky is blue.",
         )
         if not ok:

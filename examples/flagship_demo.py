@@ -166,8 +166,10 @@ async def main() -> None:
                         content = content[:300] + "..."
                     print(f"  Response: {content}")
                     print(f"  Tokens: {result['input_tokens']} in / {result['output_tokens']} out")
-                    print(f"  Cost: ${result['total_cost']:.6f} | "
-                          f"Time: {result['response_time']:.2f}s")
+                    print(
+                        f"  Cost: ${result['total_cost']:.6f} | "
+                        f"Time: {result['response_time']:.2f}s"
+                    )
                 else:
                     print(f"  Error: {result.get('error', 'Unknown error')}")
 

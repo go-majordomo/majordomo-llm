@@ -549,9 +549,7 @@ class TestLLMCascadeHooks:
         assert self.before_calls == 1
         assert self.after_calls == 1
 
-    async def test_block_at_cascade_prevents_provider_calls(
-        self, mock_all_clients
-    ):
+    async def test_block_at_cascade_prevents_provider_calls(self, mock_all_clients):
         from majordomo_llm import HookBlocked, HookOutcome, HookPipeline
 
         class Blocker:

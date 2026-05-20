@@ -111,9 +111,7 @@ class ProductRecommendations(BaseModel):
 # =============================================================================
 
 
-async def demo_sentiment_analysis(
-    logged_llm: LoggingLLM, provider: str, model: str
-) -> None:
+async def demo_sentiment_analysis(logged_llm: LoggingLLM, provider: str, model: str) -> None:
     """Demo: Simple enum-based structured output."""
     print(f"\n  [{provider}/{model}]")
 
@@ -133,15 +131,15 @@ async def demo_sentiment_analysis(
         result: SentimentAnalysis = response.content
         print(f"    Sentiment: {result.sentiment.value} ({result.confidence:.0%} confidence)")
         print(f"    Reasoning: {result.reasoning[:80]}...")
-        print(f"    Cost: ${response.total_cost:.6f} | "
-              f"Tokens: {response.input_tokens}+{response.output_tokens}")
+        print(
+            f"    Cost: ${response.total_cost:.6f} | "
+            f"Tokens: {response.input_tokens}+{response.output_tokens}"
+        )
     except Exception as e:
         print(f"    Error: {e}")
 
 
-async def demo_text_analysis(
-    logged_llm: LoggingLLM, provider: str, model: str
-) -> None:
+async def demo_text_analysis(logged_llm: LoggingLLM, provider: str, model: str) -> None:
     """Demo: Nested model with lists."""
     print(f"\n  [{provider}/{model}]")
 
@@ -166,25 +164,25 @@ async def demo_text_analysis(
         print(f"    Topics: {', '.join(result.topics[:3])}")
         entities_str = ", ".join(f"{e.name} ({e.type})" for e in result.entities[:3])
         print(f"    Entities: {entities_str}")
-        print(f"    Cost: ${response.total_cost:.6f} | "
-              f"Tokens: {response.input_tokens}+{response.output_tokens}")
+        print(
+            f"    Cost: ${response.total_cost:.6f} | "
+            f"Tokens: {response.input_tokens}+{response.output_tokens}"
+        )
     except Exception as e:
         print(f"    Error: {e}")
 
 
-async def demo_code_review(
-    logged_llm: LoggingLLM, provider: str, model: str
-) -> None:
+async def demo_code_review(logged_llm: LoggingLLM, provider: str, model: str) -> None:
     """Demo: Boolean and constrained integer fields."""
     print(f"\n  [{provider}/{model}]")
 
-    code = '''
+    code = """
 def calculate_total(items):
     total = 0
     for i in range(len(items)):
         total = total + items[i]["price"] * items[i]["quantity"]
     return total
-'''
+"""
 
     try:
         response = await logged_llm.get_structured_json_response(
@@ -199,15 +197,15 @@ def calculate_total(items):
         print(f"    Issues: {len(result.issues)} found")
         if result.issues:
             print(f"      - {result.issues[0][:60]}...")
-        print(f"    Cost: ${response.total_cost:.6f} | "
-              f"Tokens: {response.input_tokens}+{response.output_tokens}")
+        print(
+            f"    Cost: ${response.total_cost:.6f} | "
+            f"Tokens: {response.input_tokens}+{response.output_tokens}"
+        )
     except Exception as e:
         print(f"    Error: {e}")
 
 
-async def demo_product_recommendations(
-    logged_llm: LoggingLLM, provider: str, model: str
-) -> None:
+async def demo_product_recommendations(logged_llm: LoggingLLM, provider: str, model: str) -> None:
     """Demo: Complex nested lists with multiple constraints."""
     print(f"\n  [{provider}/{model}]")
 
@@ -228,8 +226,10 @@ async def demo_product_recommendations(
         print(f"    Recommendations: {len(result.recommendations)} products")
         for rec in result.recommendations[:2]:
             print(f"      - {rec.name} ({rec.price_range}) - {rec.rating}/5")
-        print(f"    Cost: ${response.total_cost:.6f} | "
-              f"Tokens: {response.input_tokens}+{response.output_tokens}")
+        print(
+            f"    Cost: ${response.total_cost:.6f} | "
+            f"Tokens: {response.input_tokens}+{response.output_tokens}"
+        )
     except Exception as e:
         print(f"    Error: {e}")
 
