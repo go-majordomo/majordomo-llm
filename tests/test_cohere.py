@@ -236,6 +236,89 @@ class TestCohereStructuredResponse:
         assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
 
 
+class TestCohereSchemaNormalizer:
+    """Tests for the Cohere schema normalizer that strips unsupported keywords."""
+
+    def _strip(self, schema):
+        from majordomo_llm.providers.cohere import _strip_cohere_unsupported_constraints
+
+        return _strip_cohere_unsupported_constraints(schema)
+
+    def test_strips_numeric_constraints(self):
+        """Should drop minimum/maximum/exclusive*/multipleOf from number fields."""
+        result = self._strip({
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "exclusiveMinimum": 0,
+                    "multipleOf": 0.01,
+                },
+            },
+        })
+        score = result["properties"]["score"]
+        assert score == {"type": "number"}
+
+    def test_strips_array_constraints(self):
+        """Should drop minItems/maxItems/uniqueItems from array fields."""
+        result = self._strip({
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": 5,
+            "uniqueItems": True,
+        })
+        assert result == {"type": "array", "items": {"type": "string"}}
+
+    def test_strips_string_constraints(self):
+        """Should drop minLength/maxLength/pattern/format from string fields."""
+        result = self._strip({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-z]+$",
+            "format": "email",
+        })
+        assert result == {"type": "string"}
+
+    def test_recurses_into_nested_objects_and_arrays(self):
+        """Should strip constraints at every nesting depth."""
+        result = self._strip({
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "score": {"type": "number", "minimum": 0},
+                        },
+                    },
+                },
+            },
+        })
+        items = result["properties"]["items"]
+        assert "minItems" not in items
+        score = items["items"]["properties"]["score"]
+        assert score == {"type": "number"}
+
+    def test_preserves_supported_keywords(self):
+        """Should leave type, properties, required, enum, description untouched."""
+        original = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The name"},
+                "status": {"type": "string", "enum": ["active", "inactive"]},
+            },
+            "required": ["name"],
+            "description": "A record",
+        }
+        assert self._strip(original) == original
+
+
 class TestCohereInit:
     """Tests for Cohere initialization."""
 

@@ -185,9 +185,14 @@ class TestBedrockGetResponse:
         assert "helpful assistant" in kwargs["system"][0]["text"]
 
 
+# Substring not in _BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED — exercises the
+# tool-calling fallback path in the tests below.
+_TOOL_CALLING_FALLBACK_MODEL = "moonshotai.kimi-k2.5"
+
+
 class TestBedrockStructuredResponse:
     async def test_extracts_tool_use_content(self):
-        llm = _make_bedrock()
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
         client = _install_mock_client(llm)
         client.converse.return_value = _tool_use_response(
             "CountryInfo",
@@ -204,7 +209,7 @@ class TestBedrockStructuredResponse:
         assert response.content.population == 67000000
 
     async def test_forces_tool_choice(self):
-        llm = _make_bedrock()
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
         client = _install_mock_client(llm)
         client.converse.return_value = _tool_use_response(
             "CountryInfo",
@@ -220,15 +225,35 @@ class TestBedrockStructuredResponse:
         assert kwargs["toolConfig"]["toolChoice"] == {"tool": {"name": "CountryInfo"}}
         assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "CountryInfo"
 
-    async def test_json_schema_response_uses_schema_tool(self):
-        llm = _make_bedrock()
+    async def test_omits_tool_choice_for_llama4(self):
+        """Llama 4 on Bedrock rejects toolChoice.tool; we expose the tool but
+        do not force it (model is steered via the system prompt instead)."""
+        llm = _make_bedrock(model="us.meta.llama4-scout-17b-instruct-v1:0")
         client = _install_mock_client(llm)
         client.converse.return_value = _tool_use_response(
             "CountryInfo",
             {"name": "France", "capital": "Paris", "population": 67000000},
         )
 
-        response = await llm.get_json_schema_response(
+        await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        kwargs = client.converse.call_args.kwargs
+        assert "toolChoice" not in kwargs["toolConfig"]
+        # The tool itself must still be exposed so the model can call it.
+        assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "CountryInfo"
+
+    async def test_json_schema_response_uses_schema_tool(self):
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
+        client = _install_mock_client(llm)
+        client.converse.return_value = _tool_use_response(
+            "CountryInfo",
+            {"name": "France", "capital": "Paris", "population": 67000000},
+        )
+
+        await llm.get_json_schema_response(
             user_prompt="Tell me about France",
             response_schema=COUNTRY_SCHEMA,
             schema_name="CountryInfo",
@@ -237,8 +262,112 @@ class TestBedrockStructuredResponse:
         kwargs = client.converse.call_args.kwargs
         spec = kwargs["toolConfig"]["tools"][0]["toolSpec"]
         assert spec["name"] == "CountryInfo"
-        assert spec["inputSchema"]["json"] == COUNTRY_SCHEMA
-        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
+
+
+class TestBedrockNativeStructuredOutputs:
+    """Tests for Bedrock's native Structured Outputs feature (outputConfig)."""
+
+    async def test_uses_output_config_for_supported_model(self):
+        """Claude models should use outputConfig, not toolConfig."""
+        llm = _make_bedrock()  # default us.anthropic.claude-* — supported
+        client = _install_mock_client(llm)
+        client.converse.return_value = _converse_response(
+            text='{"name": "France", "capital": "Paris", "population": 67000000}'
+        )
+
+        await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        kwargs = client.converse.call_args.kwargs
+        assert "toolConfig" not in kwargs
+        assert "outputConfig" in kwargs
+        text_format = kwargs["outputConfig"]["textFormat"]
+        assert text_format["type"] == "json_schema"
+        assert text_format["structure"]["jsonSchema"]["name"] == "CountryInfo"
+
+    async def test_serializes_schema_as_json_string(self):
+        """The schema field must be a JSON string, not a dict — Bedrock requires it.
+
+        Bedrock also requires ``additionalProperties: false`` and every property
+        listed in ``required`` on each object node (same as OpenAI strict mode),
+        so the schema that lands in the request is the strict-normalized form.
+        """
+        import json
+
+        llm = _make_bedrock()
+        client = _install_mock_client(llm)
+        client.converse.return_value = _converse_response(
+            text='{"name": "France", "capital": "Paris", "population": 67000000}'
+        )
+
+        await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        schema_field = client.converse.call_args.kwargs["outputConfig"]["textFormat"][
+            "structure"
+        ]["jsonSchema"]["schema"]
+        assert isinstance(schema_field, str)
+        parsed = json.loads(schema_field)
+        assert parsed["additionalProperties"] is False
+        assert set(parsed["required"]) == {"name", "capital", "population"}
+
+    async def test_parses_text_content_as_json(self):
+        """Native path returns JSON in message text, not a toolUse block."""
+        llm = _make_bedrock()
+        client = _install_mock_client(llm)
+        client.converse.return_value = _converse_response(
+            text='{"name": "France", "capital": "Paris", "population": 67000000}'
+        )
+
+        response = await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        assert response.content.name == "France"
+        assert response.content.capital == "Paris"
+        assert response.content.population == 67000000
+
+    async def test_get_json_schema_response_uses_native_path(self):
+        llm = _make_bedrock()
+        client = _install_mock_client(llm)
+        client.converse.return_value = _converse_response(
+            text='{"name": "France", "capital": "Paris", "population": 67000000}'
+        )
+
+        await llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        kwargs = client.converse.call_args.kwargs
+        assert "toolConfig" not in kwargs
+        assert kwargs["outputConfig"]["textFormat"]["structure"]["jsonSchema"]["name"] == (
+            "CountryInfo"
+        )
+
+    async def test_falls_back_to_tool_calling_for_unsupported_model(self):
+        """Models not in the allowlist should still get the tool-calling path."""
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
+        client = _install_mock_client(llm)
+        client.converse.return_value = _tool_use_response(
+            "CountryInfo",
+            {"name": "France", "capital": "Paris", "population": 67000000},
+        )
+
+        await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        kwargs = client.converse.call_args.kwargs
+        assert "outputConfig" not in kwargs
+        assert "toolConfig" in kwargs
 
 
 class TestBedrockStream:

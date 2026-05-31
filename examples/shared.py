@@ -33,6 +33,9 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
         ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"),
     ),
     ("bedrock", "deepseek.v3.2", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
+    # OpenAI-compatible serverless hosts — using the cheapest small model from each.
+    ("fireworks", "accounts/fireworks/models/kimi-k2p5", ("FIREWORKS_API_KEY",)),
+    ("together", "deepseek-ai/DeepSeek-V4-Pro", ("TOGETHER_API_KEY",)),
 ]
 
 # Base directory for examples

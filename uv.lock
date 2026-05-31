@@ -998,7 +998,7 @@ wheels = [
 
 [[package]]
 name = "majordomo-llm"
-version = "0.9.1"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiobotocore" },

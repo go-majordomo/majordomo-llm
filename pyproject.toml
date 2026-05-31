@@ -1,6 +1,6 @@
 [project]
 name = "majordomo-llm"
-version = "0.9.1"
+version = "0.10.0"
 description = "Unified Python interface for multiple LLM providers with cost tracking"
 readme = "README.md"
 license = {text = "MIT"}
@@ -13,6 +13,8 @@ keywords = [
     "anthropic",
     "gemini",
     "cohere",
+    "fireworks",
+    "together",
     "ai",
     "machine-learning",
     "gpt",

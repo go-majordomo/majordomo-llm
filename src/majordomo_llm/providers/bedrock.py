@@ -1,5 +1,6 @@
 """Amazon Bedrock LLM provider implementation (Converse API)."""
 
+import json
 import logging
 import os
 import time
@@ -17,7 +18,9 @@ from majordomo_llm.base import (
     T,
     _StreamState,
     canonicalize_json_schema_output,
+    enforce_strict_object_schema,
     resolve_api_key,
+    strip_unsupported_schema_constraints,
 )
 from majordomo_llm.exceptions import ConfigurationError, ProviderError, ResponseParsingError
 from majordomo_llm.retry import retry_provider_call
@@ -234,10 +237,67 @@ class Bedrock(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Bedrock-specific implementation using Converse tool calling."""
+        """Bedrock structured output — native Structured Outputs when supported,
+        Converse tool calling otherwise.
+
+        Native Structured Outputs (``outputConfig.textFormat.json_schema``) gives
+        Bedrock-compiled grammar enforcement during generation; the model cannot
+        emit non-conforming JSON. Tool calling is best-effort: the model decides
+        whether to call the tool and may produce free text instead.
+        """
         if extra_headers:
             logger.debug("extra_headers ignored by Bedrock provider")
 
+        description = schema_description or (
+            f"Provide a structured response using the {schema_name} JSON schema"
+        )
+
+        if _supports_native_structured_outputs(self.model):
+            # Bedrock Structured Outputs requires additionalProperties: false on
+            # every object and every property listed in required (same as OpenAI
+            # strict mode), and rejects numeric/array/string bounds that aren't
+            # expressible in its grammar (same set Cohere rejects).
+            normalized_schema = strip_unsupported_schema_constraints(
+                enforce_strict_object_schema(response_schema)
+            )
+            output_config = _bedrock_output_config(schema_name, description, normalized_schema)
+            start_time = time.time()
+            try:
+                async with self._client() as client:
+                    response = await client.converse(
+                        modelId=self.model,
+                        messages=_bedrock_user_message(user_prompt),
+                        system=_bedrock_system_prompt(
+                            system_prompt or "You are a helpful assistant."
+                        ),
+                        inferenceConfig=self._inference_config(temperature, top_p, 4096),
+                        outputConfig=output_config,
+                    )
+            except (ClientError, BotoCoreError) as e:
+                raise ProviderError(
+                    f"Bedrock API error: {e}",
+                    provider="bedrock",
+                    original_error=e,
+                ) from e
+
+            execution_time = time.time() - start_time
+            content = _extract_text_content(response)
+            input_tokens, output_tokens, cached_tokens = _extract_usage(response)
+            input_cost, output_cost, total_cost = self._calculate_costs(
+                input_tokens, output_tokens
+            )
+            return LLMResponse(
+                content=canonicalize_json_schema_output(content, response_schema),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
+                input_cost=input_cost,
+                output_cost=output_cost,
+                total_cost=total_cost,
+                response_time=execution_time,
+            )
+
+        # Fallback path: Converse tool calling.
         tool_instruction = f"Use the {schema_name} tool to provide your answer."
         if system_prompt is None:
             system_prompt = f"You are a helpful assistant. {tool_instruction}"
@@ -246,9 +306,9 @@ class Bedrock(LLM):
 
         tool_config = _bedrock_tool_config(
             name=schema_name,
-            description=schema_description
-            or f"Provide a structured response using the {schema_name} JSON schema",
+            description=description,
             schema=response_schema,
+            model_id=self.model,
         )
 
         start_time = time.time()
@@ -294,23 +354,76 @@ class Bedrock(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
-        """Bedrock-specific structured response via forced tool use."""
+        """Bedrock structured output — native Structured Outputs when supported,
+        forced Converse tool use otherwise. See ``_get_json_schema_response`` for
+        the rationale on the two paths."""
         if extra_headers:
             logger.debug("extra_headers ignored by Bedrock provider")
 
+        schema = response_model.model_json_schema()
+        description = f"Provide a structured response using the {response_model.__name__} format"
+
+        if _supports_native_structured_outputs(self.model):
+            normalized_schema = strip_unsupported_schema_constraints(
+                enforce_strict_object_schema(schema)
+            )
+            output_config = _bedrock_output_config(
+                response_model.__name__, description, normalized_schema
+            )
+            start_time = time.time()
+            try:
+                async with self._client() as client:
+                    response = await client.converse(
+                        modelId=self.model,
+                        messages=_bedrock_user_message(user_prompt),
+                        system=_bedrock_system_prompt(
+                            system_prompt or "You are a helpful assistant."
+                        ),
+                        inferenceConfig=self._inference_config(temperature, top_p, 4096),
+                        outputConfig=output_config,
+                    )
+            except (ClientError, BotoCoreError) as e:
+                raise ProviderError(
+                    f"Bedrock API error: {e}",
+                    provider="bedrock",
+                    original_error=e,
+                ) from e
+
+            execution_time = time.time() - start_time
+            raw_text = _extract_text_content(response)
+            try:
+                content: Any = json.loads(raw_text)
+            except json.JSONDecodeError as e:
+                raise ResponseParsingError(
+                    f"Bedrock Structured Outputs returned invalid JSON: {raw_text!r}"
+                ) from e
+            input_tokens, output_tokens, cached_tokens = _extract_usage(response)
+            input_cost, output_cost, total_cost = self._calculate_costs(
+                input_tokens, output_tokens
+            )
+            return LLMJSONResponse(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
+                input_cost=input_cost,
+                output_cost=output_cost,
+                total_cost=total_cost,
+                response_time=execution_time,
+            )
+
+        # Fallback path: Converse tool calling.
         tool_instruction = "Use the structured_response tool to provide your answer."
         if system_prompt is None:
             system_prompt = f"You are a helpful assistant. {tool_instruction}"
         else:
             system_prompt = f"{system_prompt}\n\n{tool_instruction}"
 
-        schema = response_model.model_json_schema()
         tool_config = _bedrock_tool_config(
             name="structured_response",
-            description=(
-                f"Provide a structured response using the {response_model.__name__} format"
-            ),
+            description=description,
             schema=schema,
+            model_id=self.model,
         )
 
         start_time = time.time()
@@ -355,10 +468,69 @@ def _bedrock_system_prompt(system_prompt: str) -> list[dict[str, Any]]:
     return [{"text": system_prompt}]
 
 
-def _bedrock_tool_config(
+# Bedrock model substrings that reject ``toolConfig.toolChoice.tool`` in the
+# Converse API. The tool itself is still exposed via ``tools``; the model is
+# expected to invoke it because the system prompt instructs it to. Add a new
+# substring whenever a model surfaces "toolChoice.tool field" validation errors.
+_BEDROCK_MODELS_WITHOUT_FORCED_TOOL_CHOICE = frozenset(
+    {
+        "llama4",
+    }
+)
+
+# Bedrock model substrings that support the native Structured Outputs feature
+# (``outputConfig.textFormat.json_schema``). For these models, Bedrock compiles
+# the schema into a grammar and enforces it during generation — a guarantee
+# tool-calling cannot give. Models not in this set fall back to the tool-calling
+# path, which is best-effort. Compatibility list curated from AWS docs; expand
+# as new families gain support. Reference:
+# https://gerardo.dev/en/bedrock-structured-outputs.html
+_BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED = frozenset(
+    {
+        "anthropic.claude",
+        "nvidia.nemotron",
+        "qwen3",
+        "gemma",
+        "mistral",
+    }
+)
+
+
+def _supports_forced_tool_choice(model_id: str) -> bool:
+    return not any(token in model_id for token in _BEDROCK_MODELS_WITHOUT_FORCED_TOOL_CHOICE)
+
+
+def _supports_native_structured_outputs(model_id: str) -> bool:
+    return any(token in model_id for token in _BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED)
+
+
+def _bedrock_output_config(
     name: str, description: str, schema: dict[str, Any]
 ) -> dict[str, Any]:
+    """Build the ``outputConfig`` payload for Bedrock's native Structured Outputs.
+
+    The schema must be passed as a JSON-serialized string under
+    ``textFormat.structure.jsonSchema.schema`` — Bedrock compiles it into a
+    grammar and constrains generation to comply.
+    """
     return {
+        "textFormat": {
+            "type": "json_schema",
+            "structure": {
+                "jsonSchema": {
+                    "schema": json.dumps(schema),
+                    "name": name,
+                    "description": description,
+                }
+            },
+        }
+    }
+
+
+def _bedrock_tool_config(
+    name: str, description: str, schema: dict[str, Any], *, model_id: str
+) -> dict[str, Any]:
+    config: dict[str, Any] = {
         "tools": [
             {
                 "toolSpec": {
@@ -368,8 +540,10 @@ def _bedrock_tool_config(
                 }
             }
         ],
-        "toolChoice": {"tool": {"name": name}},
     }
+    if _supports_forced_tool_choice(model_id):
+        config["toolChoice"] = {"tool": {"name": name}}
+    return config
 
 
 def _extract_text_content(response: dict[str, Any]) -> str:

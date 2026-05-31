@@ -16,9 +16,15 @@ from majordomo_llm.base import (
     canonicalize_json_schema_output,
     inline_schema_refs,
     resolve_api_key,
+    strip_unsupported_schema_constraints,
 )
 from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.retry import retry_provider_call
+
+# Alias kept for backward compatibility — tests and downstream callers may
+# import this name. Delegates to the shared helper in base.py since Bedrock
+# Structured Outputs rejects the same constraint set.
+_strip_cohere_unsupported_constraints = strip_unsupported_schema_constraints
 
 
 class Cohere(LLM):
@@ -235,7 +241,7 @@ class Cohere(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Cohere-specific implementation using native JSON schema response format."""
-        schema = inline_schema_refs(response_schema)
+        schema = _strip_cohere_unsupported_constraints(inline_schema_refs(response_schema))
         messages: list[Any] = []
         if system_prompt is not None:
             messages.append(SystemChatMessageV2(content=system_prompt))

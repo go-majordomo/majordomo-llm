@@ -56,10 +56,12 @@ from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.bedrock import Bedrock
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
+from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
+from majordomo_llm.providers.together import Together
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 __all__ = [
     # Base classes and types
@@ -103,8 +105,10 @@ __all__ = [
     "Bedrock",
     "Cohere",
     "DeepSeek",
+    "Fireworks",
     "Gemini",
     "OpenAI",
+    "Together",
     # Version
     "__version__",
 ]

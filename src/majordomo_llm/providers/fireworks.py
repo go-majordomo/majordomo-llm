@@ -1,4 +1,4 @@
-"""DeepSeek LLM provider implementation."""
+"""Fireworks AI LLM provider implementation."""
 
 import time
 from collections.abc import AsyncIterator
@@ -11,7 +11,6 @@ from majordomo_llm.base import (
     LLMResponse,
     LLMStreamResponse,
     _StreamState,
-    build_schema_prompt,
     canonicalize_json_schema_output,
     resolve_api_key,
 )
@@ -19,27 +18,30 @@ from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.retry import retry_provider_call
 
 
-class DeepSeek(LLM):
-    """DeepSeek LLM provider.
+class Fireworks(LLM):
+    """Fireworks AI LLM provider.
 
-    Implements the LLM interface for DeepSeek's models using the OpenAI-compatible
-    API. Supports both DeepSeek-V3 (chat) and DeepSeek-R1 (reasoner) models.
+    Implements the LLM interface for Fireworks-hosted models (DeepSeek, Kimi,
+    GLM, Qwen3, Llama 4, etc.) using the OpenAI-compatible chat completions API.
 
-    The API key is read from the ``DEEPSEEK_API_KEY`` environment variable.
+    The API key is read from the ``FIREWORKS_API_KEY`` environment variable.
+
+    Model IDs are fully qualified (``accounts/fireworks/models/<slug>``) and are
+    passed through verbatim to the API.
 
     Attributes:
-        client: The async OpenAI client instance configured for DeepSeek.
+        client: The async OpenAI client instance configured for Fireworks.
 
     Example:
-        >>> llm = DeepSeek(
-        ...     model="deepseek-chat",
-        ...     input_cost=0.28,
-        ...     output_cost=0.42,
+        >>> llm = Fireworks(
+        ...     model="accounts/fireworks/models/deepseek-v4-pro",
+        ...     input_cost=1.74,
+        ...     output_cost=3.48,
         ... )
-        >>> response = await llm.get_response("Hello, DeepSeek!")
+        >>> response = await llm.get_response("Hello, Fireworks!")
     """
 
-    DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+    FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
     REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
     THINKING_MODES = frozenset({"enabled", "disabled"})
 
@@ -57,19 +59,23 @@ class DeepSeek(LLM):
         reasoning_effort: str | None = None,
         thinking: str | None = None,
     ) -> None:
-        """Initialize the DeepSeek provider.
+        """Initialize the Fireworks provider.
 
         Args:
-            model: The DeepSeek model identifier (e.g., "deepseek-chat", "deepseek-reasoner").
+            model: The fully qualified Fireworks model ID
+                (e.g., "accounts/fireworks/models/deepseek-v4-pro").
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
-            api_key: Optional API key. Defaults to ``DEEPSEEK_API_KEY`` env var.
+            api_key: Optional API key. Defaults to ``FIREWORKS_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
-            base_url: Optional custom base URL. Overrides DEEPSEEK_BASE_URL when set.
+            base_url: Optional custom base URL. Overrides FIREWORKS_BASE_URL when set.
             default_headers: Optional headers sent with every request.
-            reasoning_effort: Optional reasoning effort for supported DeepSeek models.
-            thinking: Optional thinking mode ("enabled" or "disabled") for supported models.
+            reasoning_effort: Optional reasoning effort level for models that
+                support it (e.g., DeepSeek V4). Forwarded to the underlying model
+                via Fireworks's OpenAI-compatible endpoint.
+            thinking: Optional thinking mode ("enabled" or "disabled") for models
+                that support it. Forwarded via ``extra_body``.
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
@@ -78,15 +84,15 @@ class DeepSeek(LLM):
         if reasoning_effort is not None and reasoning_effort not in self.REASONING_EFFORTS:
             valid = ", ".join(sorted(self.REASONING_EFFORTS))
             raise ValueError(
-                f"Invalid DeepSeek reasoning_effort '{reasoning_effort}'. Valid: {valid}"
+                f"Invalid Fireworks reasoning_effort '{reasoning_effort}'. Valid: {valid}"
             )
         if thinking is not None and thinking not in self.THINKING_MODES:
             valid = ", ".join(sorted(self.THINKING_MODES))
-            raise ValueError(f"Invalid DeepSeek thinking mode '{thinking}'. Valid: {valid}")
+            raise ValueError(f"Invalid Fireworks thinking mode '{thinking}'. Valid: {valid}")
 
-        resolved_api_key = resolve_api_key(api_key, "DEEPSEEK_API_KEY", "DeepSeek")
+        resolved_api_key = resolve_api_key(api_key, "FIREWORKS_API_KEY", "Fireworks")
         super().__init__(
-            provider="deepseek",
+            provider="fireworks",
             model=model,
             input_cost=input_cost,
             output_cost=output_cost,
@@ -98,18 +104,30 @@ class DeepSeek(LLM):
         )
         self.client = openai.AsyncOpenAI(
             api_key=resolved_api_key,
-            base_url=self.base_url or self.DEEPSEEK_BASE_URL,
+            base_url=self.base_url or self.FIREWORKS_BASE_URL,
             default_headers=self.default_headers,
         )
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
 
-    def _deepseek_request_kwargs(self) -> dict[str, Any]:
-        """Build DeepSeek-specific request options for supported models."""
+    def _fireworks_request_kwargs(self) -> dict[str, Any]:
+        """Build Fireworks-specific request options for reasoning-capable models.
+
+        Fireworks rejects requests that specify both ``reasoning_effort`` and
+        ``thinking`` (``cannot specify both 'thinking' and 'reasoning_effort'``),
+        so we collapse the two into a single field:
+
+        - ``thinking == "disabled"`` wins over ``reasoning_effort`` (explicit
+          opt-out is authoritative).
+        - Otherwise prefer ``reasoning_effort`` (which already implies thinking
+          is on at the requested depth).
+        """
         kwargs: dict[str, Any] = {}
-        if self.reasoning_effort is not None:
+        if self.thinking == "disabled":
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        elif self.reasoning_effort is not None:
             kwargs["reasoning_effort"] = self.reasoning_effort
-        if self.thinking is not None:
+        elif self.thinking is not None:
             kwargs["extra_body"] = {"thinking": {"type": self.thinking}}
         return kwargs
 
@@ -122,7 +140,7 @@ class DeepSeek(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Get a plain text response from DeepSeek."""
+        """Get a plain text response from Fireworks."""
         return await self._get_response(
             user_prompt, system_prompt, temperature, top_p, extra_headers=extra_headers
         )
@@ -135,14 +153,14 @@ class DeepSeek(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Internal method to get a response from DeepSeek."""
+        """Internal method to get a response from Fireworks."""
         messages: list[Any] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
 
         start_time = time.time()
-        request_kwargs = self._deepseek_request_kwargs()
+        request_kwargs = self._fireworks_request_kwargs()
         try:
             if self.supports_temperature_top_p:
                 response = await self.client.chat.completions.create(
@@ -162,8 +180,8 @@ class DeepSeek(LLM):
                 )
         except openai.APIError as e:
             raise ProviderError(
-                f"DeepSeek API error: {e}",
-                provider="deepseek",
+                f"Fireworks API error: {e}",
+                provider="fireworks",
                 original_error=e,
             ) from e
 
@@ -201,14 +219,14 @@ class DeepSeek(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
-        """Get a streaming text response from DeepSeek."""
+        """Get a streaming text response from Fireworks."""
         messages: list[Any] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
 
         state = _StreamState()
-        request_kwargs = self._deepseek_request_kwargs()
+        request_kwargs = self._fireworks_request_kwargs()
 
         try:
             if self.supports_temperature_top_p:
@@ -233,8 +251,8 @@ class DeepSeek(LLM):
                 )
         except openai.APIError as e:
             raise ProviderError(
-                f"DeepSeek API error: {e}",
-                provider="deepseek",
+                f"Fireworks API error: {e}",
+                provider="fireworks",
                 original_error=e,
             ) from e
 
@@ -256,8 +274,8 @@ class DeepSeek(LLM):
                         )
             except openai.APIError as e:
                 raise ProviderError(
-                    f"DeepSeek API error: {e}",
-                    provider="deepseek",
+                    f"Fireworks API error: {e}",
+                    provider="fireworks",
                     original_error=e,
                 ) from e
 
@@ -274,27 +292,27 @@ class DeepSeek(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """DeepSeek-specific implementation using json_object mode.
+        """Fireworks-specific implementation using OpenAI-compatible JSON Schema."""
+        messages: list[Any] = []
+        if system_prompt is not None:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
 
-        DeepSeek's API supports only ``response_format={'type': 'json_object'}``
-        (see https://api-docs.deepseek.com/guides/json_mode); ``json_schema`` is
-        rejected with ``"This response_format type is unavailable now"``. The
-        schema is therefore injected into the system prompt so the model knows
-        the expected shape, and ``json_object`` mode constrains the output to
-        valid JSON. The response is still canonicalized against the schema so
-        callers receive a deterministic, byte-comparable string.
-        """
-        effective_system_prompt = build_schema_prompt(response_schema, system_prompt)
+        json_schema_payload: dict[str, object] = {
+            "name": schema_name,
+            "schema": response_schema,
+            "strict": True,
+        }
+        if schema_description is not None:
+            json_schema_payload["description"] = schema_description
 
-        messages: list[Any] = [
-            {"role": "system", "content": effective_system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        response_format: Any = {"type": "json_object"}
+        response_format: Any = {
+            "type": "json_schema",
+            "json_schema": json_schema_payload,
+        }
 
         start_time = time.time()
-        request_kwargs = self._deepseek_request_kwargs()
+        request_kwargs = self._fireworks_request_kwargs()
         try:
             if self.supports_temperature_top_p:
                 response = await self.client.chat.completions.create(
@@ -316,8 +334,8 @@ class DeepSeek(LLM):
                 )
         except openai.APIError as e:
             raise ProviderError(
-                f"DeepSeek API error: {e}",
-                provider="deepseek",
+                f"Fireworks API error: {e}",
+                provider="fireworks",
                 original_error=e,
             ) from e
 

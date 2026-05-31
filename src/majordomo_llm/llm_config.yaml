@@ -129,6 +129,21 @@ deepseek:
       input_cost: 0.435
       output_cost: 0.87
       reasoning_effort: medium
+    # Reasoning profile — Sonnet-with-extended-thinking class. Use for code
+    # review, multi-step analysis, structured extraction under ambiguity.
+    deepseek-v4-pro-reasoning:
+      model: deepseek-v4-pro
+      input_cost: 0.435
+      output_cost: 0.87
+      thinking: enabled
+      reasoning_effort: medium
+    # Hard problems — Opus-tier work: math, complex planning, deep debugging.
+    deepseek-v4-pro-hard:
+      model: deepseek-v4-pro
+      input_cost: 0.435
+      output_cost: 0.87
+      thinking: enabled
+      reasoning_effort: high
     deepseek-chat:
       input_cost: 0.28
       output_cost: 0.42
@@ -220,6 +235,79 @@ bedrock:
       input_cost: 0.62
       output_cost: 1.85
 
+# Fireworks AI (OpenAI-compatible). Serverless inference only.
+# Model IDs are fully qualified: accounts/fireworks/models/<slug>.
+# Qwen3 and Llama 4 SKUs use parameter-count tier pricing rather than per-model
+# headline pricing and are intentionally omitted here pending clarification.
+fireworks:
+  models:
+    accounts/fireworks/models/deepseek-v4-pro:
+      input_cost: 1.74
+      output_cost: 3.48
+      reasoning_effort: medium
+    # Reasoning + hard profiles share the same upstream SKU; the ``model:``
+    # override keeps the API model ID stable while exposing distinct YAML keys.
+    deepseek-v4-pro-reasoning:
+      model: accounts/fireworks/models/deepseek-v4-pro
+      input_cost: 1.74
+      output_cost: 3.48
+      thinking: enabled
+      reasoning_effort: medium
+    deepseek-v4-pro-hard:
+      model: accounts/fireworks/models/deepseek-v4-pro
+      input_cost: 1.74
+      output_cost: 3.48
+      thinking: enabled
+      reasoning_effort: high
+    accounts/fireworks/models/kimi-k2p5:
+      input_cost: 0.60
+      output_cost: 3.00
+    accounts/fireworks/models/kimi-k2p6:
+      input_cost: 0.95
+      output_cost: 4.00
+    accounts/fireworks/models/glm-5p1:
+      input_cost: 1.40
+      output_cost: 4.40
+
+# Together AI (OpenAI-compatible). Serverless inference only.
+# Model IDs are slash-delimited HF-style and case-sensitive.
+together:
+  models:
+    deepseek-ai/DeepSeek-V4-Pro:
+      input_cost: 2.10
+      output_cost: 4.40
+      reasoning_effort: medium
+    deepseek-v4-pro-reasoning:
+      model: deepseek-ai/DeepSeek-V4-Pro
+      input_cost: 2.10
+      output_cost: 4.40
+      thinking: enabled
+      reasoning_effort: medium
+    deepseek-v4-pro-hard:
+      model: deepseek-ai/DeepSeek-V4-Pro
+      input_cost: 2.10
+      output_cost: 4.40
+      thinking: enabled
+      reasoning_effort: high
+    moonshotai/Kimi-K2.6:
+      input_cost: 1.20
+      output_cost: 4.50
+    Qwen/Qwen3.6-Plus:
+      input_cost: 0.50
+      output_cost: 3.00
+    Qwen/Qwen3.5-9B:
+      input_cost: 0.10
+      output_cost: 0.15
+    Qwen/Qwen3-235B-A22B-fp8-tput:
+      input_cost: 0.20
+      output_cost: 0.60
+    zai-org/GLM-5.1:
+      input_cost: 1.40
+      output_cost: 4.40
+    zai-org/GLM-5:
+      input_cost: 1.00
+      output_cost: 3.20
+
 # Deprecated model mappings
 # When a user requests a deprecated model, it is automatically replaced with
 # the provider-recommended replacement and a warning is logged.
@@ -263,3 +351,41 @@ aliases:
         model: gpt-4.1
       - provider: gemini
         model: gemini-2.5-pro
+  # Cross-vendor cascades for the same underlying open-weight model.
+  # Order: Fireworks first (lower published price), Together as failover.
+  deepseek-v4-pro:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/deepseek-v4-pro
+      - provider: together
+        model: deepseek-ai/DeepSeek-V4-Pro
+  # Reasoning + hard cascades end at Sonnet/Opus as the quality safety net.
+  # Use these as Sonnet-with-thinking / Opus replacements respectively.
+  deepseek-v4-pro-reasoning:
+    cascade:
+      - provider: fireworks
+        model: deepseek-v4-pro-reasoning
+      - provider: together
+        model: deepseek-v4-pro-reasoning
+      - provider: anthropic
+        model: claude-sonnet-4-6
+  deepseek-v4-pro-hard:
+    cascade:
+      - provider: fireworks
+        model: deepseek-v4-pro-hard
+      - provider: together
+        model: deepseek-v4-pro-hard
+      - provider: anthropic
+        model: claude-opus-4-7
+  kimi-k2.6:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/kimi-k2p6
+      - provider: together
+        model: moonshotai/Kimi-K2.6
+  glm-5.1:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/glm-5p1
+      - provider: together
+        model: zai-org/GLM-5.1
