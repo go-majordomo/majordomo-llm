@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-01
+
+### Added
+
+- **Bedrock Mantle provider** (`BedrockMantle`) — Anthropic Claude served via AWS-native Anthropic Messages API at `https://bedrock-mantle.{region}.api.aws/anthropic`. Implemented as a thin subclass of `Anthropic`, so Claude's full feature set (structured outputs, prompt caching, extended thinking, tool use, streaming) works out of the box without Converse-shape gymnastics. Authenticates via `AWS_BEARER_TOKEN_BEDROCK` (same bearer token used for the legacy Bedrock Converse path). Region from `AWS_REGION` / `AWS_DEFAULT_REGION` / `region=` constructor arg
+- 3 BedrockMantle SKUs in `llm_config.yaml`: Claude Opus 4.8, Opus 4.7, Haiku 4.5 (model IDs use the bare `anthropic.claude-<name>` format). Sonnet 4.6 is not yet hosted on Mantle (returns 404 not_found_error); will be added when AWS lists it
+
+### Changed
+
+- **Bedrock provider scope narrowed to non-Anthropic models.** Anthropic Claude entries removed from the `bedrock:` YAML block — those now live under `bedrock_mantle:`. The remaining Bedrock catalog covers Moonshot Kimi, NVIDIA Nemotron, Meta Llama 4, and DeepSeek-on-Bedrock
+- **Removed the Bedrock native Structured Outputs path** (`outputConfig.textFormat.json_schema` via Converse). The supporting allowlist (`_BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED`) and helper (`_bedrock_output_config`) are gone. Rationale: the only beneficiary was Anthropic Claude on Bedrock, which has moved to BedrockMantle where Claude's structured outputs are first-class. Non-Anthropic Bedrock models (Llama 4, Kimi, Nemotron, DeepSeek-on-Bedrock) keep the Converse tool-calling path, which is now the sole Bedrock structured-output mechanism. Eliminates the per-version Anthropic substring maintenance burden — newer Claude releases (Opus 4.8+) just work via BedrockMantle without any allowlist update
+
+### Removed
+
+- `enforce_strict_object_schema` and `strip_unsupported_schema_constraints` are no longer used by the Bedrock provider (they remain in `base.py` and continue to be used by OpenAI strict mode and Cohere respectively)
+- `us.anthropic.claude-*` entries from the `bedrock:` YAML block. Migration: use `bedrock_mantle` with `anthropic.claude-*` model IDs (no `us.` prefix, no `-v1` suffix). No backward-compatible alias provided — no users on the previous Bedrock Claude path
+
 ### Known limitations
 
 - **Bedrock Nemotron Nano structured output** is grammar-enforced via Bedrock Structured Outputs, but the model can produce malformed JSON on deeply nested or complex schemas (~3+ levels). Simpler schemas pass reliably. For high-reliability structured calls, cascade to a larger model (e.g. `nemotron → claude-haiku`)

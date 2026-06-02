@@ -90,6 +90,17 @@ class Together(LLM):
             raise ValueError(f"Invalid Together thinking mode '{thinking}'. Valid: {valid}")
 
         resolved_api_key = resolve_api_key(api_key, "TOGETHER_API_KEY", "Together")
+
+        # When routing through a proxy (e.g. Majordomo Steward), auto-inject
+        # ``x-majordomo-provider: together`` so the gateway can disambiguate
+        # Together traffic from vanilla OpenAI (both speak the same wire
+        # shape). Caller-supplied default_headers win on key collision.
+        if base_url is not None:
+            merged_headers: dict[str, str] = {"x-majordomo-provider": "together"}
+            if default_headers:
+                merged_headers.update(default_headers)
+            default_headers = merged_headers
+
         super().__init__(
             provider="together",
             model=model,

@@ -54,6 +54,7 @@ from majordomo_llm.hooks import (
 )
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.bedrock import Bedrock
+from majordomo_llm.providers.bedrock_mantle import BedrockMantle
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
@@ -61,7 +62,7 @@ from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 __all__ = [
     # Base classes and types
@@ -103,6 +104,7 @@ __all__ = [
     # Provider implementations
     "Anthropic",
     "Bedrock",
+    "BedrockMantle",
     "Cohere",
     "DeepSeek",
     "Fireworks",

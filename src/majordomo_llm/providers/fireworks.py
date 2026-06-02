@@ -91,6 +91,17 @@ class Fireworks(LLM):
             raise ValueError(f"Invalid Fireworks thinking mode '{thinking}'. Valid: {valid}")
 
         resolved_api_key = resolve_api_key(api_key, "FIREWORKS_API_KEY", "Fireworks")
+
+        # When routing through a proxy (e.g. Majordomo Steward), auto-inject
+        # ``x-majordomo-provider: fireworks`` so the gateway can disambiguate
+        # Fireworks traffic from vanilla OpenAI (both speak the same wire
+        # shape). Caller-supplied default_headers win on key collision.
+        if base_url is not None:
+            merged_headers: dict[str, str] = {"x-majordomo-provider": "fireworks"}
+            if default_headers:
+                merged_headers.update(default_headers)
+            default_headers = merged_headers
+
         super().__init__(
             provider="fireworks",
             model=model,

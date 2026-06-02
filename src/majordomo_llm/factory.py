@@ -13,6 +13,7 @@ from majordomo_llm.base import LLM
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.bedrock import Bedrock
+from majordomo_llm.providers.bedrock_mantle import BedrockMantle
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
@@ -203,6 +204,7 @@ def get_llm_instance(
         "deepseek": DeepSeek,
         "cohere": Cohere,
         "bedrock": Bedrock,
+        "bedrock_mantle": BedrockMantle,
         "fireworks": Fireworks,
         "together": Together,
     }
@@ -216,7 +218,7 @@ def get_llm_instance(
             "reasoning_effort": model_attributes.get("reasoning_effort"),
             "thinking": model_attributes.get("thinking"),
         }
-    elif provider == "bedrock":
+    elif provider in ("bedrock", "bedrock_mantle"):
         provider_kwargs = {"region": region}
 
     # An entry may override its API model ID via the ``model`` attribute. This

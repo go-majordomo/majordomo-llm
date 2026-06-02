@@ -264,110 +264,75 @@ class TestBedrockStructuredResponse:
         assert spec["name"] == "CountryInfo"
 
 
-class TestBedrockNativeStructuredOutputs:
-    """Tests for Bedrock's native Structured Outputs feature (outputConfig)."""
+class _FakeRequest:
+    """Stand-in for the botocore request passed to before-send handlers."""
 
-    async def test_uses_output_config_for_supported_model(self):
-        """Claude models should use outputConfig, not toolConfig."""
-        llm = _make_bedrock()  # default us.anthropic.claude-* — supported
-        client = _install_mock_client(llm)
-        client.converse.return_value = _converse_response(
-            text='{"name": "France", "capital": "Paris", "population": 67000000}'
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+
+
+async def _emit_before_send(llm: Bedrock) -> _FakeRequest:
+    """Trigger the session-level before-send.bedrock-runtime event and return
+    the fake request after handlers have run. aiobotocore's emit is async."""
+    request = _FakeRequest()
+    await llm._session.emit("before-send.bedrock-runtime", request=request)
+    return request
+
+
+class TestBedrockProxyHeaderInjection:
+    """Tests for the Steward-routing header-injection hook."""
+
+    async def test_injects_host_and_default_headers_when_base_url_is_set(self):
+        llm = Bedrock(
+            model="us.anthropic.claude-sonnet-4-5-v1:0",
+            input_cost=3.0,
+            output_cost=15.0,
+            api_key="bedrock-bearer",
+            region="us-west-2",
+            base_url="https://gateway.example.com",
+            default_headers={"X-Majordomo-Key": "mk-1", "X-Majordomo-Feature": "shadow"},
         )
 
-        await llm.get_structured_json_response(
-            response_model=CountryInfo,
-            user_prompt="Tell me about France",
+        request = await _emit_before_send(llm)
+
+        assert request.headers["Host"] == "gateway.example.com"
+        assert request.headers["X-Majordomo-Key"] == "mk-1"
+        assert request.headers["X-Majordomo-Feature"] == "shadow"
+        assert request.headers["X-Majordomo-Bedrock-Region"] == "us-west-2"
+
+    async def test_no_hook_registered_when_base_url_is_unset(self):
+        """Direct-AWS callers must not get proxy headers — regression guard."""
+        llm = Bedrock(
+            model="us.anthropic.claude-sonnet-4-5-v1:0",
+            input_cost=3.0,
+            output_cost=15.0,
+            api_key="bedrock-bearer",
+            region="us-east-1",
+            default_headers={"X-Majordomo-Key": "mk-1"},
         )
 
-        kwargs = client.converse.call_args.kwargs
-        assert "toolConfig" not in kwargs
-        assert "outputConfig" in kwargs
-        text_format = kwargs["outputConfig"]["textFormat"]
-        assert text_format["type"] == "json_schema"
-        assert text_format["structure"]["jsonSchema"]["name"] == "CountryInfo"
+        request = await _emit_before_send(llm)
 
-    async def test_serializes_schema_as_json_string(self):
-        """The schema field must be a JSON string, not a dict — Bedrock requires it.
+        # No handler should have run — request.headers stays empty.
+        assert request.headers == {}
 
-        Bedrock also requires ``additionalProperties: false`` and every property
-        listed in ``required`` on each object node (same as OpenAI strict mode),
-        so the schema that lands in the request is the strict-normalized form.
-        """
-        import json
-
-        llm = _make_bedrock()
-        client = _install_mock_client(llm)
-        client.converse.return_value = _converse_response(
-            text='{"name": "France", "capital": "Paris", "population": 67000000}'
+    async def test_handles_empty_default_headers(self):
+        """``default_headers=None`` is the common case for ad-hoc gateway use;
+        Host and region should still land."""
+        llm = Bedrock(
+            model="us.anthropic.claude-sonnet-4-5-v1:0",
+            input_cost=3.0,
+            output_cost=15.0,
+            api_key="bedrock-bearer",
+            region="us-east-1",
+            base_url="https://gateway.example.com",
         )
 
-        await llm.get_structured_json_response(
-            response_model=CountryInfo,
-            user_prompt="Tell me about France",
-        )
+        request = await _emit_before_send(llm)
 
-        schema_field = client.converse.call_args.kwargs["outputConfig"]["textFormat"][
-            "structure"
-        ]["jsonSchema"]["schema"]
-        assert isinstance(schema_field, str)
-        parsed = json.loads(schema_field)
-        assert parsed["additionalProperties"] is False
-        assert set(parsed["required"]) == {"name", "capital", "population"}
-
-    async def test_parses_text_content_as_json(self):
-        """Native path returns JSON in message text, not a toolUse block."""
-        llm = _make_bedrock()
-        client = _install_mock_client(llm)
-        client.converse.return_value = _converse_response(
-            text='{"name": "France", "capital": "Paris", "population": 67000000}'
-        )
-
-        response = await llm.get_structured_json_response(
-            response_model=CountryInfo,
-            user_prompt="Tell me about France",
-        )
-
-        assert response.content.name == "France"
-        assert response.content.capital == "Paris"
-        assert response.content.population == 67000000
-
-    async def test_get_json_schema_response_uses_native_path(self):
-        llm = _make_bedrock()
-        client = _install_mock_client(llm)
-        client.converse.return_value = _converse_response(
-            text='{"name": "France", "capital": "Paris", "population": 67000000}'
-        )
-
-        await llm.get_json_schema_response(
-            user_prompt="Tell me about France",
-            response_schema=COUNTRY_SCHEMA,
-            schema_name="CountryInfo",
-        )
-
-        kwargs = client.converse.call_args.kwargs
-        assert "toolConfig" not in kwargs
-        assert kwargs["outputConfig"]["textFormat"]["structure"]["jsonSchema"]["name"] == (
-            "CountryInfo"
-        )
-
-    async def test_falls_back_to_tool_calling_for_unsupported_model(self):
-        """Models not in the allowlist should still get the tool-calling path."""
-        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
-        client = _install_mock_client(llm)
-        client.converse.return_value = _tool_use_response(
-            "CountryInfo",
-            {"name": "France", "capital": "Paris", "population": 67000000},
-        )
-
-        await llm.get_structured_json_response(
-            response_model=CountryInfo,
-            user_prompt="Tell me about France",
-        )
-
-        kwargs = client.converse.call_args.kwargs
-        assert "outputConfig" not in kwargs
-        assert "toolConfig" in kwargs
+        assert request.headers["Host"] == "gateway.example.com"
+        assert request.headers["X-Majordomo-Bedrock-Region"] == "us-east-1"
+        assert "X-Majordomo-Key" not in request.headers
 
 
 class TestBedrockStream:

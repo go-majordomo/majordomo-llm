@@ -19,12 +19,13 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
     ("gemini", "gemini-3-flash-preview", ("GEMINI_API_KEY",)),
     ("deepseek", "deepseek-v4-flash", ("DEEPSEEK_API_KEY",)),
     ("cohere", "command-a-03-2025", ("CO_API_KEY",)),
-    # Amazon Bedrock — one model per upstream provider.
+    # Amazon Bedrock Mantle — Claude via AWS-native Anthropic Messages API.
     (
-        "bedrock",
-        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "bedrock_mantle",
+        "anthropic.claude-haiku-4-5",
         ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"),
     ),
+    # Amazon Bedrock (Converse API) — non-Anthropic upstream providers.
     ("bedrock", "moonshotai.kimi-k2.5", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
     ("bedrock", "nvidia.nemotron-nano-12b-v2", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
     (

@@ -9,6 +9,7 @@ Example:
 
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.bedrock import Bedrock
+from majordomo_llm.providers.bedrock_mantle import BedrockMantle
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
@@ -19,6 +20,7 @@ from majordomo_llm.providers.together import Together
 __all__ = [
     "Anthropic",
     "Bedrock",
+    "BedrockMantle",
     "Cohere",
     "DeepSeek",
     "Fireworks",

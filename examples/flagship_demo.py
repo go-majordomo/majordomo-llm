@@ -38,6 +38,10 @@ FLAGSHIPS: list[tuple[str, str, str]] = [
     ("gemini", "gemini-3.1-pro-preview", "GEMINI_API_KEY"),
     # Native DeepSeek flagship (the reasoning model from api.deepseek.com).
     ("deepseek", "deepseek-reasoner", "DEEPSEEK_API_KEY"),
+    # Anthropic Claude via Bedrock Mantle. Apples-to-apples vs the anthropic
+    # entry above for Opus 4.7 — same model, different transport (AWS-native).
+    ("bedrock_mantle", "anthropic.claude-opus-4-8", "AWS_BEARER_TOKEN_BEDROCK"),
+    ("bedrock_mantle", "anthropic.claude-opus-4-7", "AWS_BEARER_TOKEN_BEDROCK"),
     # Open-weight alternatives via Fireworks. Same upstream model, three
     # reasoning profiles — see llm_config.yaml for the effort settings.
     (

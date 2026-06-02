@@ -186,6 +186,7 @@ class TestGetAllLLMInstances:
             "deepseek",
             "cohere",
             "bedrock",
+            "bedrock_mantle",
             "fireworks",
             "together",
         }

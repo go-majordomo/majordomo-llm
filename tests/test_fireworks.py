@@ -395,6 +395,37 @@ class TestFireworksInit:
                 default_headers=None,
             )
 
+    def test_injects_steward_routing_header_when_proxying(self):
+        """When base_url is set (proxy routing), the provider auto-injects
+        ``x-majordomo-provider: fireworks`` so Steward can disambiguate
+        Fireworks traffic from vanilla OpenAI (both speak the same wire
+        shape). Without this, Steward routes the request to OpenAI's
+        endpoint and gets a 401 because the Fireworks fw_* key doesn't
+        validate there."""
+        with patch("majordomo_llm.providers.fireworks.openai.AsyncOpenAI") as mock_client:
+            Fireworks(
+                model=MODEL_ID,
+                input_cost=1.74,
+                output_cost=3.48,
+                api_key="test-key",
+                base_url="https://gateway.example.com",
+            )
+            headers = mock_client.call_args.kwargs["default_headers"]
+            assert headers["x-majordomo-provider"] == "fireworks"
+
+    def test_does_not_inject_steward_header_when_direct(self):
+        """Direct Fireworks calls must not get Majordomo headers — regression
+        guard against leaking proxy metadata to the real Fireworks endpoint."""
+        with patch("majordomo_llm.providers.fireworks.openai.AsyncOpenAI") as mock_client:
+            Fireworks(
+                model=MODEL_ID,
+                input_cost=1.74,
+                output_cost=3.48,
+                api_key="test-key",
+            )
+            headers = mock_client.call_args.kwargs["default_headers"]
+            assert headers is None or "x-majordomo-provider" not in headers
+
     def test_accepts_custom_base_url_and_headers(self):
         """Should honor explicit base_url and default_headers overrides."""
         with patch("majordomo_llm.providers.fireworks.openai.AsyncOpenAI") as mock_client:
@@ -408,10 +439,15 @@ class TestFireworksInit:
                 default_headers={"X-Trace": "abc"},
             )
 
+            # The x-majordomo-provider header is auto-injected for proxy routing
+            # (base_url was explicitly set), merged with the caller's headers.
             mock_client.assert_called_once_with(
                 api_key="test-key",
                 base_url="https://custom.example.com/v1",
-                default_headers={"X-Trace": "abc"},
+                default_headers={
+                    "x-majordomo-provider": "fireworks",
+                    "X-Trace": "abc",
+                },
             )
 
     def test_supports_temperature_by_default(self):

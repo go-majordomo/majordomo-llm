@@ -167,41 +167,16 @@ cohere:
       output_cost: 0.15
 
 # Amazon Bedrock (Converse API). us-east-1 on-demand pricing.
-# Model IDs use the "us." cross-region inference profile prefix when AWS
-# publishes one for the model (required for on-demand throughput on most
-# Claude models). For providers without a cross-region profile (Moonshot,
-# NVIDIA Nemotron, DeepSeek v3.2), the bare model ID is used and the call
-# is region-pinned.
+# For non-Anthropic models hosted on Bedrock. Anthropic Claude models live
+# under the ``bedrock_mantle:`` block below, which uses the AWS-native
+# Anthropic Messages API endpoint (better feature support — structured
+# outputs, prompt caching, extended thinking — without Converse-shape
+# limitations).
+# Model IDs here use the "us." cross-region inference profile prefix when
+# AWS publishes one (Llama 4). Moonshot / NVIDIA Nemotron / DeepSeek use the
+# bare model ID and are region-pinned.
 bedrock:
   models:
-    # Anthropic on Bedrock (cross-region inference profiles)
-    us.anthropic.claude-opus-4-7:
-      input_cost: 5.00
-      output_cost: 25.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-sonnet-4-6:
-      input_cost: 3.00
-      output_cost: 15.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-opus-4-6-v1:
-      input_cost: 5.00
-      output_cost: 25.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-opus-4-5-20251101-v1:0:
-      input_cost: 5.00
-      output_cost: 25.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-haiku-4-5-20251001-v1:0:
-      input_cost: 1.00
-      output_cost: 5.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-sonnet-4-5-20250929-v1:0:
-      input_cost: 3.00
-      output_cost: 15.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-sonnet-4-20250514-v1:0:
-      input_cost: 3.00
-      output_cost: 15.00
     # Moonshot (Kimi) on Bedrock — base model IDs, no cross-region profile.
     # Note AWS uses different prefixes ("moonshot." vs "moonshotai.") per model.
     moonshot.kimi-k2-thinking:
@@ -234,6 +209,30 @@ bedrock:
     deepseek.v3.2:
       input_cost: 0.62
       output_cost: 1.85
+
+# Amazon Bedrock Mantle — Anthropic Claude via AWS-native Messages API.
+# Endpoint: https://bedrock-mantle.{region}.api.aws/anthropic
+# Model IDs are bare ``anthropic.claude-<name>`` (no ``us.`` prefix, no ``-v1``
+# suffix). Auth via AWS_BEARER_TOKEN_BEDROCK + AWS_REGION. Opus 4.7+ and
+# Sonnet 4.5+ deprecate temperature/top_p/top_k — supports_temperature_top_p
+# must be false for those models.
+# https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock
+bedrock_mantle:
+  models:
+    anthropic.claude-opus-4-8:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    anthropic.claude-opus-4-7:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    # Sonnet 4.6 is not yet available on Bedrock Mantle (returns 404
+    # not_found_error). Add when AWS lists it on the platform.claude.com page.
+    anthropic.claude-haiku-4-5:
+      input_cost: 1.00
+      output_cost: 5.00
+      supports_temperature_top_p: false
 
 # Fireworks AI (OpenAI-compatible). Serverless inference only.
 # Model IDs are fully qualified: accounts/fireworks/models/<slug>.

@@ -1,11 +1,11 @@
 """Amazon Bedrock LLM provider implementation (Converse API)."""
 
-import json
 import logging
 import os
 import time
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urlparse
 
 import aiobotocore.session
 from botocore.exceptions import BotoCoreError, ClientError
@@ -18,9 +18,7 @@ from majordomo_llm.base import (
     T,
     _StreamState,
     canonicalize_json_schema_output,
-    enforce_strict_object_schema,
     resolve_api_key,
-    strip_unsupported_schema_constraints,
 )
 from majordomo_llm.exceptions import ConfigurationError, ProviderError, ResponseParsingError
 from majordomo_llm.retry import retry_provider_call
@@ -75,9 +73,15 @@ class Bedrock(LLM):
             api_key: Optional Bedrock API key. Defaults to
                 ``AWS_BEARER_TOKEN_BEDROCK`` env var.
             api_key_alias: Optional human-readable name for the API key.
-            base_url: Optional custom endpoint URL.
-            default_headers: Accepted for interface parity; not forwarded to
-                the Bedrock client.
+            base_url: Optional custom endpoint URL. When set (e.g. a Majordomo
+                Steward gateway), enables the proxy header-injection hook
+                described below.
+            default_headers: When ``base_url`` is set, these headers are
+                injected on every outbound request via a botocore ``before-send``
+                hook (aiobotocore exposes no native ``default_headers`` kwarg).
+                Used to pass ``X-Majordomo-Key`` and other gateway metadata
+                through to Steward. Ignored when ``base_url`` is not set, since
+                direct AWS callers must not receive proxy auth headers.
             region: AWS region (e.g., "us-east-1"). Defaults to ``AWS_REGION``
                 or ``AWS_DEFAULT_REGION`` env vars.
 
@@ -114,6 +118,42 @@ class Bedrock(LLM):
         # even when the env var was not pre-set.
         os.environ["AWS_BEARER_TOKEN_BEDROCK"] = resolved_api_key
         self._session = aiobotocore.session.AioSession()
+
+        # When routing through a proxy (e.g. Majordomo Steward), aiobotocore
+        # offers no ``default_headers`` kwarg the way the OpenAI SDK does, so we
+        # inject headers via botocore's event system. Three things land on the
+        # wire:
+        #
+        # 1. ``Host`` is overridden to the proxy hostname. Without this,
+        #    aiobotocore sets it to ``bedrock-runtime.<region>.amazonaws.com``
+        #    and intermediate sidecars (istio, envoy, etc.) 404 because Host
+        #    doesn't match the proxy's listener.
+        # 2. Every entry in ``default_headers`` is copied onto the request —
+        #    this is how ``X-Majordomo-Key`` reaches Steward for auth.
+        # 3. ``X-Majordomo-Bedrock-Region`` carries the AWS region so Steward
+        #    knows which upstream region to forward to.
+        #
+        # The hook is only registered when ``base_url`` is set; direct AWS
+        # callers must not receive proxy headers.
+        if self.base_url:
+            self._register_proxy_header_hook()
+
+    def _register_proxy_header_hook(self) -> None:
+        """Register the before-send hook that injects Majordomo proxy headers."""
+        proxy_host = urlparse(self.base_url or "").netloc
+        region = self.region
+        proxy_headers = dict(self.default_headers or {})
+
+        def _inject(request: Any, **_kwargs: Any) -> None:
+            request.headers["Host"] = proxy_host
+            for key, value in proxy_headers.items():
+                request.headers[key] = value
+            request.headers["X-Majordomo-Bedrock-Region"] = region
+
+        # ``before-send.bedrock-runtime`` fires for all bedrock-runtime
+        # operations (Converse, ConverseStream, etc.) — session-level events
+        # propagate to every client created from the session.
+        self._session.register("before-send.bedrock-runtime", _inject)
 
     def _client(self) -> Any:
         """Open an async bedrock-runtime client context manager."""
@@ -237,13 +277,13 @@ class Bedrock(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Bedrock structured output — native Structured Outputs when supported,
-        Converse tool calling otherwise.
+        """Bedrock structured output via Converse tool calling.
 
-        Native Structured Outputs (``outputConfig.textFormat.json_schema``) gives
-        Bedrock-compiled grammar enforcement during generation; the model cannot
-        emit non-conforming JSON. Tool calling is best-effort: the model decides
-        whether to call the tool and may produce free text instead.
+        Anthropic Claude models are served via the BedrockMantle provider, which
+        uses the AWS-native Anthropic Messages API and supports first-class
+        structured outputs. This (Converse-based) Bedrock provider is for
+        non-Anthropic models — Llama 4, Kimi, Nemotron, DeepSeek-on-Bedrock —
+        where tool calling is the only reliable structured-output mechanism.
         """
         if extra_headers:
             logger.debug("extra_headers ignored by Bedrock provider")
@@ -252,52 +292,6 @@ class Bedrock(LLM):
             f"Provide a structured response using the {schema_name} JSON schema"
         )
 
-        if _supports_native_structured_outputs(self.model):
-            # Bedrock Structured Outputs requires additionalProperties: false on
-            # every object and every property listed in required (same as OpenAI
-            # strict mode), and rejects numeric/array/string bounds that aren't
-            # expressible in its grammar (same set Cohere rejects).
-            normalized_schema = strip_unsupported_schema_constraints(
-                enforce_strict_object_schema(response_schema)
-            )
-            output_config = _bedrock_output_config(schema_name, description, normalized_schema)
-            start_time = time.time()
-            try:
-                async with self._client() as client:
-                    response = await client.converse(
-                        modelId=self.model,
-                        messages=_bedrock_user_message(user_prompt),
-                        system=_bedrock_system_prompt(
-                            system_prompt or "You are a helpful assistant."
-                        ),
-                        inferenceConfig=self._inference_config(temperature, top_p, 4096),
-                        outputConfig=output_config,
-                    )
-            except (ClientError, BotoCoreError) as e:
-                raise ProviderError(
-                    f"Bedrock API error: {e}",
-                    provider="bedrock",
-                    original_error=e,
-                ) from e
-
-            execution_time = time.time() - start_time
-            content = _extract_text_content(response)
-            input_tokens, output_tokens, cached_tokens = _extract_usage(response)
-            input_cost, output_cost, total_cost = self._calculate_costs(
-                input_tokens, output_tokens
-            )
-            return LLMResponse(
-                content=canonicalize_json_schema_output(content, response_schema),
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cached_tokens=cached_tokens,
-                input_cost=input_cost,
-                output_cost=output_cost,
-                total_cost=total_cost,
-                response_time=execution_time,
-            )
-
-        # Fallback path: Converse tool calling.
         tool_instruction = f"Use the {schema_name} tool to provide your answer."
         if system_prompt is None:
             system_prompt = f"You are a helpful assistant. {tool_instruction}"
@@ -354,65 +348,17 @@ class Bedrock(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
-        """Bedrock structured output — native Structured Outputs when supported,
-        forced Converse tool use otherwise. See ``_get_json_schema_response`` for
-        the rationale on the two paths."""
+        """Bedrock structured output via Converse forced tool use.
+
+        See ``_get_json_schema_response`` for the rationale on why this provider
+        always uses tool calling rather than native Bedrock Structured Outputs.
+        """
         if extra_headers:
             logger.debug("extra_headers ignored by Bedrock provider")
 
         schema = response_model.model_json_schema()
         description = f"Provide a structured response using the {response_model.__name__} format"
 
-        if _supports_native_structured_outputs(self.model):
-            normalized_schema = strip_unsupported_schema_constraints(
-                enforce_strict_object_schema(schema)
-            )
-            output_config = _bedrock_output_config(
-                response_model.__name__, description, normalized_schema
-            )
-            start_time = time.time()
-            try:
-                async with self._client() as client:
-                    response = await client.converse(
-                        modelId=self.model,
-                        messages=_bedrock_user_message(user_prompt),
-                        system=_bedrock_system_prompt(
-                            system_prompt or "You are a helpful assistant."
-                        ),
-                        inferenceConfig=self._inference_config(temperature, top_p, 4096),
-                        outputConfig=output_config,
-                    )
-            except (ClientError, BotoCoreError) as e:
-                raise ProviderError(
-                    f"Bedrock API error: {e}",
-                    provider="bedrock",
-                    original_error=e,
-                ) from e
-
-            execution_time = time.time() - start_time
-            raw_text = _extract_text_content(response)
-            try:
-                content: Any = json.loads(raw_text)
-            except json.JSONDecodeError as e:
-                raise ResponseParsingError(
-                    f"Bedrock Structured Outputs returned invalid JSON: {raw_text!r}"
-                ) from e
-            input_tokens, output_tokens, cached_tokens = _extract_usage(response)
-            input_cost, output_cost, total_cost = self._calculate_costs(
-                input_tokens, output_tokens
-            )
-            return LLMJSONResponse(
-                content=content,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cached_tokens=cached_tokens,
-                input_cost=input_cost,
-                output_cost=output_cost,
-                total_cost=total_cost,
-                response_time=execution_time,
-            )
-
-        # Fallback path: Converse tool calling.
         tool_instruction = "Use the structured_response tool to provide your answer."
         if system_prompt is None:
             system_prompt = f"You are a helpful assistant. {tool_instruction}"
@@ -478,53 +424,8 @@ _BEDROCK_MODELS_WITHOUT_FORCED_TOOL_CHOICE = frozenset(
     }
 )
 
-# Bedrock model substrings that support the native Structured Outputs feature
-# (``outputConfig.textFormat.json_schema``). For these models, Bedrock compiles
-# the schema into a grammar and enforces it during generation — a guarantee
-# tool-calling cannot give. Models not in this set fall back to the tool-calling
-# path, which is best-effort. Compatibility list curated from AWS docs; expand
-# as new families gain support. Reference:
-# https://gerardo.dev/en/bedrock-structured-outputs.html
-_BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED = frozenset(
-    {
-        "anthropic.claude",
-        "nvidia.nemotron",
-        "qwen3",
-        "gemma",
-        "mistral",
-    }
-)
-
-
 def _supports_forced_tool_choice(model_id: str) -> bool:
     return not any(token in model_id for token in _BEDROCK_MODELS_WITHOUT_FORCED_TOOL_CHOICE)
-
-
-def _supports_native_structured_outputs(model_id: str) -> bool:
-    return any(token in model_id for token in _BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED)
-
-
-def _bedrock_output_config(
-    name: str, description: str, schema: dict[str, Any]
-) -> dict[str, Any]:
-    """Build the ``outputConfig`` payload for Bedrock's native Structured Outputs.
-
-    The schema must be passed as a JSON-serialized string under
-    ``textFormat.structure.jsonSchema.schema`` — Bedrock compiles it into a
-    grammar and constrains generation to comply.
-    """
-    return {
-        "textFormat": {
-            "type": "json_schema",
-            "structure": {
-                "jsonSchema": {
-                    "schema": json.dumps(schema),
-                    "name": name,
-                    "description": description,
-                }
-            },
-        }
-    }
 
 
 def _bedrock_tool_config(
