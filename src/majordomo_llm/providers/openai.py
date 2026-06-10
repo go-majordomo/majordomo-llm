@@ -12,40 +12,17 @@ from majordomo_llm.base import (
     LLMStreamResponse,
     _StreamState,
     canonicalize_json_schema_output,
-    inline_schema_refs,
+    enforce_strict_object_schema,
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError
 from majordomo_llm.retry import retry_provider_call
 
-
-def _enforce_openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a JSON schema for OpenAI's strict structured-output mode.
-
-    OpenAI strict mode requires every object node to declare
-    ``additionalProperties: false`` and to list every defined property in
-    ``required``. Pydantic's ``model_json_schema()`` emits neither, so
-    structured-output calls with raw Pydantic schemas are rejected with
-    ``invalid_json_schema``.
-
-    Inlines ``$ref``/``$defs`` first so the walker doesn't need to resolve
-    references itself, then mutates a deep copy of the schema in place.
-    """
-    schema = inline_schema_refs(schema)
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            if node.get("type") == "object" and "properties" in node:
-                node["additionalProperties"] = False
-                node["required"] = list(node["properties"].keys())
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(schema)
-    return schema
+# Kept as a module-level alias for backward compatibility — tests and downstream
+# callers may import it. Delegates to the shared helper in base.py since the
+# normalization is identical between OpenAI strict mode and Bedrock Structured
+# Outputs.
+_enforce_openai_strict_schema = enforce_strict_object_schema
 
 
 class OpenAI(LLM):

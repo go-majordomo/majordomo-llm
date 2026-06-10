@@ -27,6 +27,8 @@ def mock_all_clients():
         "CO_API_KEY": "test-key",
         "AWS_BEARER_TOKEN_BEDROCK": "test-key",
         "AWS_REGION": "us-east-1",
+        "FIREWORKS_API_KEY": "test-key",
+        "TOGETHER_API_KEY": "test-key",
     }
     with (
         patch.dict("os.environ", env_vars),
@@ -35,6 +37,8 @@ def mock_all_clients():
         patch("majordomo_llm.providers.gemini.genai.Client"),
         patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"),
         patch("majordomo_llm.providers.cohere.cohere.AsyncClientV2"),
+        patch("majordomo_llm.providers.fireworks.openai.AsyncOpenAI"),
+        patch("majordomo_llm.providers.together.openai.AsyncOpenAI"),
     ):
         yield
 
@@ -85,6 +89,19 @@ class TestGetLLMInstance:
         expected_config = LLM_CONFIG["anthropic"]["models"]["claude-sonnet-4-20250514"]
         assert llm.input_cost == expected_config["input_cost"]
         assert llm.output_cost == expected_config["output_cost"]
+
+    def test_yaml_model_override_resolves_to_upstream_id(self, mock_all_clients):
+        """Profile entries with ``model:`` override should pass the upstream ID
+        to the provider while keeping the YAML key as the lookup name."""
+        llm = get_llm_instance("fireworks", "deepseek-v4-pro-reasoning")
+        assert llm.model == "accounts/fireworks/models/deepseek-v4-pro"
+        assert llm.reasoning_effort == "medium"
+        assert llm.thinking == "enabled"
+
+        llm = get_llm_instance("together", "deepseek-v4-pro-hard")
+        assert llm.model == "deepseek-ai/DeepSeek-V4-Pro"
+        assert llm.reasoning_effort == "high"
+        assert llm.thinking == "enabled"
 
     def test_sets_supports_temperature_top_p_flag(self, mock_all_clients):
         """Should set supports_temperature_top_p from config."""
@@ -162,7 +179,17 @@ class TestGetAllLLMInstances:
         instances = list(get_all_llm_instances())
 
         providers = {llm.provider for llm in instances}
-        assert providers == {"openai", "anthropic", "gemini", "deepseek", "cohere", "bedrock"}
+        assert providers == {
+            "openai",
+            "anthropic",
+            "gemini",
+            "deepseek",
+            "cohere",
+            "bedrock",
+            "bedrock_mantle",
+            "fireworks",
+            "together",
+        }
 
 
 class TestLLMConfig:

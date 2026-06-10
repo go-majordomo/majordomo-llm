@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
@@ -289,6 +289,28 @@ class TestEnforceOpenAIStrictSchema:
         address_schema = result["properties"]["address"]
         assert address_schema["additionalProperties"] is False
         assert address_schema["required"] == ["street"]
+
+    def test_inlines_enum_refs_with_sibling_description(self):
+        """Pydantic emits enum fields as {"$ref": "...", "description": "..."}.
+        The inliner must resolve the ref AND preserve the field's description."""
+        from enum import Enum
+
+        class Sentiment(str, Enum):
+            POSITIVE = "positive"
+            NEGATIVE = "negative"
+
+        class Analysis(BaseModel):
+            sentiment: Sentiment = Field(description="The overall sentiment")
+
+        result = self._strict(Analysis.model_json_schema())
+
+        assert "$defs" not in result
+        sentiment_schema = result["properties"]["sentiment"]
+        # Ref body should be inlined.
+        assert sentiment_schema["enum"] == ["positive", "negative"]
+        assert sentiment_schema["type"] == "string"
+        # And the field-level description should be preserved.
+        assert sentiment_schema["description"] == "The overall sentiment"
 
     def test_does_not_mutate_input(self):
         original = {"type": "object", "properties": {"name": {"type": "string"}}}

@@ -216,10 +216,15 @@ class TestDeepSeekStructuredResponse:
             )
             return llm
 
-    async def test_uses_json_schema_response_format(
+    async def test_uses_json_object_response_format(
         self, deepseek_llm, mock_deepseek_json_response
     ):
-        """Should use JSON schema response format for structured output."""
+        """Should use json_object mode and inject schema into system prompt.
+
+        DeepSeek's API supports only response_format={"type": "json_object"};
+        json_schema is rejected server-side. The schema is therefore embedded
+        in the system prompt so the model knows the expected shape.
+        """
         deepseek_llm.client.chat.completions.create = AsyncMock(
             return_value=mock_deepseek_json_response
         )
@@ -230,15 +235,13 @@ class TestDeepSeekStructuredResponse:
         )
 
         call_kwargs = deepseek_llm.client.chat.completions.create.call_args.kwargs
-        assert call_kwargs["response_format"] == {
-            "type": "json_schema",
-            "json_schema": {
-                "description": "Provide a structured response using the CountryInfo schema",
-                "name": "CountryInfo",
-                "schema": COUNTRY_SCHEMA,
-                "strict": True,
-            },
-        }
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+
+        # Schema should be injected as the first message's system content.
+        messages = call_kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert '"type": "object"' in messages[0]["content"]
+        assert '"properties"' in messages[0]["content"]
 
     async def test_structured_response_passes_deepseek_reasoning_options(
         self, mock_deepseek_json_response

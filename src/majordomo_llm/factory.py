@@ -13,10 +13,13 @@ from majordomo_llm.base import LLM
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.bedrock import Bedrock
+from majordomo_llm.providers.bedrock_mantle import BedrockMantle
 from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
+from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
+from majordomo_llm.providers.together import Together
 
 logger = logging.getLogger(__name__)
 
@@ -201,22 +204,30 @@ def get_llm_instance(
         "deepseek": DeepSeek,
         "cohere": Cohere,
         "bedrock": Bedrock,
+        "bedrock_mantle": BedrockMantle,
+        "fireworks": Fireworks,
+        "together": Together,
     }
     cls = _PROVIDER_CLASSES.get(provider)
     if cls is None:
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")
 
     provider_kwargs: dict[str, Any] = {}
-    if provider == "deepseek":
+    if provider in ("deepseek", "fireworks", "together"):
         provider_kwargs = {
             "reasoning_effort": model_attributes.get("reasoning_effort"),
             "thinking": model_attributes.get("thinking"),
         }
-    elif provider == "bedrock":
+    elif provider in ("bedrock", "bedrock_mantle"):
         provider_kwargs = {"region": region}
 
+    # An entry may override its API model ID via the ``model`` attribute. This
+    # lets the same underlying model be registered under multiple YAML keys —
+    # e.g. distinct "reasoning effort" profiles that share one upstream SKU.
+    api_model = model_attributes.get("model", model)
+
     llm = cls(
-        model=model,
+        model=api_model,
         input_cost=model_attributes["input_cost"],
         output_cost=model_attributes["output_cost"],
         supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),

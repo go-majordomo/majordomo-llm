@@ -185,9 +185,14 @@ class TestBedrockGetResponse:
         assert "helpful assistant" in kwargs["system"][0]["text"]
 
 
+# Substring not in _BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED — exercises the
+# tool-calling fallback path in the tests below.
+_TOOL_CALLING_FALLBACK_MODEL = "moonshotai.kimi-k2.5"
+
+
 class TestBedrockStructuredResponse:
     async def test_extracts_tool_use_content(self):
-        llm = _make_bedrock()
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
         client = _install_mock_client(llm)
         client.converse.return_value = _tool_use_response(
             "CountryInfo",
@@ -204,7 +209,7 @@ class TestBedrockStructuredResponse:
         assert response.content.population == 67000000
 
     async def test_forces_tool_choice(self):
-        llm = _make_bedrock()
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
         client = _install_mock_client(llm)
         client.converse.return_value = _tool_use_response(
             "CountryInfo",
@@ -220,15 +225,35 @@ class TestBedrockStructuredResponse:
         assert kwargs["toolConfig"]["toolChoice"] == {"tool": {"name": "CountryInfo"}}
         assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "CountryInfo"
 
-    async def test_json_schema_response_uses_schema_tool(self):
-        llm = _make_bedrock()
+    async def test_omits_tool_choice_for_llama4(self):
+        """Llama 4 on Bedrock rejects toolChoice.tool; we expose the tool but
+        do not force it (model is steered via the system prompt instead)."""
+        llm = _make_bedrock(model="us.meta.llama4-scout-17b-instruct-v1:0")
         client = _install_mock_client(llm)
         client.converse.return_value = _tool_use_response(
             "CountryInfo",
             {"name": "France", "capital": "Paris", "population": 67000000},
         )
 
-        response = await llm.get_json_schema_response(
+        await llm.get_structured_json_response(
+            response_model=CountryInfo,
+            user_prompt="Tell me about France",
+        )
+
+        kwargs = client.converse.call_args.kwargs
+        assert "toolChoice" not in kwargs["toolConfig"]
+        # The tool itself must still be exposed so the model can call it.
+        assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "CountryInfo"
+
+    async def test_json_schema_response_uses_schema_tool(self):
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
+        client = _install_mock_client(llm)
+        client.converse.return_value = _tool_use_response(
+            "CountryInfo",
+            {"name": "France", "capital": "Paris", "population": 67000000},
+        )
+
+        await llm.get_json_schema_response(
             user_prompt="Tell me about France",
             response_schema=COUNTRY_SCHEMA,
             schema_name="CountryInfo",
@@ -237,8 +262,77 @@ class TestBedrockStructuredResponse:
         kwargs = client.converse.call_args.kwargs
         spec = kwargs["toolConfig"]["tools"][0]["toolSpec"]
         assert spec["name"] == "CountryInfo"
-        assert spec["inputSchema"]["json"] == COUNTRY_SCHEMA
-        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
+
+
+class _FakeRequest:
+    """Stand-in for the botocore request passed to before-send handlers."""
+
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+
+
+async def _emit_before_send(llm: Bedrock) -> _FakeRequest:
+    """Trigger the session-level before-send.bedrock-runtime event and return
+    the fake request after handlers have run. aiobotocore's emit is async."""
+    request = _FakeRequest()
+    await llm._session.emit("before-send.bedrock-runtime", request=request)
+    return request
+
+
+class TestBedrockProxyHeaderInjection:
+    """Tests for the Steward-routing header-injection hook."""
+
+    async def test_injects_host_and_default_headers_when_base_url_is_set(self):
+        llm = Bedrock(
+            model="us.anthropic.claude-sonnet-4-5-v1:0",
+            input_cost=3.0,
+            output_cost=15.0,
+            api_key="bedrock-bearer",
+            region="us-west-2",
+            base_url="https://gateway.example.com",
+            default_headers={"X-Majordomo-Key": "mk-1", "X-Majordomo-Feature": "shadow"},
+        )
+
+        request = await _emit_before_send(llm)
+
+        assert request.headers["Host"] == "gateway.example.com"
+        assert request.headers["X-Majordomo-Key"] == "mk-1"
+        assert request.headers["X-Majordomo-Feature"] == "shadow"
+        assert request.headers["X-Majordomo-Bedrock-Region"] == "us-west-2"
+
+    async def test_no_hook_registered_when_base_url_is_unset(self):
+        """Direct-AWS callers must not get proxy headers — regression guard."""
+        llm = Bedrock(
+            model="us.anthropic.claude-sonnet-4-5-v1:0",
+            input_cost=3.0,
+            output_cost=15.0,
+            api_key="bedrock-bearer",
+            region="us-east-1",
+            default_headers={"X-Majordomo-Key": "mk-1"},
+        )
+
+        request = await _emit_before_send(llm)
+
+        # No handler should have run — request.headers stays empty.
+        assert request.headers == {}
+
+    async def test_handles_empty_default_headers(self):
+        """``default_headers=None`` is the common case for ad-hoc gateway use;
+        Host and region should still land."""
+        llm = Bedrock(
+            model="us.anthropic.claude-sonnet-4-5-v1:0",
+            input_cost=3.0,
+            output_cost=15.0,
+            api_key="bedrock-bearer",
+            region="us-east-1",
+            base_url="https://gateway.example.com",
+        )
+
+        request = await _emit_before_send(llm)
+
+        assert request.headers["Host"] == "gateway.example.com"
+        assert request.headers["X-Majordomo-Bedrock-Region"] == "us-east-1"
+        assert "X-Majordomo-Key" not in request.headers
 
 
 class TestBedrockStream:

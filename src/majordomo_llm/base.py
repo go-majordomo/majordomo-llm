@@ -73,14 +73,20 @@ def inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
     def resolve_refs(obj: Any) -> Any:
         if isinstance(obj, dict):
-            if "$ref" in obj and len(obj) == 1:
-                # Extract definition name from "#/$defs/EntityName"
+            if "$ref" in obj:
+                # Pydantic emits enum/model refs as either a bare {"$ref": ...}
+                # or as {"$ref": ..., "description": ...} when the property has
+                # its own metadata. Inline the ref in both cases and merge any
+                # sibling keys on top so user-provided descriptions win.
                 ref_path = obj["$ref"]
                 if ref_path.startswith("#/$defs/"):
                     def_name = ref_path[len("#/$defs/") :]
                     if def_name in defs:
-                        # Recursively resolve refs in the definition too
-                        return resolve_refs(copy.deepcopy(defs[def_name]))
+                        inlined = resolve_refs(copy.deepcopy(defs[def_name]))
+                        siblings = {k: resolve_refs(v) for k, v in obj.items() if k != "$ref"}
+                        if isinstance(inlined, dict):
+                            return {**inlined, **siblings}
+                        return inlined
                 return obj
             return {k: resolve_refs(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -88,6 +94,78 @@ def inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
         return obj
 
     return cast(dict[str, Any], resolve_refs(schema))
+
+
+# JSON Schema constraints that grammar-enforced structured-output backends
+# (Cohere, Bedrock Structured Outputs) reject. The set is empirically derived
+# from the providers' validation errors — both report "constraint not supported
+# for type X" for the same keywords. Add a key whenever a new provider surfaces
+# the same class of rejection.
+_UNSUPPORTED_SCHEMA_CONSTRAINTS = frozenset(
+    {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "minItems",
+        "maxItems",
+        "uniqueItems",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "format",
+    }
+)
+
+
+def strip_unsupported_schema_constraints(schema: dict[str, Any]) -> dict[str, Any]:
+    """Recursively remove schema keywords that strict-grammar backends reject.
+
+    Used by Cohere and Bedrock Structured Outputs, whose schema compilers do not
+    support the full JSON Schema vocabulary. Removed keys include numeric bounds
+    (``minimum``/``maximum``/``multipleOf``), array bounds (``minItems``/
+    ``maxItems``/``uniqueItems``), and string constraints (``minLength``/
+    ``maxLength``/``pattern``/``format``).
+    """
+
+    def strip(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: strip(v) for k, v in obj.items() if k not in _UNSUPPORTED_SCHEMA_CONSTRAINTS}
+        if isinstance(obj, list):
+            return [strip(item) for item in obj]
+        return obj
+
+    return cast(dict[str, Any], strip(schema))
+
+
+def enforce_strict_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a JSON schema for strict structured-output modes.
+
+    Both OpenAI's ``response_format`` strict mode and Bedrock Structured Outputs
+    require every object node to declare ``additionalProperties: false`` and to
+    list every defined property in ``required``. Pydantic's
+    ``model_json_schema()`` emits neither, so structured-output calls with raw
+    Pydantic schemas are rejected by both providers.
+
+    Inlines ``$ref``/``$defs`` first so the walker does not need to resolve
+    references itself, then mutates a deep copy of the schema in place.
+    """
+    schema = inline_schema_refs(schema)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "object" and "properties" in node:
+                node["additionalProperties"] = False
+                node["required"] = list(node["properties"].keys())
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
+    return schema
 
 
 def build_schema_prompt(schema: dict[str, Any], system_prompt: str | None = None) -> str:

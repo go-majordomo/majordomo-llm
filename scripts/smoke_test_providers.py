@@ -58,12 +58,24 @@ PROVIDER_API_KEY_ENV: dict[str, str] = {
     "deepseek": "DEEPSEEK_API_KEY",
     "cohere": "CO_API_KEY",
     "bedrock": "AWS_BEARER_TOKEN_BEDROCK",
+    "bedrock_mantle": "AWS_BEARER_TOKEN_BEDROCK",
+    "fireworks": "FIREWORKS_API_KEY",
+    "together": "TOGETHER_API_KEY",
 }
 
 # Providers currently routable through Steward. Others run direct-only — their
 # steward-leg rows are suppressed so they don't pollute the matrix with known
-# "not yet supported" failures.
-STEWARD_SUPPORTED_PROVIDERS: set[str] = {"openai", "anthropic", "gemini"}
+# "not yet supported" failures. Bedrock's Steward routing has code support but
+# has not been live-tested; runs here will surface any gaps.
+STEWARD_SUPPORTED_PROVIDERS: set[str] = {
+    "openai",
+    "anthropic",
+    "gemini",
+    "bedrock",
+    "bedrock_mantle",
+    "fireworks",
+    "together",
+}
 
 # Per-provider additional models for Pass 2 (text + stream only).
 # Pass 1's canonical model is auto-picked as the first entry in llm_config.yaml.
@@ -71,9 +83,37 @@ EXTRA_MODELS: dict[str, list[str]] = {
     "openai": ["gpt-5.4", "gpt-5.4-mini"],
     "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
     "gemini": ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
-    "deepseek": ["deepseek-v4-flash"],
-    "cohere": [],
-    "bedrock": [],
+    # Reasoning profile aliases exercise the YAML ``model:`` override + the
+    # reasoning_effort/thinking plumbing introduced in v0.10.0.
+    "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro-reasoning", "deepseek-v4-pro-hard"],
+    "cohere": ["command-r-plus-08-2024"],
+    # Bedrock catalog is diverse — cover the model families that exercise each
+    # distinct code path (forced toolChoice vs toolChoice-omitted Llama 4) so
+    # regressions on any path are caught. Anthropic Claude is no longer served
+    # here — see bedrock_mantle below.
+    "bedrock": [
+        "us.meta.llama4-scout-17b-instruct-v1:0",
+        "moonshotai.kimi-k2.5",
+        "nvidia.nemotron-nano-12b-v2",
+        "deepseek.v3.2",
+    ],
+    # Mantle hosts the three open Claude SKUs — Pass 1 hits Opus 4.8 (first in
+    # YAML); Pass 2 sweeps the rest to confirm each model ID routes cleanly.
+    "bedrock_mantle": [
+        "anthropic.claude-opus-4-7",
+        "anthropic.claude-haiku-4-5",
+    ],
+    "fireworks": [
+        "accounts/fireworks/models/deepseek-v4-pro",
+        "deepseek-v4-pro-reasoning",
+        "deepseek-v4-pro-hard",
+        "accounts/fireworks/models/kimi-k2p5",
+    ],
+    "together": [
+        "deepseek-ai/DeepSeek-V4-Pro",
+        "deepseek-v4-pro-reasoning",
+        "deepseek-v4-pro-hard",
+    ],
 }
 
 OK = "✓"
@@ -182,6 +222,10 @@ def _steward_base_url(provider: str, gateway_url: str) -> str:
     at a bare gateway URL the SDK constructs paths like ``/responses`` instead
     of ``/v1/responses`` and Steward rejects them. Append ``/v1`` for OpenAI
     to match what the SDK expects.
+
+    BedrockMantle uses the bare gateway URL — Steward routes Mantle vs vanilla
+    Anthropic on the ``x-majordomo-provider`` header (auto-injected by the
+    BedrockMantle provider when ``base_url`` is set), not on the request path.
     """
     base = gateway_url.rstrip("/")
     if provider == "openai":
@@ -256,9 +300,26 @@ async def _run_cell(
         )
 
 
-def _print_row(row: Row, caps: list[str]) -> None:
-    cells = " ".join(f"{cap}:{row.cells[cap].status}" for cap in caps)
-    print(f"  [{row.route:7}] {row.provider:9} {row.model:42} {cells}")
+def _row_prefix(provider: str, model: str, route: str) -> str:
+    return f"  [{route:7}] {provider:14} {model:48}"
+
+
+def _print_cell_done(
+    provider: str,
+    model: str,
+    route: str,
+    capability: str,
+    cell: CellResult,
+) -> None:
+    """Print one line per cell as it completes. Live progress without TTY
+    tricks — each cell's line appears as soon as the call returns."""
+    elapsed = f"({cell.elapsed:.1f}s)" if cell.elapsed else ""
+    err = f" — {cell.error}" if cell.error else ""
+    print(
+        f"{_row_prefix(provider, model, route)} "
+        f"{capability:11} {cell.status} {elapsed}{err}",
+        flush=True,
+    )
 
 
 async def _run_all(
@@ -297,8 +358,8 @@ async def _run_all(
                     gateway_key=gateway_key,
                     run_id=run_id,
                 )
+                _print_cell_done(provider, model, route_name, cap, row.cells[cap])
             all_rows.append(row)
-            _print_row(row, capabilities)
 
     pass2_caps = [c for c in ("text", "stream") if c in capabilities]
     pass2_name = "per-model-smoke"
@@ -326,8 +387,8 @@ async def _run_all(
                             gateway_key=gateway_key,
                             run_id=run_id,
                         )
+                        _print_cell_done(provider, model, route_name, cap, row.cells[cap])
                     all_rows.append(row)
-                    _print_row(row, pass2_caps)
         if not any_pass2:
             print("  (no extra models configured for selected providers)")
 

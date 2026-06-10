@@ -129,6 +129,21 @@ deepseek:
       input_cost: 0.435
       output_cost: 0.87
       reasoning_effort: medium
+    # Reasoning profile — Sonnet-with-extended-thinking class. Use for code
+    # review, multi-step analysis, structured extraction under ambiguity.
+    deepseek-v4-pro-reasoning:
+      model: deepseek-v4-pro
+      input_cost: 0.435
+      output_cost: 0.87
+      thinking: enabled
+      reasoning_effort: medium
+    # Hard problems — Opus-tier work: math, complex planning, deep debugging.
+    deepseek-v4-pro-hard:
+      model: deepseek-v4-pro
+      input_cost: 0.435
+      output_cost: 0.87
+      thinking: enabled
+      reasoning_effort: high
     deepseek-chat:
       input_cost: 0.28
       output_cost: 0.42
@@ -152,41 +167,16 @@ cohere:
       output_cost: 0.15
 
 # Amazon Bedrock (Converse API). us-east-1 on-demand pricing.
-# Model IDs use the "us." cross-region inference profile prefix when AWS
-# publishes one for the model (required for on-demand throughput on most
-# Claude models). For providers without a cross-region profile (Moonshot,
-# NVIDIA Nemotron, DeepSeek v3.2), the bare model ID is used and the call
-# is region-pinned.
+# For non-Anthropic models hosted on Bedrock. Anthropic Claude models live
+# under the ``bedrock_mantle:`` block below, which uses the AWS-native
+# Anthropic Messages API endpoint (better feature support — structured
+# outputs, prompt caching, extended thinking — without Converse-shape
+# limitations).
+# Model IDs here use the "us." cross-region inference profile prefix when
+# AWS publishes one (Llama 4). Moonshot / NVIDIA Nemotron / DeepSeek use the
+# bare model ID and are region-pinned.
 bedrock:
   models:
-    # Anthropic on Bedrock (cross-region inference profiles)
-    us.anthropic.claude-opus-4-7:
-      input_cost: 5.00
-      output_cost: 25.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-sonnet-4-6:
-      input_cost: 3.00
-      output_cost: 15.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-opus-4-6-v1:
-      input_cost: 5.00
-      output_cost: 25.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-opus-4-5-20251101-v1:0:
-      input_cost: 5.00
-      output_cost: 25.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-haiku-4-5-20251001-v1:0:
-      input_cost: 1.00
-      output_cost: 5.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-sonnet-4-5-20250929-v1:0:
-      input_cost: 3.00
-      output_cost: 15.00
-      supports_temperature_top_p: false
-    us.anthropic.claude-sonnet-4-20250514-v1:0:
-      input_cost: 3.00
-      output_cost: 15.00
     # Moonshot (Kimi) on Bedrock — base model IDs, no cross-region profile.
     # Note AWS uses different prefixes ("moonshot." vs "moonshotai.") per model.
     moonshot.kimi-k2-thinking:
@@ -219,6 +209,103 @@ bedrock:
     deepseek.v3.2:
       input_cost: 0.62
       output_cost: 1.85
+
+# Amazon Bedrock Mantle — Anthropic Claude via AWS-native Messages API.
+# Endpoint: https://bedrock-mantle.{region}.api.aws/anthropic
+# Model IDs are bare ``anthropic.claude-<name>`` (no ``us.`` prefix, no ``-v1``
+# suffix). Auth via AWS_BEARER_TOKEN_BEDROCK + AWS_REGION. Opus 4.7+ and
+# Sonnet 4.5+ deprecate temperature/top_p/top_k — supports_temperature_top_p
+# must be false for those models.
+# https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock
+bedrock_mantle:
+  models:
+    anthropic.claude-opus-4-8:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    anthropic.claude-opus-4-7:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+    # Sonnet 4.6 is not yet available on Bedrock Mantle (returns 404
+    # not_found_error). Add when AWS lists it on the platform.claude.com page.
+    anthropic.claude-haiku-4-5:
+      input_cost: 1.00
+      output_cost: 5.00
+      supports_temperature_top_p: false
+
+# Fireworks AI (OpenAI-compatible). Serverless inference only.
+# Model IDs are fully qualified: accounts/fireworks/models/<slug>.
+# Qwen3 and Llama 4 SKUs use parameter-count tier pricing rather than per-model
+# headline pricing and are intentionally omitted here pending clarification.
+fireworks:
+  models:
+    accounts/fireworks/models/deepseek-v4-pro:
+      input_cost: 1.74
+      output_cost: 3.48
+      reasoning_effort: medium
+    # Reasoning + hard profiles share the same upstream SKU; the ``model:``
+    # override keeps the API model ID stable while exposing distinct YAML keys.
+    deepseek-v4-pro-reasoning:
+      model: accounts/fireworks/models/deepseek-v4-pro
+      input_cost: 1.74
+      output_cost: 3.48
+      thinking: enabled
+      reasoning_effort: medium
+    deepseek-v4-pro-hard:
+      model: accounts/fireworks/models/deepseek-v4-pro
+      input_cost: 1.74
+      output_cost: 3.48
+      thinking: enabled
+      reasoning_effort: high
+    accounts/fireworks/models/kimi-k2p5:
+      input_cost: 0.60
+      output_cost: 3.00
+    accounts/fireworks/models/kimi-k2p6:
+      input_cost: 0.95
+      output_cost: 4.00
+    accounts/fireworks/models/glm-5p1:
+      input_cost: 1.40
+      output_cost: 4.40
+
+# Together AI (OpenAI-compatible). Serverless inference only.
+# Model IDs are slash-delimited HF-style and case-sensitive.
+together:
+  models:
+    deepseek-ai/DeepSeek-V4-Pro:
+      input_cost: 2.10
+      output_cost: 4.40
+      reasoning_effort: medium
+    deepseek-v4-pro-reasoning:
+      model: deepseek-ai/DeepSeek-V4-Pro
+      input_cost: 2.10
+      output_cost: 4.40
+      thinking: enabled
+      reasoning_effort: medium
+    deepseek-v4-pro-hard:
+      model: deepseek-ai/DeepSeek-V4-Pro
+      input_cost: 2.10
+      output_cost: 4.40
+      thinking: enabled
+      reasoning_effort: high
+    moonshotai/Kimi-K2.6:
+      input_cost: 1.20
+      output_cost: 4.50
+    Qwen/Qwen3.6-Plus:
+      input_cost: 0.50
+      output_cost: 3.00
+    Qwen/Qwen3.5-9B:
+      input_cost: 0.10
+      output_cost: 0.15
+    Qwen/Qwen3-235B-A22B-fp8-tput:
+      input_cost: 0.20
+      output_cost: 0.60
+    zai-org/GLM-5.1:
+      input_cost: 1.40
+      output_cost: 4.40
+    zai-org/GLM-5:
+      input_cost: 1.00
+      output_cost: 3.20
 
 # Deprecated model mappings
 # When a user requests a deprecated model, it is automatically replaced with
@@ -263,3 +350,41 @@ aliases:
         model: gpt-4.1
       - provider: gemini
         model: gemini-2.5-pro
+  # Cross-vendor cascades for the same underlying open-weight model.
+  # Order: Fireworks first (lower published price), Together as failover.
+  deepseek-v4-pro:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/deepseek-v4-pro
+      - provider: together
+        model: deepseek-ai/DeepSeek-V4-Pro
+  # Reasoning + hard cascades end at Sonnet/Opus as the quality safety net.
+  # Use these as Sonnet-with-thinking / Opus replacements respectively.
+  deepseek-v4-pro-reasoning:
+    cascade:
+      - provider: fireworks
+        model: deepseek-v4-pro-reasoning
+      - provider: together
+        model: deepseek-v4-pro-reasoning
+      - provider: anthropic
+        model: claude-sonnet-4-6
+  deepseek-v4-pro-hard:
+    cascade:
+      - provider: fireworks
+        model: deepseek-v4-pro-hard
+      - provider: together
+        model: deepseek-v4-pro-hard
+      - provider: anthropic
+        model: claude-opus-4-7
+  kimi-k2.6:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/kimi-k2p6
+      - provider: together
+        model: moonshotai/Kimi-K2.6
+  glm-5.1:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/glm-5p1
+      - provider: together
+        model: zai-org/GLM-5.1

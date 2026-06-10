@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-01
+
+### Added
+
+- **Bedrock Mantle provider** (`BedrockMantle`) — Anthropic Claude served via AWS-native Anthropic Messages API at `https://bedrock-mantle.{region}.api.aws/anthropic`. Implemented as a thin subclass of `Anthropic`, so Claude's full feature set (structured outputs, prompt caching, extended thinking, tool use, streaming) works out of the box without Converse-shape gymnastics. Authenticates via `AWS_BEARER_TOKEN_BEDROCK` (same bearer token used for the legacy Bedrock Converse path). Region from `AWS_REGION` / `AWS_DEFAULT_REGION` / `region=` constructor arg
+- 3 BedrockMantle SKUs in `llm_config.yaml`: Claude Opus 4.8, Opus 4.7, Haiku 4.5 (model IDs use the bare `anthropic.claude-<name>` format). Sonnet 4.6 is not yet hosted on Mantle (returns 404 not_found_error); will be added when AWS lists it
+
+### Changed
+
+- **Bedrock provider scope narrowed to non-Anthropic models.** Anthropic Claude entries removed from the `bedrock:` YAML block — those now live under `bedrock_mantle:`. The remaining Bedrock catalog covers Moonshot Kimi, NVIDIA Nemotron, Meta Llama 4, and DeepSeek-on-Bedrock
+- **Removed the Bedrock native Structured Outputs path** (`outputConfig.textFormat.json_schema` via Converse). The supporting allowlist (`_BEDROCK_STRUCTURED_OUTPUTS_SUPPORTED`) and helper (`_bedrock_output_config`) are gone. Rationale: the only beneficiary was Anthropic Claude on Bedrock, which has moved to BedrockMantle where Claude's structured outputs are first-class. Non-Anthropic Bedrock models (Llama 4, Kimi, Nemotron, DeepSeek-on-Bedrock) keep the Converse tool-calling path, which is now the sole Bedrock structured-output mechanism. Eliminates the per-version Anthropic substring maintenance burden — newer Claude releases (Opus 4.8+) just work via BedrockMantle without any allowlist update
+
+### Removed
+
+- `enforce_strict_object_schema` and `strip_unsupported_schema_constraints` are no longer used by the Bedrock provider (they remain in `base.py` and continue to be used by OpenAI strict mode and Cohere respectively)
+- `us.anthropic.claude-*` entries from the `bedrock:` YAML block. Migration: use `bedrock_mantle` with `anthropic.claude-*` model IDs (no `us.` prefix, no `-v1` suffix). No backward-compatible alias provided — no users on the previous Bedrock Claude path
+
+### Known limitations
+
+- **Bedrock Nemotron Nano structured output** is grammar-enforced via Bedrock Structured Outputs, but the model can produce malformed JSON on deeply nested or complex schemas (~3+ levels). Simpler schemas pass reliably. For high-reliability structured calls, cascade to a larger model (e.g. `nemotron → claude-haiku`)
+- **Together / `json_schema` response format** is supported on a subset of hosted models. The Together provider sends the `json_schema` shape uniformly; models that reject it surface as `ProviderError`. Use the cross-vendor `deepseek-v4-pro` alias to fail over to Fireworks for structured calls on Together-only DeepSeek models
+
+## [0.10.0] - 2026-05-31
+
+### Fixed
+
+- **OpenAI / strict schemas with enum fields**: `inline_schema_refs()` now correctly inlines `$ref` references that have sibling keys (e.g. Pydantic-generated `{"$ref": "...", "description": "..."}` for fields typed with an `Enum`). Previously the `len(obj) == 1` guard left the dangling reference in place after `$defs` was popped, producing `Invalid schema for response_format: reference to component '#/$defs/...' which was not found in the schema` from OpenAI. Field-level descriptions on enum fields are preserved in the inlined output
+- **Cohere / strict schema validator** rejects standard JSON Schema constraints (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems`, `minLength`, `maxLength`, `pattern`, `format`). The Cohere provider now strips these recursively before sending so Pydantic models using `Field(ge=, le=, min_length=, ...)` work as-is. The stripping logic was promoted to a shared `strip_unsupported_schema_constraints` helper in `base.py` and is reused by the Bedrock Structured Outputs path
+- **Bedrock / Llama 4 structured output**: `us.meta.llama4-*` models reject `toolConfig.toolChoice.tool` in the Converse API. The Bedrock provider now omits the `toolChoice` field for Llama 4 model IDs while still exposing the tool, relying on the system-prompt instruction to steer the model toward the tool call
+- **Bedrock / Nemotron structured output (and grammar-enforced JSON for all supported models)**: previously, Bedrock structured output went exclusively through Converse tool calling, which produced opaque `InternalServerException` errors on NVIDIA Nemotron Nano. The Bedrock provider now uses native Bedrock Structured Outputs (`outputConfig.textFormat.json_schema`) for the supported model families — Anthropic Claude, NVIDIA Nemotron Nano, Qwen3, Google Gemma, Mistral — where Bedrock compiles the schema into a grammar and enforces it during generation. Tool calling remains the fallback path for models outside that allowlist (Llama 4, Moonshot Kimi K2.5, DeepSeek v3.2). Schemas are auto-normalized with `additionalProperties: false` and full `required` lists (the new shared `enforce_strict_object_schema` helper, previously `_enforce_openai_strict_schema`), and the same grammar-incompatible constraints stripped by Cohere (`minimum`, `maximum`, `minItems`, etc.) are stripped before being sent to Bedrock
+- **DeepSeek / structured output uses correct response_format**: DeepSeek's API supports only `response_format={"type": "json_object"}` (per https://api-docs.deepseek.com/guides/json_mode); the previous `json_schema` request shape was rejected by every DeepSeek SKU with `"This response_format type is unavailable now"`. The DeepSeek provider now uses `json_object` mode and injects the schema into the system prompt via `build_schema_prompt()`, restoring structured output across `deepseek-chat`, `deepseek-v4-pro`, and `deepseek-v4-flash`
+- **Fireworks / `reasoning_effort` + `thinking` conflict**: Fireworks rejects requests that specify both `reasoning_effort` and `thinking` (`cannot specify both 'thinking' and 'reasoning_effort'`), which broke the `deepseek-v4-pro-reasoning` and `deepseek-v4-pro-hard` profile aliases (both set both fields). The Fireworks provider now collapses the two fields: `thinking="disabled"` takes precedence (explicit opt-out wins); otherwise `reasoning_effort` is sent alone since it already implies thinking is on. Together still accepts both fields and is unaffected
+
+### Added
+
+- **Fireworks AI provider** (`Fireworks`) via the OpenAI-compatible `https://api.fireworks.ai/inference/v1` endpoint. Supports text, streaming, raw JSON-schema structured output, and Pydantic-validated structured output. Authenticates with `FIREWORKS_API_KEY`
+- **Together AI provider** (`Together`) via the OpenAI-compatible `https://api.together.xyz/v1` endpoint. Same capability surface as Fireworks. Authenticates with `TOGETHER_API_KEY`. Note: Together's `json_schema` response format is supported on a subset of hosted models; the request uses the standard shape uniformly and surfaces model-side rejections as `ProviderError`
+- 4 Fireworks serverless SKUs in `llm_config.yaml`: DeepSeek-V4-Pro, Kimi-K2.5, Kimi-K2.6, GLM-5.1
+- 7 Together serverless SKUs in `llm_config.yaml`: DeepSeek-V4-Pro, Kimi-K2.6, Qwen3.6-Plus, Qwen3.5-9B, Qwen3-235B-A22B-fp8-tput, GLM-5.1, GLM-5
+- `reasoning_effort` and `thinking` constructor kwargs on `Fireworks` and `Together`, mirroring the `DeepSeek` provider. Validated against the same effort/thinking value sets; forwarded via top-level `reasoning_effort` and `extra_body={"thinking": {"type": ...}}` respectively. Plumbed through `get_llm_instance()` from YAML attributes
+- **Multi-profile model registration**: a `llm_config.yaml` model entry may declare a `model:` field that overrides the API model ID, decoupling it from the YAML key. Lets the same upstream SKU be registered under multiple profile names with different reasoning configs
+- Three DeepSeek-V4-Pro reasoning profiles (`-reasoning`, `-hard`) registered under `deepseek`, `fireworks`, and `together` using the new `model:` override
+- Cross-vendor cascade aliases — `deepseek-v4-pro`, `kimi-k2.6`, `glm-5.1` (Fireworks → Together), and `deepseek-v4-pro-reasoning` / `deepseek-v4-pro-hard` (Fireworks → Together → Anthropic Sonnet/Opus as quality safety net)
+- `flagship_demo.py` expanded to compare closed-source frontiers (Opus 4.7, GPT-5.5, Gemini 3.1 Pro Preview, DeepSeek-Reasoner) side-by-side with DeepSeek-V4-Pro at three reasoning profiles across both Fireworks and Together
+
 ## [0.9.1] - 2026-05-18
 
 ### Fixed
