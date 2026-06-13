@@ -16,7 +16,7 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
     # Native provider SDKs — using the latest fast/small model from each.
     ("openai", "gpt-5.4-mini", ("OPENAI_API_KEY",)),
     ("anthropic", "claude-haiku-4-5-20251001", ("ANTHROPIC_API_KEY",)),
-    ("gemini", "gemini-3-flash-preview", ("GEMINI_API_KEY",)),
+    ("gemini", "gemini-3.5-flash", ("GEMINI_API_KEY",)),
     ("deepseek", "deepseek-v4-flash", ("DEEPSEEK_API_KEY",)),
     ("cohere", "command-a-03-2025", ("CO_API_KEY",)),
     # Amazon Bedrock Mantle — Claude via AWS-native Anthropic Messages API.

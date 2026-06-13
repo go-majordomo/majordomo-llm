@@ -82,7 +82,7 @@ STEWARD_SUPPORTED_PROVIDERS: set[str] = {
 EXTRA_MODELS: dict[str, list[str]] = {
     "openai": ["gpt-5.4", "gpt-5.4-mini"],
     "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
-    "gemini": ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
+    "gemini": ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
     # Reasoning profile aliases exercise the YAML ``model:`` override + the
     # reasoning_effort/thinking plumbing introduced in v0.10.0.
     "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro-reasoning", "deepseek-v4-pro-hard"],

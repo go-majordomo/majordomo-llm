@@ -35,7 +35,7 @@ FLAGSHIPS: list[tuple[str, str, str]] = [
     # Closed-source frontier flagships, one per major vendor.
     ("anthropic", "claude-opus-4-7", "ANTHROPIC_API_KEY"),
     ("openai", "gpt-5.5", "OPENAI_API_KEY"),
-    ("gemini", "gemini-3.1-pro-preview", "GEMINI_API_KEY"),
+    ("gemini", "gemini-3.5-flash", "GEMINI_API_KEY"),
     # Native DeepSeek flagship (the reasoning model from api.deepseek.com).
     ("deepseek", "deepseek-reasoner", "DEEPSEEK_API_KEY"),
     # Anthropic Claude via Bedrock Mantle. Apples-to-apples vs the anthropic

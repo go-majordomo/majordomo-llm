@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-06-12
+
+### Changed
+
+- **Gemini catalog refreshed** against https://ai.google.dev/gemini-api/docs/models — added new flagship `gemini-3.5-flash` ($1.50/$9.00, Stable), promoted `gemini-3.1-flash-lite-preview` to the stable name `gemini-3.1-flash-lite` (same pricing), and registered the deprecation mapping so existing callers auto-upgrade. `gemini-3.1-pro-preview` and `gemini-3-flash-preview` remain listed as preview. `examples/shared.py` and `examples/flagship_demo.py` Gemini entries point at `gemini-3.5-flash`; smoke-test `EXTRA_MODELS` swept to the new stable models
+
 ## [0.11.0] - 2026-06-01
 
 ### Added
