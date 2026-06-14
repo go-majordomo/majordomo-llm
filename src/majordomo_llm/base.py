@@ -337,8 +337,9 @@ class Usage:
         cached_tokens: Number of tokens served from cache (provider-specific).
         input_cost: Cost for input tokens in USD.
         output_cost: Cost for output tokens in USD.
-        total_cost: Total cost (input + output) in USD.
+        total_cost: Total cost (input + output + tool use) in USD.
         response_time: Time taken for the request in seconds.
+        tool_use_cost: Cost for provider-side tool calls (e.g. web search) in USD.
     """
 
     input_tokens: int
@@ -348,6 +349,7 @@ class Usage:
     output_cost: float
     total_cost: float
     response_time: float
+    tool_use_cost: float = field(default=0.0, kw_only=True)
 
 
 @dataclass

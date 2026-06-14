@@ -139,6 +139,7 @@ def get_llm_instance(
     base_url: str | None = None,
     default_headers: dict[str, str] | None = None,
     region: str | None = None,
+    use_web_search: bool = False,
 ) -> LLM:
     """Create an LLM instance for the specified provider and model.
 
@@ -156,12 +157,19 @@ def get_llm_instance(
         region: AWS region for the Bedrock provider (e.g., "us-east-1").
             Ignored by other providers. Defaults to ``AWS_REGION`` /
             ``AWS_DEFAULT_REGION`` env vars when not specified.
+        use_web_search: Enable the provider's server-side web search tool.
+            Validated against the model's ``supports_web_search`` flag in
+            ``llm_config.yaml``. Silently ignored for providers that do not
+            implement web search (cohere, deepseek, fireworks, together,
+            bedrock_mantle).
 
     Returns:
         An LLM instance configured for the specified provider and model.
 
     Raises:
-        ConfigurationError: If the provider or model is not recognized.
+        ConfigurationError: If the provider or model is not recognized, or if
+            ``use_web_search`` is set on a model whose config does not declare
+            ``supports_web_search: true``.
 
     Example:
         >>> llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
@@ -197,6 +205,16 @@ def get_llm_instance(
             f"Unknown model '{model}' for provider '{provider}'. Available: {available}"
         )
 
+    _WEB_SEARCH_PROVIDERS = ("openai", "anthropic", "gemini", "bedrock")
+    if (
+        use_web_search
+        and provider in _WEB_SEARCH_PROVIDERS
+        and not model_attributes.get("supports_web_search", False)
+    ):
+        raise ConfigurationError(
+            f"Model '{model}' for provider '{provider}' does not support web search."
+        )
+
     _PROVIDER_CLASSES: dict[str, type[LLM]] = {
         "openai": OpenAI,
         "anthropic": Anthropic,
@@ -220,6 +238,9 @@ def get_llm_instance(
         }
     elif provider in ("bedrock", "bedrock_mantle"):
         provider_kwargs = {"region": region}
+
+    if provider in ("openai", "anthropic", "gemini", "bedrock"):
+        provider_kwargs["use_web_search"] = use_web_search
 
     # An entry may override its API model ID via the ``model`` attribute. This
     # lets the same underlying model be registered under multiple YAML keys —

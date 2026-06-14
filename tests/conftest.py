@@ -15,6 +15,7 @@ def mock_anthropic_text_response():
     response.usage.input_tokens = 25
     response.usage.output_tokens = 10
     response.usage.cache_read_input_tokens = 0
+    response.usage.server_tool_use = None
     response.stop_reason = "end_turn"
     return response
 
@@ -32,6 +33,7 @@ def mock_anthropic_tool_response():
     response.usage.input_tokens = 50
     response.usage.output_tokens = 30
     response.usage.cache_read_input_tokens = 5
+    response.usage.server_tool_use = None
     response.stop_reason = "tool_use"
     return response
 
@@ -72,6 +74,7 @@ def mock_gemini_text_response():
     response.text = "Gemini says hello!"
     response.usage_metadata.prompt_token_count = 15
     response.usage_metadata.candidates_token_count = 5
+    response.candidates = []
     return response
 
 
@@ -82,6 +85,7 @@ def mock_gemini_json_response():
     response.text = '{"status": "success", "value": 123}'
     response.usage_metadata.prompt_token_count = 20
     response.usage_metadata.candidates_token_count = 12
+    response.candidates = []
     return response
 
 

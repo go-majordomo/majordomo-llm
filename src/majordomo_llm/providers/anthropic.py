@@ -100,6 +100,21 @@ class Anthropic(LLM):
             default_headers=self.default_headers,
         )
 
+    # Anthropic bills server-side web search at $10 per 1,000 requests.
+    _WEB_SEARCH_COST_PER_REQUEST = 0.01
+
+    def _compute_web_search_cost(self, response: Any) -> float:
+        """Return the per-call web-search fee charged by Anthropic.
+
+        Reads ``response.usage.server_tool_use.web_search_requests`` which is
+        populated only when the web_search tool was actually invoked.
+        """
+        server_tool_use = getattr(response.usage, "server_tool_use", None)
+        if server_tool_use is None:
+            return 0.0
+        requests = getattr(server_tool_use, "web_search_requests", 0) or 0
+        return requests * self._WEB_SEARCH_COST_PER_REQUEST
+
     @retry_provider_call
     async def _get_response_impl(
         self,
@@ -119,7 +134,9 @@ class Anthropic(LLM):
 
         tools: list[Any] = []
         if self.use_web_search:
-            tools.append({"type": "web_search_tool", "name": "web_search_20250305"})
+            tools.append(
+                WebSearchTool20250305Param(type="web_search_20250305", name="web_search")
+            )
 
         try:
             if self.supports_temperature_top_p:
@@ -157,6 +174,8 @@ class Anthropic(LLM):
         input_tokens = response_message.usage.input_tokens
         output_tokens = response_message.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        tool_use_cost = self._compute_web_search_cost(response_message)
+        total_cost += tool_use_cost
 
         return LLMResponse(
             content="\n".join(final_response),
@@ -167,6 +186,7 @@ class Anthropic(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            tool_use_cost=tool_use_cost,
             deprecation_warning=self.deprecation_warning,
         )
 
@@ -245,7 +265,7 @@ class Anthropic(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Anthropic-specific implementation using forced tool calling."""
-        if self.model == "claude-sonnet-4-5-20250929" and self.use_web_search:
+        if self.use_web_search:
             response, execution_time = await self._json_schema_response_with_web_search_helper(
                 user_prompt=user_prompt,
                 response_schema=response_schema,
@@ -310,6 +330,8 @@ class Anthropic(LLM):
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        tool_use_cost = self._compute_web_search_cost(response)
+        total_cost += tool_use_cost
 
         return LLMResponse(
             content=canonicalize_json_schema_output(content, response_schema),
@@ -320,6 +342,7 @@ class Anthropic(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            tool_use_cost=tool_use_cost,
         )
 
     @retry_provider_call
@@ -333,7 +356,7 @@ class Anthropic(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Anthropic-specific implementation using tool calling for structured outputs."""
-        if self.model == "claude-sonnet-4-5-20250929" and self.use_web_search:
+        if self.use_web_search:
             return await self._get_structured_response_with_web_search(
                 response_model=response_model,
                 user_prompt=user_prompt,
@@ -409,6 +432,8 @@ class Anthropic(LLM):
         input_tokens = response_message.usage.input_tokens
         output_tokens = response_message.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        tool_use_cost = self._compute_web_search_cost(response_message)
+        total_cost += tool_use_cost
 
         return LLMJSONResponse(
             content=content,
@@ -419,6 +444,7 @@ class Anthropic(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            tool_use_cost=tool_use_cost,
         )
 
     async def _get_structured_response_with_web_search(
@@ -451,6 +477,8 @@ class Anthropic(LLM):
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        tool_use_cost = self._compute_web_search_cost(response)
+        total_cost += tool_use_cost
 
         return LLMJSONResponse(
             content=content,
@@ -461,6 +489,7 @@ class Anthropic(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            tool_use_cost=tool_use_cost,
         )
 
     async def _structured_response_with_web_search_helper(

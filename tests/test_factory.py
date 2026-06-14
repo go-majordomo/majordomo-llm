@@ -209,3 +209,27 @@ class TestLLMConfig:
                 assert "output_cost" in model_config, f"{provider}/{model} missing output_cost"
                 assert model_config["input_cost"] >= 0, f"{provider}/{model} invalid input_cost"
                 assert model_config["output_cost"] >= 0, f"{provider}/{model} invalid output_cost"
+
+
+class TestUseWebSearchForwarding:
+    """Tests for use_web_search forwarding from the factory."""
+
+    def test_forwards_to_supported_provider(self, mock_all_clients):
+        llm = get_llm_instance("anthropic", "claude-sonnet-4-6", use_web_search=True)
+        assert llm.use_web_search is True
+
+    def test_default_is_false(self, mock_all_clients):
+        llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+        assert llm.use_web_search is False
+
+    def test_raises_on_unsupported_model(self, mock_all_clients):
+        with pytest.raises(ConfigurationError) as exc_info:
+            get_llm_instance("openai", "gpt-5-nano", use_web_search=True)
+        assert "does not support web search" in str(exc_info.value)
+
+    def test_silently_ignored_for_unsupported_provider(self, mock_all_clients):
+        # Cohere does not implement web search. The factory should accept
+        # use_web_search=True without raising and not forward the flag — the
+        # resulting instance should still report use_web_search=False.
+        llm = get_llm_instance("cohere", "command-a-03-2025", use_web_search=True)
+        assert llm.use_web_search is False

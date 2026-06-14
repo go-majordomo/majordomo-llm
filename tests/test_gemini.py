@@ -325,3 +325,62 @@ class TestGeminiGetResponseStream:
 
         assert response.content == "Hello world"
         assert response.input_tokens == 15
+
+
+class TestGeminiWebSearch:
+    """Tests for Gemini web search wiring."""
+
+    @pytest.fixture
+    def gemini_llm_web(self):
+        with patch("majordomo_llm.providers.gemini.genai.Client"):
+            return Gemini(
+                model="gemini-2.5-flash",
+                input_cost=0.30,
+                output_cost=2.50,
+                use_web_search=True,
+                api_key="test-key",
+            )
+
+    async def test_google_search_tool_in_config(self, gemini_llm_web, mock_gemini_text_response):
+        gemini_llm_web.client.aio.models.generate_content = AsyncMock(
+            return_value=mock_gemini_text_response
+        )
+
+        await gemini_llm_web.get_response("Latest news?")
+
+        config = gemini_llm_web.client.aio.models.generate_content.call_args.kwargs["config"]
+        assert config.tools is not None
+        assert len(config.tools) == 1
+        assert config.tools[0].google_search is not None
+
+    async def test_grounded_query_cost_added(self, gemini_llm_web, mock_gemini_text_response):
+        candidate = MagicMock()
+        candidate.grounding_metadata = MagicMock()
+        mock_gemini_text_response.candidates = [candidate]
+        gemini_llm_web.client.aio.models.generate_content = AsyncMock(
+            return_value=mock_gemini_text_response
+        )
+
+        response = await gemini_llm_web.get_response("Latest news?")
+
+        assert response.tool_use_cost == pytest.approx(0.035)
+        expected_input_cost = 15 * 0.30 / TOKENS_PER_MILLION
+        expected_output_cost = 5 * 2.50 / TOKENS_PER_MILLION
+        assert response.total_cost == pytest.approx(
+            expected_input_cost + expected_output_cost + 0.035
+        )
+
+    async def test_structured_call_raises_when_grounding_enabled(
+        self, gemini_llm_web, mock_gemini_json_response
+    ):
+        gemini_llm_web.client.aio.models.generate_content = AsyncMock(
+            return_value=mock_gemini_json_response
+        )
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            await gemini_llm_web.get_json_schema_response(
+                "Return status",
+                response_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+            )
+
+        assert "grounded web search" in str(exc_info.value)

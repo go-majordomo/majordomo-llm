@@ -16,7 +16,7 @@ from majordomo_llm.base import (
     canonicalize_json_schema_output,
     resolve_api_key,
 )
-from majordomo_llm.exceptions import ProviderError
+from majordomo_llm.exceptions import ConfigurationError, ProviderError
 from majordomo_llm.retry import retry_provider_call
 
 
@@ -47,6 +47,7 @@ class Gemini(LLM):
         output_cost: float,
         *,
         supports_temperature_top_p: bool = True,
+        use_web_search: bool = False,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -59,6 +60,7 @@ class Gemini(LLM):
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether the model supports temperature/top_p.
+            use_web_search: Enable the Google Search grounding tool.
             api_key: Optional API key. Defaults to ``GEMINI_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -74,6 +76,7 @@ class Gemini(LLM):
             input_cost=input_cost,
             output_cost=output_cost,
             supports_temperature_top_p=True,
+            use_web_search=use_web_search,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
             base_url=base_url,
@@ -86,6 +89,28 @@ class Gemini(LLM):
                 headers=self.default_headers,
             )
         self.client = genai.Client(api_key=resolved_api_key, http_options=http_options)
+
+    # Gemini bills grounded queries at $35 per 1,000 requests.
+    _GROUNDED_QUERY_COST = 0.035
+
+    def _apply_web_search(self, config_kwargs: dict[str, Any]) -> None:
+        """Attach the Google Search tool to a request config when enabled."""
+        if not self.use_web_search:
+            return
+        config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+
+    def _compute_web_search_cost(self, response: Any) -> float:
+        """Return the per-call grounded-query fee charged by Gemini.
+
+        Counts response candidates that carry ``grounding_metadata`` — the
+        only signal the API surfaces when a grounded query was actually
+        performed.
+        """
+        candidates = getattr(response, "candidates", None) or []
+        grounded = sum(
+            1 for c in candidates if getattr(c, "grounding_metadata", None) is not None
+        )
+        return grounded * self._GROUNDED_QUERY_COST
 
     @retry_provider_call
     async def _get_response_impl(
@@ -118,6 +143,7 @@ class Gemini(LLM):
         }
         if extra_headers:
             config_kwargs["http_options"] = types.HttpOptions(headers=extra_headers)
+        self._apply_web_search(config_kwargs)
         try:
             response = await self.client.aio.models.generate_content(
                 model=self.model,
@@ -134,6 +160,8 @@ class Gemini(LLM):
 
         input_tokens, output_tokens = _gemini_token_counts(response)
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        tool_use_cost = self._compute_web_search_cost(response)
+        total_cost += tool_use_cost
 
         return LLMResponse(
             content=response.text or "",
@@ -144,6 +172,7 @@ class Gemini(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            tool_use_cost=tool_use_cost,
             deprecation_warning=self.deprecation_warning,
         )
 
@@ -164,6 +193,7 @@ class Gemini(LLM):
         }
         if extra_headers:
             config_kwargs["http_options"] = types.HttpOptions(headers=extra_headers)
+        self._apply_web_search(config_kwargs)
 
         try:
             response = await self.client.aio.models.generate_content_stream(
@@ -207,6 +237,12 @@ class Gemini(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Gemini-specific implementation using response schema for structured outputs."""
+        if self.use_web_search:
+            raise ConfigurationError(
+                "Gemini does not support combining grounded web search with "
+                "response_schema in the same request. Use a separate Gemini "
+                "instance with use_web_search=False for structured calls."
+            )
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
             "temperature": temperature,

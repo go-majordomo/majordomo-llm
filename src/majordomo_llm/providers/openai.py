@@ -51,6 +51,7 @@ class OpenAI(LLM):
         input_cost: float,
         output_cost: float,
         supports_temperature_top_p: bool = True,
+        use_web_search: bool = False,
         *,
         api_key: str | None = None,
         api_key_alias: str | None = None,
@@ -64,6 +65,7 @@ class OpenAI(LLM):
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
+            use_web_search: Enable Responses API ``web_search_preview`` tool.
             api_key: Optional API key. Defaults to ``OPENAI_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -79,6 +81,7 @@ class OpenAI(LLM):
             input_cost=input_cost,
             output_cost=output_cost,
             supports_temperature_top_p=supports_temperature_top_p,
+            use_web_search=use_web_search,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
             base_url=base_url,
@@ -89,6 +92,16 @@ class OpenAI(LLM):
             base_url=self.base_url,
             default_headers=self.default_headers,
         )
+
+    def _web_search_kwargs(self) -> dict[str, Any]:
+        """Return ``tools=`` kwarg for the Responses API when web search is on.
+
+        OpenAI bills the web_search_preview tool's tokens through normal output
+        tokens, so no separate ``tool_use_cost`` is added.
+        """
+        if not self.use_web_search:
+            return {}
+        return {"tools": [{"type": "web_search_preview"}]}
 
     @retry_provider_call
     async def _get_response_impl(
@@ -114,6 +127,7 @@ class OpenAI(LLM):
     ) -> LLMResponse:
         """Internal method to get a response from OpenAI."""
         start_time = time.time()
+        web_search_kwargs = self._web_search_kwargs()
         try:
             if self.supports_temperature_top_p:
                 response = await self.client.responses.create(
@@ -123,6 +137,7 @@ class OpenAI(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     extra_headers=extra_headers,
+                    **web_search_kwargs,
                 )
             else:
                 response = await self.client.responses.create(
@@ -130,6 +145,7 @@ class OpenAI(LLM):
                     instructions=system_prompt,
                     input=user_prompt,
                     extra_headers=extra_headers,
+                    **web_search_kwargs,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -166,6 +182,7 @@ class OpenAI(LLM):
     ) -> LLMStreamResponse:
         """Get a streaming text response from OpenAI."""
         state = _StreamState()
+        web_search_kwargs = self._web_search_kwargs()
 
         try:
             if self.supports_temperature_top_p:
@@ -177,6 +194,7 @@ class OpenAI(LLM):
                     top_p=top_p,
                     stream=True,
                     extra_headers=extra_headers,
+                    **web_search_kwargs,
                 )
             else:
                 response = await self.client.responses.create(
@@ -185,6 +203,7 @@ class OpenAI(LLM):
                     input=user_prompt,
                     stream=True,
                     extra_headers=extra_headers,
+                    **web_search_kwargs,
                 )
         except openai.APIError as e:
             raise ProviderError(
@@ -236,6 +255,7 @@ class OpenAI(LLM):
         if schema_description is not None:
             response_format["description"] = schema_description
         text_config: Any = {"format": response_format}
+        web_search_kwargs = self._web_search_kwargs()
 
         try:
             if self.supports_temperature_top_p:
@@ -247,6 +267,7 @@ class OpenAI(LLM):
                     top_p=top_p,
                     text=text_config,
                     extra_headers=extra_headers,
+                    **web_search_kwargs,
                 )
             else:
                 response = await self.client.responses.create(
@@ -255,6 +276,7 @@ class OpenAI(LLM):
                     input=user_prompt,
                     text=text_config,
                     extra_headers=extra_headers,
+                    **web_search_kwargs,
                 )
         except openai.APIError as e:
             raise ProviderError(

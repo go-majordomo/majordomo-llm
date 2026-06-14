@@ -308,3 +308,55 @@ class TestAnthropicGetResponseStream:
 
         call_kwargs = anthropic_llm.client.messages.create.call_args.kwargs
         assert call_kwargs["stream"] is True
+
+
+class TestAnthropicWebSearch:
+    """Tests for Anthropic web search wiring."""
+
+    @pytest.fixture
+    def anthropic_llm_web(self):
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model="claude-sonnet-4-6",
+                input_cost=3.0,
+                output_cost=15.0,
+                use_web_search=True,
+                api_key="test-key",
+            )
+
+    async def test_web_search_tool_included_in_text_call(
+        self, anthropic_llm_web, mock_anthropic_text_response
+    ):
+        """Should include WebSearchTool20250305Param when use_web_search=True."""
+        anthropic_llm_web.client.messages.create = AsyncMock(
+            return_value=mock_anthropic_text_response
+        )
+
+        await anthropic_llm_web.get_response("Latest news?")
+
+        call_kwargs = anthropic_llm_web.client.messages.create.call_args.kwargs
+        tools = call_kwargs["tools"]
+        assert any(
+            t.get("type") == "web_search_20250305" and t.get("name") == "web_search"
+            for t in tools
+        )
+
+    async def test_web_search_cost_added_to_total(
+        self, anthropic_llm_web, mock_anthropic_text_response
+    ):
+        """Should add server_tool_use web_search_requests * $0.01 to total_cost."""
+        from unittest.mock import MagicMock
+
+        mock_anthropic_text_response.usage.server_tool_use = MagicMock(web_search_requests=2)
+        anthropic_llm_web.client.messages.create = AsyncMock(
+            return_value=mock_anthropic_text_response
+        )
+
+        response = await anthropic_llm_web.get_response("Latest news?")
+
+        assert response.tool_use_cost == pytest.approx(0.02)
+        expected_input_cost = 25 * 3.0 / TOKENS_PER_MILLION
+        expected_output_cost = 10 * 15.0 / TOKENS_PER_MILLION
+        assert response.total_cost == pytest.approx(
+            expected_input_cost + expected_output_cost + 0.02
+        )

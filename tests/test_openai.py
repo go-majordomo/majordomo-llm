@@ -447,3 +447,48 @@ class TestOpenAIGetResponseStream:
 
         call_kwargs = openai_llm.client.responses.create.call_args.kwargs
         assert call_kwargs["stream"] is True
+
+
+class TestOpenAIWebSearch:
+    """Tests for OpenAI web search wiring."""
+
+    @pytest.fixture
+    def openai_llm_web(self):
+        with patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"):
+            return OpenAI(
+                model="gpt-4.1",
+                input_cost=2.0,
+                output_cost=8.0,
+                use_web_search=True,
+                api_key="test-key",
+            )
+
+    @pytest.fixture
+    def openai_llm_no_web(self):
+        with patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"):
+            return OpenAI(
+                model="gpt-4.1",
+                input_cost=2.0,
+                output_cost=8.0,
+                api_key="test-key",
+            )
+
+    async def test_web_search_tool_passed_when_enabled(
+        self, openai_llm_web, mock_openai_text_response
+    ):
+        openai_llm_web.client.responses.create = AsyncMock(return_value=mock_openai_text_response)
+
+        await openai_llm_web.get_response("Latest news?")
+
+        call_kwargs = openai_llm_web.client.responses.create.call_args.kwargs
+        assert call_kwargs.get("tools") == [{"type": "web_search_preview"}]
+
+    async def test_no_tools_when_disabled(self, openai_llm_no_web, mock_openai_text_response):
+        openai_llm_no_web.client.responses.create = AsyncMock(
+            return_value=mock_openai_text_response
+        )
+
+        await openai_llm_no_web.get_response("Hello")
+
+        call_kwargs = openai_llm_no_web.client.responses.create.call_args.kwargs
+        assert "tools" not in call_kwargs

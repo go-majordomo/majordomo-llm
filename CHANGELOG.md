@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-13
+
+### Added
+
+- **`use_web_search` extended to OpenAI and Gemini.** Previously only Anthropic accepted the flag (and only on `claude-sonnet-4-5-20250929`). OpenAI now wires the Responses API `web_search_preview` tool; Gemini attaches the `google_search` grounding tool to its `GenerateContentConfig`. Bedrock continues to accept the flag as a no-op for interface parity
+- **`get_llm_instance(..., use_web_search=...)` factory forwarding.** The flag is validated against a new `supports_web_search: true` config flag per model in `llm_config.yaml` and forwarded to capable providers (openai, anthropic, gemini, bedrock). Passing `use_web_search=True` for a model whose config does not declare the flag raises `ConfigurationError`. Providers without a web-search story (cohere, deepseek, fireworks, together, bedrock_mantle) silently ignore the flag
+- **`tool_use_cost: float` on `Usage`** (kw-only, defaults to `0.0`). Anthropic populates it from `response.usage.server_tool_use.web_search_requests` at $0.01/request; Gemini populates it by counting candidates with `grounding_metadata` at $0.035/request. OpenAI bills web search through normal output tokens, so it remains `0.0` for that provider. The value is added into `total_cost`
+- `examples/web_search_demo.py` — one supported model from each of Anthropic, OpenAI, and Gemini with `use_web_search=True`, printing the full cost breakdown (input + output + tool)
+
+### Changed
+
+- **Anthropic web-search gate relaxed from a single hard-coded model to a YAML capability flag.** The `self.model == "claude-sonnet-4-5-20250929"` check is gone; the factory's `supports_web_search` validation drives gating. Web search is now flagged on Claude 4.5 and 4.6 SKUs (opus-4-7, opus-4-6, sonnet-4-6, opus-4-5-20251101, sonnet-4-5-20250929, haiku-4-5-20251001)
+- **Anthropic plain-text web-search tool fixed.** The plain-text response path was previously appending `{"type": "web_search_tool", "name": "web_search_20250305"}`, which is not a valid tool type. Now uses `WebSearchTool20250305Param(type="web_search_20250305", name="web_search")` to match the structured-output paths
+- OpenAI `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5`, `gpt-5-mini`, `gpt-4.1`, `gpt-4.1-mini` flagged `supports_web_search: true`. Gemini `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash` flagged the same
+
+### Known limitations
+
+- **Gemini cannot combine grounding with `response_schema` in a single request** — the API rejects the combination. The Gemini provider raises `ConfigurationError` from `_get_json_schema_response` (and any path that routes through it) when `use_web_search=True`. To use both features, construct one Gemini instance with `use_web_search=True` for grounded text/stream calls and a separate instance with `use_web_search=False` for structured calls
+
 ## [0.11.1] - 2026-06-12
 
 ### Changed
