@@ -128,10 +128,13 @@ class TestRegisterAlias:
 
     def test_registers_cascade(self, mock_all_clients):
         """Should register a cascade alias."""
-        register_alias("myfallback", [
-            ("anthropic", "claude-sonnet-4-20250514"),
-            ("openai", "gpt-4.1"),
-        ])
+        register_alias(
+            "myfallback",
+            [
+                ("anthropic", "claude-sonnet-4-20250514"),
+                ("openai", "gpt-4.1"),
+            ],
+        )
 
         llm = get_llm_by_alias("myfallback")
         assert isinstance(llm, LLMCascade)

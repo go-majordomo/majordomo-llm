@@ -163,13 +163,21 @@ class TestLLMCostCalculation:
         """Concrete implementation for testing abstract base class."""
 
         async def _get_response_impl(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            self,
+            user_prompt,
+            system_prompt=None,
+            temperature=0.3,
+            top_p=1.0,
             extra_headers=None,
         ):
             raise NotImplementedError()
 
         async def _get_response_stream_impl(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            self,
+            user_prompt,
+            system_prompt=None,
+            temperature=0.3,
+            top_p=1.0,
             extra_headers=None,
         ):
             raise NotImplementedError()
@@ -239,13 +247,21 @@ class TestLLMFullModelName:
         """Concrete implementation for testing."""
 
         async def _get_response_impl(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            self,
+            user_prompt,
+            system_prompt=None,
+            temperature=0.3,
+            top_p=1.0,
             extra_headers=None,
         ):
             raise NotImplementedError()
 
         async def _get_response_stream_impl(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            self,
+            user_prompt,
+            system_prompt=None,
+            temperature=0.3,
+            top_p=1.0,
             extra_headers=None,
         ):
             raise NotImplementedError()
@@ -269,13 +285,21 @@ class TestLLMStreamResponse:
         """Concrete implementation for testing abstract base class."""
 
         async def _get_response_impl(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            self,
+            user_prompt,
+            system_prompt=None,
+            temperature=0.3,
+            top_p=1.0,
             extra_headers=None,
         ):
             raise NotImplementedError()
 
         async def _get_response_stream_impl(
-            self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+            self,
+            user_prompt,
+            system_prompt=None,
+            temperature=0.3,
+            top_p=1.0,
             extra_headers=None,
         ):
             raise NotImplementedError()
@@ -405,7 +429,10 @@ class _RecordingLLM(LLM):
 
     def __init__(self, content: str = "response", **kwargs):
         super().__init__(
-            provider="test", model="test-model", input_cost=1.0, output_cost=2.0,
+            provider="test",
+            model="test-model",
+            input_cost=1.0,
+            output_cost=2.0,
             **kwargs,
         )
         self.canned_content = content
@@ -413,14 +440,22 @@ class _RecordingLLM(LLM):
         self.schema_calls: list[str] = []
 
     async def _get_response_impl(
-        self, user_prompt, system_prompt=None, temperature=0.3, top_p=1.0,
+        self,
+        user_prompt,
+        system_prompt=None,
+        temperature=0.3,
+        top_p=1.0,
         extra_headers=None,
     ):
         self.calls.append(user_prompt)
         return LLMResponse(
             content=self.canned_content,
-            input_tokens=10, output_tokens=20, cached_tokens=0,
-            input_cost=0.01, output_cost=0.02, total_cost=0.03,
+            input_tokens=10,
+            output_tokens=20,
+            cached_tokens=0,
+            input_cost=0.01,
+            output_cost=0.02,
+            total_cost=0.03,
             response_time=0.1,
         )
 
@@ -428,15 +463,25 @@ class _RecordingLLM(LLM):
         raise NotImplementedError()
 
     async def _get_json_schema_response(
-        self, user_prompt, response_schema, system_prompt=None,
-        schema_name="Response", schema_description=None,
-        temperature=0.3, top_p=1.0, extra_headers=None,
+        self,
+        user_prompt,
+        response_schema,
+        system_prompt=None,
+        schema_name="Response",
+        schema_description=None,
+        temperature=0.3,
+        top_p=1.0,
+        extra_headers=None,
     ):
         self.schema_calls.append(user_prompt)
         return LLMResponse(
             content=self.canned_content,
-            input_tokens=10, output_tokens=20, cached_tokens=0,
-            input_cost=0.01, output_cost=0.02, total_cost=0.03,
+            input_tokens=10,
+            output_tokens=20,
+            cached_tokens=0,
+            input_cost=0.01,
+            output_cost=0.02,
+            total_cost=0.03,
             response_time=0.1,
         )
 
@@ -456,7 +501,8 @@ class TestLLMWithoutHooks:
     async def test_get_json_schema_response_passes_through(self):
         llm = _RecordingLLM(content='{"name":"x","population":1}')
         response = await llm.get_json_schema_response(
-            user_prompt="prompt", response_schema=COUNTRY_SCHEMA,
+            user_prompt="prompt",
+            response_schema=COUNTRY_SCHEMA,
         )
         assert response.content == '{"name":"x","population":1}'
         assert llm.schema_calls == ["prompt"]
@@ -556,15 +602,15 @@ class TestLLMWithHooks:
                 return HookOutcome.pass_through(self.name)
 
             async def after_call(self, prompt, response, ctx):
-                return HookOutcome.redact(
-                    self.name, '{"name":"y","population":2}', "rewrite"
-                )
+                return HookOutcome.redact(self.name, '{"name":"y","population":2}', "rewrite")
 
         pipeline = HookPipeline([Hook()])
         llm = _RecordingLLM(
-            content='{"name":"x","population":1}', hook_pipeline=pipeline,
+            content='{"name":"x","population":1}',
+            hook_pipeline=pipeline,
         )
         response = await llm.get_json_schema_response(
-            user_prompt="prompt", response_schema=COUNTRY_SCHEMA,
+            user_prompt="prompt",
+            response_schema=COUNTRY_SCHEMA,
         )
         assert response.content == '{"name":"y","population":2}'

@@ -173,9 +173,7 @@ class LLMCascade(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Unused on the cascade — ``_get_json_schema_response_retried`` dispatches directly."""
-        raise NotImplementedError(
-            "LLMCascade dispatches via _get_json_schema_response_retried"
-        )
+        raise NotImplementedError("LLMCascade dispatches via _get_json_schema_response_retried")
 
     async def _cascade_call(
         self,

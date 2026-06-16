@@ -24,8 +24,7 @@ import yaml
 
 CONFIG_PATH = Path(__file__).parent.parent / "src" / "majordomo_llm" / "llm_config.yaml"
 LITELLM_URL = (
-    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
-    "model_prices_and_context_window.json"
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 )
 TOKENS_PER_MILLION = 1_000_000
 
@@ -44,6 +43,7 @@ DIVIDER = "═" * 64
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+
 def load_config() -> dict:
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
@@ -51,10 +51,11 @@ def load_config() -> dict:
 
 # ── LiteLLM fetch ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ModelInfo:
     model_id: str
-    input_cost: float   # USD per million tokens
+    input_cost: float  # USD per million tokens
     output_cost: float  # USD per million tokens
 
 
@@ -96,6 +97,7 @@ def fetch_litellm_models() -> dict[str, dict[str, ModelInfo]]:
 
 # ── Diff ──────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ProviderDiff:
     provider: str
@@ -115,7 +117,11 @@ def compute_diff(
     litellm_ids = set(litellm_models.keys())
 
     diff.new_models = sorted(
-        [m for mid, m in litellm_models.items() if mid not in config_models and mid not in deprecated],
+        [
+            m
+            for mid, m in litellm_models.items()
+            if mid not in config_models and mid not in deprecated
+        ],
         key=lambda m: m.model_id,
     )
 
@@ -129,6 +135,7 @@ def compute_diff(
 
 
 # ── Reporting ─────────────────────────────────────────────────────────────────
+
 
 def print_new_models(diffs: dict[str, ProviderDiff]) -> None:
     any_new = any(d.new_models for d in diffs.values())
@@ -201,6 +208,7 @@ def print_removed_models(config: dict, diffs: dict[str, ProviderDiff]) -> None:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     config = load_config()

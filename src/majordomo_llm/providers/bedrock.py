@@ -88,9 +88,7 @@ class Bedrock(LLM):
         Raises:
             ConfigurationError: If no API key or region can be resolved.
         """
-        resolved_api_key = resolve_api_key(
-            api_key, "AWS_BEARER_TOKEN_BEDROCK", "Amazon Bedrock"
-        )
+        resolved_api_key = resolve_api_key(api_key, "AWS_BEARER_TOKEN_BEDROCK", "Amazon Bedrock")
         resolved_region = (
             region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         )

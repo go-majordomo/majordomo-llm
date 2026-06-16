@@ -15,7 +15,7 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 - **Structured Outputs** - Native support for Pydantic models and raw JSON Schema dicts
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
 - **Automatic Fallback** - Cascade across providers with `LLMCascade` for resilience
-- **Request Logging** - Optional async logging to PostgreSQL/MySQL/SQLite with S3 or local file storage for request/response bodies
+- **Request Logging** - Optional async logging to PostgreSQL/MySQL/SQLite/Mixpanel with S3 or local file storage for request/response bodies
 - **API Key Tracking** - Log hashed API keys and optional aliases for usage attribution
 - **Async First** - Fully async/await compatible for high-performance applications
 - **Type Safe** - Complete type annotations and `py.typed` marker for IDE support
@@ -37,7 +37,7 @@ uv add majordomo-llm
 To enable request logging to PostgreSQL, MySQL, or S3:
 
 ```bash
-pip install majordomo-llm[logging]
+pip install 'majordomo-llm[logging]'
 ```
 
 ## Quick Start
@@ -427,12 +427,38 @@ CREATE TABLE IF NOT EXISTS llm_requests (
 );
 ```
 
+#### Mixpanel Analytics
+
+Send LLM usage metrics to Mixpanel as `"llm_request"` events. Each request becomes a tracked event with all cost, token, and timing data as event properties. The `api_key_alias` is used as the Mixpanel `distinct_id` for per-key analytics.
+
+```python
+from majordomo_llm import get_llm_instance
+from majordomo_llm.logging import LoggingLLM, MixpanelAdapter
+
+async def main():
+    llm = get_llm_instance("anthropic", "claude-sonnet-4-20250514")
+
+    # Default (US data residency)
+    db = await MixpanelAdapter.create("your-mixpanel-token")
+
+    # EU or India data residency
+    # db = await MixpanelAdapter.create("your-token", api_host="https://api-eu.mixpanel.com")
+
+    logged_llm = LoggingLLM(llm, db)
+    response = await logged_llm.get_response("Hello!")
+
+    await logged_llm.close()
+```
+
+Each Mixpanel event includes: `provider`, `model`, `status`, `timestamp`, `response_time`, `input_tokens`, `output_tokens`, `cached_tokens`, `input_cost`, `output_cost`, `total_cost`, `api_key_alias`, and `api_key_hash`. `None` values are omitted from the event properties.
+
 #### Available Adapters
 
 **Database Adapters:**
 - **PostgresAdapter** - PostgreSQL via asyncpg
 - **MySQLAdapter** - MySQL via aiomysql
 - **SqliteAdapter** - SQLite via aiosqlite (great for local development)
+- **MixpanelAdapter** - Mixpanel analytics via the mixpanel SDK
 
 **Storage Adapters:**
 - **S3Adapter** - AWS S3 via aioboto3

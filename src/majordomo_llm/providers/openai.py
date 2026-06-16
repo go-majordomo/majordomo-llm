@@ -290,11 +290,14 @@ class OpenAI(LLM):
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
-        cached_tokens = getattr(
-            getattr(response.usage, "input_tokens_details", None),
-            "cached_tokens",
-            0,
-        ) or 0
+        cached_tokens = (
+            getattr(
+                getattr(response.usage, "input_tokens_details", None),
+                "cached_tokens",
+                0,
+            )
+            or 0
+        )
 
         return LLMResponse(
             content=canonicalize_json_schema_output(response.output_text, response_schema),

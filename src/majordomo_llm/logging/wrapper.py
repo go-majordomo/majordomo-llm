@@ -76,8 +76,7 @@ class LoggingLLM(LLM):
     ) -> LLMResponse:
         """Unused — :meth:`get_response` overrides the public method directly."""
         raise NotImplementedError(
-            "LoggingLLM logs at the public method layer; _get_response_impl "
-            "is never called"
+            "LoggingLLM logs at the public method layer; _get_response_impl is never called"
         )
 
     async def _get_response_stream_impl(
@@ -90,8 +89,7 @@ class LoggingLLM(LLM):
     ) -> LLMStreamResponse:
         """Unused — :meth:`get_response_stream` overrides the public method directly."""
         raise NotImplementedError(
-            "LoggingLLM logs at the public method layer; _get_response_stream_impl "
-            "is never called"
+            "LoggingLLM logs at the public method layer; _get_response_stream_impl is never called"
         )
 
     async def _log_request(
@@ -175,7 +173,10 @@ class LoggingLLM(LLM):
 
         try:
             response = await self._llm.get_response(
-                user_prompt, system_prompt, temperature, top_p,
+                user_prompt,
+                system_prompt,
+                temperature,
+                top_p,
                 extra_headers=extra_headers,
                 caller_metadata=caller_metadata,
             )
@@ -218,7 +219,10 @@ class LoggingLLM(LLM):
 
         try:
             stream = await self._llm.get_response_stream(
-                user_prompt, system_prompt, temperature, top_p,
+                user_prompt,
+                system_prompt,
+                temperature,
+                top_p,
                 extra_headers=extra_headers,
             )
         except Exception as e:
@@ -273,7 +277,10 @@ class LoggingLLM(LLM):
 
         try:
             response = await self._llm.get_json_response(
-                user_prompt, system_prompt, temperature, top_p,
+                user_prompt,
+                system_prompt,
+                temperature,
+                top_p,
                 extra_headers=extra_headers,
                 caller_metadata=caller_metadata,
             )
@@ -317,7 +324,11 @@ class LoggingLLM(LLM):
 
         try:
             response = await self._llm.get_structured_json_response(
-                response_model, user_prompt, system_prompt, temperature, top_p,
+                response_model,
+                user_prompt,
+                system_prompt,
+                temperature,
+                top_p,
                 extra_headers=extra_headers,
                 caller_metadata=caller_metadata,
             )

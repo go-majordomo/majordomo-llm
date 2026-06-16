@@ -38,9 +38,7 @@ class RegexHook:
             return HookOutcome.pass_through(self.name)
         return self._evaluate(prompt)
 
-    async def after_call(
-        self, prompt: str, response: str, ctx: HookContext
-    ) -> HookOutcome:
+    async def after_call(self, prompt: str, response: str, ctx: HookContext) -> HookOutcome:
         if self.phase == "before":
             return HookOutcome.pass_through(self.name)
         return self._evaluate(response)

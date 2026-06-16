@@ -45,9 +45,7 @@ class _StubHook:
             return HookOutcome.pass_through(self.name)
         return self._before(prompt, ctx)
 
-    async def after_call(
-        self, prompt: str, response: str, ctx: HookContext
-    ) -> HookOutcome:
+    async def after_call(self, prompt: str, response: str, ctx: HookContext) -> HookOutcome:
         self.after_called_with.append((prompt, response, ctx))
         if self._after is None:
             return HookOutcome.pass_through(self.name)
@@ -96,9 +94,7 @@ class TestHookPipelineAfter:
         assert result == "CLEAN"
 
     async def test_after_call_block_raises_after_call(self, echo_call):
-        hook = _StubHook(
-            "blocker", after=lambda p, r, _: HookOutcome.block("blocker", "no")
-        )
+        hook = _StubHook("blocker", after=lambda p, r, _: HookOutcome.block("blocker", "no"))
         pipeline = HookPipeline([hook])
         with pytest.raises(HookBlocked):
             await pipeline.run("prompt", echo_call)

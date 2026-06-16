@@ -137,11 +137,12 @@ class CellResult:
 async def _run_text(llm: LLM, extra_headers: dict[str, str] | None) -> CellResult:
     t = time.time()
     r = await llm.get_response(
-        "Reply with just the word OK.", temperature=0.0, extra_headers=extra_headers,
+        "Reply with just the word OK.",
+        temperature=0.0,
+        extra_headers=extra_headers,
     )
     ok = bool(r.content and r.content.strip())
-    return CellResult(OK if ok else FAIL, time.time() - t,
-                      "" if ok else "empty content")
+    return CellResult(OK if ok else FAIL, time.time() - t, "" if ok else "empty content")
 
 
 async def _run_json(llm: LLM, extra_headers: dict[str, str] | None) -> CellResult:
@@ -152,8 +153,9 @@ async def _run_json(llm: LLM, extra_headers: dict[str, str] | None) -> CellResul
         extra_headers=extra_headers,
     )
     ok = isinstance(r.content, dict) and "status" in r.content
-    return CellResult(OK if ok else FAIL, time.time() - t,
-                      "" if ok else f"unexpected payload: {r.content!r}")
+    return CellResult(
+        OK if ok else FAIL, time.time() - t, "" if ok else f"unexpected payload: {r.content!r}"
+    )
 
 
 async def _run_structured(llm: LLM, extra_headers: dict[str, str] | None) -> CellResult:
@@ -168,22 +170,24 @@ async def _run_structured(llm: LLM, extra_headers: dict[str, str] | None) -> Cel
     except StructuredOutputUnsupported:
         return CellResult(SKIP, 0.0, "structured output unsupported")
     ok = isinstance(r.content, _Person) and r.content.age == 30
-    return CellResult(OK if ok else FAIL, time.time() - t,
-                      "" if ok else f"unexpected model: {r.content!r}")
+    return CellResult(
+        OK if ok else FAIL, time.time() - t, "" if ok else f"unexpected model: {r.content!r}"
+    )
 
 
 async def _run_stream(llm: LLM, extra_headers: dict[str, str] | None) -> CellResult:
     t = time.time()
     stream = await llm.get_response_stream(
-        "Reply with just the word OK.", temperature=0.0, extra_headers=extra_headers,
+        "Reply with just the word OK.",
+        temperature=0.0,
+        extra_headers=extra_headers,
     )
     chunks: list[str] = []
     async for chunk in stream:
         chunks.append(chunk)
     text = "".join(chunks)
     ok = bool(text.strip())
-    return CellResult(OK if ok else FAIL, time.time() - t,
-                      "" if ok else "empty stream")
+    return CellResult(OK if ok else FAIL, time.time() - t, "" if ok else "empty stream")
 
 
 CapabilityFn = Callable[[LLM, "dict[str, str] | None"], Awaitable[CellResult]]
@@ -270,7 +274,8 @@ async def _run_cell(
 ) -> CellResult:
     try:
         llm = _build_llm(
-            provider, model,
+            provider,
+            model,
             via_steward=via_steward,
             gateway_url=gateway_url,
             gateway_key=gateway_key,
@@ -329,7 +334,8 @@ async def _run_all(
 
     def routes_for(provider: str) -> list[tuple[str, bool]]:
         return [
-            (name, via) for name, via in routes
+            (name, via)
+            for name, via in routes
             if not via or provider in STEWARD_SUPPORTED_PROVIDERS
         ]
 
@@ -343,7 +349,10 @@ async def _run_all(
             row = Row(provider=provider, model=model, route=route_name)
             for cap in capabilities:
                 row.cells[cap] = await _run_cell(
-                    provider, model, cap, pass1_name,
+                    provider,
+                    model,
+                    cap,
+                    pass1_name,
                     via_steward=via_steward,
                     gateway_url=gateway_url,
                     gateway_key=gateway_key,
@@ -369,7 +378,10 @@ async def _run_all(
                     row = Row(provider=provider, model=model, route=route_name)
                     for cap in pass2_caps:
                         row.cells[cap] = await _run_cell(
-                            provider, model, cap, pass2_name,
+                            provider,
+                            model,
+                            cap,
+                            pass2_name,
                             via_steward=via_steward,
                             gateway_url=gateway_url,
                             gateway_key=gateway_key,
@@ -431,21 +443,27 @@ async def _run_all(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--provider", action="append", default=None,
+        "--provider",
+        action="append",
+        default=None,
         choices=get_supported_providers(),
         help="Restrict to one provider (repeatable).",
     )
     parser.add_argument(
-        "--capability", action="append", default=None,
+        "--capability",
+        action="append",
+        default=None,
         choices=list(CAPABILITIES.keys()),
         help="Restrict to one capability (repeatable).",
     )
     parser.add_argument(
-        "--skip-direct", action="store_true",
+        "--skip-direct",
+        action="store_true",
         help="Only run through-steward calls.",
     )
     parser.add_argument(
-        "--skip-steward", action="store_true",
+        "--skip-steward",
+        action="store_true",
         help="Only run direct calls.",
     )
     args = parser.parse_args()
@@ -494,24 +512,26 @@ def main() -> int:
         routes.append(("steward", True))
 
     run_id = str(uuid.uuid4())
-    steward_only_direct = [
-        p for p in runnable_providers if p not in STEWARD_SUPPORTED_PROVIDERS
-    ]
+    steward_only_direct = [p for p in runnable_providers if p not in STEWARD_SUPPORTED_PROVIDERS]
     print(f"Run ID: {run_id}")
     print(f"Gateway: {gateway_url}")
     print(f"Providers: {', '.join(runnable_providers)}")
     print(f"Capabilities: {', '.join(capabilities)}")
     print(f"Routes: {', '.join(name for name, _ in routes)}")
     if steward_only_direct and not args.skip_steward:
-        print(
-            f"Direct-only (not yet routable via Steward): "
-            f"{', '.join(steward_only_direct)}"
-        )
+        print(f"Direct-only (not yet routable via Steward): {', '.join(steward_only_direct)}")
     print()
 
-    fail_count = asyncio.run(_run_all(
-        runnable_providers, capabilities, routes, gateway_url, gateway_key, run_id,
-    ))
+    fail_count = asyncio.run(
+        _run_all(
+            runnable_providers,
+            capabilities,
+            routes,
+            gateway_url,
+            gateway_key,
+            run_id,
+        )
+    )
     return 1 if fail_count else 0
 
 

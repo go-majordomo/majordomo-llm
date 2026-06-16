@@ -213,50 +213,58 @@ class TestEnforceOpenAIStrictSchema:
         return _enforce_openai_strict_schema(schema)
 
     def test_adds_additional_properties_false_to_objects(self):
-        result = self._strict({
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        })
+        result = self._strict(
+            {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+            }
+        )
         assert result["additionalProperties"] is False
 
     def test_marks_all_properties_required(self):
-        result = self._strict({
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "integer"},
-            },
-        })
+        result = self._strict(
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer"},
+                },
+            }
+        )
         assert set(result["required"]) == {"name", "age"}
 
     def test_recurses_into_nested_objects(self):
-        result = self._strict({
-            "type": "object",
-            "properties": {
-                "person": {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
+        result = self._strict(
+            {
+                "type": "object",
+                "properties": {
+                    "person": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                    },
                 },
-            },
-        })
+            }
+        )
         assert result["additionalProperties"] is False
         nested = result["properties"]["person"]
         assert nested["additionalProperties"] is False
         assert nested["required"] == ["name"]
 
     def test_recurses_into_array_items(self):
-        result = self._strict({
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
+        result = self._strict(
+            {
+                "type": "object",
+                "properties": {
                     "items": {
-                        "type": "object",
-                        "properties": {"id": {"type": "integer"}},
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"id": {"type": "integer"}},
+                        },
                     },
                 },
-            },
-        })
+            }
+        )
         item_schema = result["properties"]["items"]["items"]
         assert item_schema["additionalProperties"] is False
         assert item_schema["required"] == ["id"]
