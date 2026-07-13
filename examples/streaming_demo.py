@@ -28,6 +28,11 @@ from shared import get_available_providers
 
 from majordomo_llm import get_llm_instance
 
+# Below this decode window (seconds), output tok/s is not meaningful: the
+# provider buffered its whole response into a single late burst rather than
+# streaming incrementally, so there is no decode phase to measure.
+MIN_DECODE_WINDOW_S = 0.05
+
 
 async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
     """Stream a response and print chunks as they arrive.
@@ -40,6 +45,12 @@ async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
     print("  ", end="", flush=True)
 
     try:
+        # Start the clock BEFORE get_response_stream() so TTFT includes the
+        # connection + request round-trip uniformly. Some SDKs perform that
+        # network I/O inside the await (OpenAI/Anthropic/Cohere/DeepSeek/
+        # Fireworks/Together), others lazily during iteration (Bedrock);
+        # measuring from here keeps TTFT comparable across providers.
+        start = time.perf_counter()
         stream = await llm.get_response_stream(
             user_prompt=prompt,
             system_prompt="Be concise. Respond in 2-3 sentences.",
@@ -47,21 +58,30 @@ async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
 
         first_chunk_time = None
         chunk_count = 0
-        start = time.time()
 
         async for chunk in stream:
             if first_chunk_time is None:
-                first_chunk_time = time.time() - start
+                first_chunk_time = time.perf_counter() - start
             chunk_count += 1
             print(chunk, end="", flush=True)
 
+        total = time.perf_counter() - start
         print()
 
         usage = stream.usage
         assert usage is not None, "usage should be finalized after iteration"
-        ttfc = first_chunk_time or 0
-        print(f"  Time to first chunk: {ttfc:.2f}s | "
-              f"Total: {usage.response_time:.2f}s")
+        ttft = first_chunk_time or 0.0
+        # Decode throughput excludes TTFT so it reflects generation speed
+        # independent of prompt length / queueing — length-agnostic output tok/s.
+        # When the whole response arrives in one late burst (buffered providers
+        # like Gemini), the decode window collapses and tok/s is undefined.
+        decode_window = total - ttft
+        if decode_window >= MIN_DECODE_WINDOW_S:
+            decode_str = f"{usage.output_tokens / decode_window:.1f} tok/s"
+        else:
+            decode_str = "n/a (buffered)"
+        print(f"  TTFT: {ttft:.2f}s | Total: {total:.2f}s | "
+              f"Decode: {decode_str}")
         print(f"  Tokens: {usage.input_tokens} in / "
               f"{usage.output_tokens} out | "
               f"Cost: ${usage.total_cost:.6f}")

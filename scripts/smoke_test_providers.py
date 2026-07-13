@@ -107,7 +107,7 @@ EXTRA_MODELS: dict[str, list[str]] = {
         "accounts/fireworks/models/deepseek-v4-pro",
         "deepseek-v4-pro-reasoning",
         "deepseek-v4-pro-hard",
-        "accounts/fireworks/models/kimi-k2p5",
+        "accounts/fireworks/models/kimi-k2p6",
     ],
     "together": [
         "deepseek-ai/DeepSeek-V4-Pro",

@@ -284,9 +284,6 @@ fireworks:
       output_cost: 3.48
       thinking: enabled
       reasoning_effort: high
-    accounts/fireworks/models/kimi-k2p5:
-      input_cost: 0.60
-      output_cost: 3.00
     accounts/fireworks/models/kimi-k2p6:
       input_cost: 0.95
       output_cost: 4.00

@@ -261,8 +261,12 @@ def mock_cohere_stream_events():
 
     end_event = MagicMock()
     end_event.type = "message-end"
-    end_event.delta.usage.tokens.input_tokens = 20
-    end_event.delta.usage.tokens.output_tokens = 8
+    # billed_units is authoritative for cost; tokens is inflated by Command's
+    # built-in preamble. The adapter must report billed_units.
+    end_event.delta.usage.billed_units.input_tokens = 20
+    end_event.delta.usage.billed_units.output_tokens = 8
+    end_event.delta.usage.tokens.input_tokens = 547
+    end_event.delta.usage.tokens.output_tokens = 68
 
     async def stream():
         yield event1

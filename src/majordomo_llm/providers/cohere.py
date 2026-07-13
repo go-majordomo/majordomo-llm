@@ -218,8 +218,9 @@ class Cohere(LLM):
                     if event_any.type == "content-delta":
                         yield event_any.delta.message.content.text or ""
                     elif event_any.type == "message-end":
-                        state.input_tokens = int(event_any.delta.usage.tokens.input_tokens or 0)
-                        state.output_tokens = int(event_any.delta.usage.tokens.output_tokens or 0)
+                        state.input_tokens, state.output_tokens = _cohere_usage_tokens(
+                            event_any.delta.usage
+                        )
             except cohere.core.api_error.ApiError as e:
                 raise ProviderError(
                     f"Cohere API error: {e}",
@@ -296,9 +297,27 @@ class Cohere(LLM):
 
 
 def _cohere_token_counts(response: Any) -> tuple[int, int]:
-    """Extract Cohere token counts with typed non-None defaults."""
+    """Extract Cohere token counts from a chat response."""
     usage = response.usage
     assert usage is not None
+    return _cohere_usage_tokens(usage)
+
+
+def _cohere_usage_tokens(usage: Any) -> tuple[int, int]:
+    """Extract (input, output) token counts from a Cohere ``Usage`` object.
+
+    Cohere reports two figures: ``billed_units`` — what the account is actually
+    charged for — and ``tokens`` — total tokens processed, which for Command
+    models includes a large built-in system preamble (hundreds of tokens the
+    caller never sent). We report ``billed_units`` so cost matches Cohere's
+    billing, falling back to ``tokens`` only when billed units are unavailable.
+    """
+    billed = getattr(usage, "billed_units", None)
+    if billed is not None:
+        input_tokens = billed.input_tokens
+        output_tokens = billed.output_tokens
+        if input_tokens is not None and output_tokens is not None:
+            return int(input_tokens), int(output_tokens)
     tokens = usage.tokens
     assert tokens is not None
     return int(tokens.input_tokens or 0), int(tokens.output_tokens or 0)

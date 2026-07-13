@@ -27,8 +27,12 @@ def mock_cohere_text_response():
     response = MagicMock()
     response.message.content = [MagicMock()]
     response.message.content[0].text = "Cohere says hello!"
-    response.usage.tokens.input_tokens = 20
-    response.usage.tokens.output_tokens = 8
+    # billed_units is what Cohere charges; tokens is inflated by Command's
+    # built-in preamble. The adapter must report billed_units.
+    response.usage.billed_units.input_tokens = 20
+    response.usage.billed_units.output_tokens = 8
+    response.usage.tokens.input_tokens = 547
+    response.usage.tokens.output_tokens = 68
     return response
 
 
@@ -40,7 +44,9 @@ def mock_cohere_json_response():
     response.message.content[
         0
     ].text = '{"name": "France", "capital": "Paris", "population": 67000000}'
-    response.usage.tokens.input_tokens = 50
+    response.usage.billed_units.input_tokens = 50
+    response.usage.billed_units.output_tokens = 30
+    response.usage.tokens.input_tokens = 500
     response.usage.tokens.output_tokens = 30
     return response
 
@@ -81,6 +87,37 @@ class TestCohereGetResponse:
         assert response.input_tokens == 20
         assert response.output_tokens == 8
         assert response.cached_tokens == 0
+
+    async def test_prefers_billed_units_over_tokens(self, cohere_llm):
+        """Should cost off billed_units, not the preamble-inflated tokens count."""
+        mock_response = MagicMock()
+        mock_response.message.content = [MagicMock()]
+        mock_response.message.content[0].text = "hi"
+        mock_response.usage.billed_units.input_tokens = 18
+        mock_response.usage.billed_units.output_tokens = 66
+        mock_response.usage.tokens.input_tokens = 547
+        mock_response.usage.tokens.output_tokens = 68
+        cohere_llm.client.chat = AsyncMock(return_value=mock_response)
+
+        response = await cohere_llm.get_response("Test prompt")
+
+        assert response.input_tokens == 18
+        assert response.output_tokens == 66
+
+    async def test_falls_back_to_tokens_when_billed_units_missing(self, cohere_llm):
+        """Should fall back to tokens when billed_units is absent."""
+        mock_response = MagicMock()
+        mock_response.message.content = [MagicMock()]
+        mock_response.message.content[0].text = "hi"
+        mock_response.usage.billed_units = None
+        mock_response.usage.tokens.input_tokens = 30
+        mock_response.usage.tokens.output_tokens = 12
+        cohere_llm.client.chat = AsyncMock(return_value=mock_response)
+
+        response = await cohere_llm.get_response("Test prompt")
+
+        assert response.input_tokens == 30
+        assert response.output_tokens == 12
 
     async def test_calculates_costs_correctly(self, cohere_llm, mock_cohere_text_response):
         """Should calculate costs based on token counts and rates."""
@@ -152,7 +189,9 @@ class TestCohereGetJSONResponse:
         mock_response = MagicMock()
         mock_response.message.content = [MagicMock()]
         mock_response.message.content[0].text = '{"name": "test", "value": 123}'
-        mock_response.usage.tokens.input_tokens = 15
+        mock_response.usage.billed_units.input_tokens = 15
+        mock_response.usage.billed_units.output_tokens = 10
+        mock_response.usage.tokens.input_tokens = 500
         mock_response.usage.tokens.output_tokens = 10
 
         cohere_llm.client.chat = AsyncMock(return_value=mock_response)
@@ -166,7 +205,9 @@ class TestCohereGetJSONResponse:
         mock_response = MagicMock()
         mock_response.message.content = [MagicMock()]
         mock_response.message.content[0].text = '```json\n{"key": "value"}\n```'
-        mock_response.usage.tokens.input_tokens = 15
+        mock_response.usage.billed_units.input_tokens = 15
+        mock_response.usage.billed_units.output_tokens = 10
+        mock_response.usage.tokens.input_tokens = 500
         mock_response.usage.tokens.output_tokens = 10
 
         cohere_llm.client.chat = AsyncMock(return_value=mock_response)
