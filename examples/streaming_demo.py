@@ -18,13 +18,19 @@ Prerequisites:
        - CO_API_KEY
 
 Usage:
-    uv run python examples/streaming_demo.py
+    uv run python examples/streaming_demo.py            # call providers directly
+    uv run python examples/streaming_demo.py --gateway  # route through Steward
+
+Gateway routing (--gateway) reads:
+    - MAJORDOMO_GATEWAY_URL (defaults to http://localhost:7680)
+    - MAJORDOMO_API_KEY (required)
 """
 
+import argparse
 import asyncio
 import time
 
-from shared import get_available_providers
+from shared import gateway_kwargs, get_available_providers
 
 from majordomo_llm import get_llm_instance
 
@@ -34,12 +40,16 @@ from majordomo_llm import get_llm_instance
 MIN_DECODE_WINDOW_S = 0.05
 
 
-async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
+async def demo_streaming(
+    provider: str, model: str, prompt: str, use_gateway: bool = False
+) -> bool:
     """Stream a response and print chunks as they arrive.
 
     Returns True on success, False if the provider raised an error.
     """
-    llm = get_llm_instance(provider, model)
+    llm = get_llm_instance(
+        provider, model, **gateway_kwargs(use_gateway, feature="streaming-demo")
+    )
 
     print(f"\n  [{provider}/{model}]")
     print("  ", end="", flush=True)
@@ -97,12 +107,16 @@ async def demo_streaming(provider: str, model: str, prompt: str) -> bool:
         return False
 
 
-async def demo_collect(provider: str, model: str) -> bool:
+async def demo_collect(
+    provider: str, model: str, use_gateway: bool = False
+) -> bool:
     """Demonstrate .collect() to get a full LLMResponse from a stream.
 
     Returns True on success, False if the provider raised an error.
     """
-    llm = get_llm_instance(provider, model)
+    llm = get_llm_instance(
+        provider, model, **gateway_kwargs(use_gateway, feature="streaming-demo")
+    )
 
     print(f"\n  [{provider}/{model}]")
 
@@ -126,13 +140,21 @@ async def demo_collect(provider: str, model: str) -> bool:
         return False
 
 
-async def main() -> None:
-    """Run all streaming demos across available providers."""
+async def main(use_gateway: bool = False) -> None:
+    """Run all streaming demos across available providers.
+
+    Args:
+        use_gateway: Route all requests through Majordomo Steward instead of
+            calling providers directly.
+    """
     print("=" * 80)
     print("majordomo-llm: Streaming Demo")
     print("=" * 80)
 
-    available_providers = get_available_providers()
+    if use_gateway:
+        print("Routing through the Majordomo gateway (Steward).")
+
+    available_providers = get_available_providers(use_gateway=use_gateway)
     if not available_providers:
         print("No API keys found. Set at least one of:")
         print("  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,")
@@ -153,6 +175,7 @@ async def main() -> None:
         ok = await demo_streaming(
             provider, model,
             "Explain why the sky is blue.",
+            use_gateway=use_gateway,
         )
         if not ok:
             streaming_failures += 1
@@ -163,7 +186,7 @@ async def main() -> None:
     print("-" * 80)
 
     for provider, model in available_providers:
-        ok = await demo_collect(provider, model)
+        ok = await demo_collect(provider, model, use_gateway=use_gateway)
         if not ok:
             collect_failures += 1
 
@@ -176,4 +199,12 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        help="Route requests through Majordomo Steward "
+        "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
+    )
+    cli_args = parser.parse_args()
+    asyncio.run(main(use_gateway=cli_args.gateway))

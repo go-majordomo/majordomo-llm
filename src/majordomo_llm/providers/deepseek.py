@@ -85,6 +85,17 @@ class DeepSeek(LLM):
             raise ValueError(f"Invalid DeepSeek thinking mode '{thinking}'. Valid: {valid}")
 
         resolved_api_key = resolve_api_key(api_key, "DEEPSEEK_API_KEY", "DeepSeek")
+
+        # When routing through a proxy (e.g. Majordomo Steward), auto-inject
+        # ``x-majordomo-provider: deepseek`` so the gateway can disambiguate
+        # DeepSeek traffic from vanilla OpenAI (both speak the same wire
+        # shape). Caller-supplied default_headers win on key collision.
+        if base_url is not None:
+            merged_headers: dict[str, str] = {"x-majordomo-provider": "deepseek"}
+            if default_headers:
+                merged_headers.update(default_headers)
+            default_headers = merged_headers
+
         super().__init__(
             provider="deepseek",
             model=model,

@@ -42,9 +42,60 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
 # Base directory for examples
 EXAMPLES_DIR = Path(__file__).parent
 
+# Default Steward endpoint when MAJORDOMO_GATEWAY_URL is not set (self-hosted).
+DEFAULT_GATEWAY_URL = "http://localhost:7680"
 
-def get_available_providers() -> list[tuple[str, str]]:
+# Providers whose native wire format Steward does not accept, so they cannot be
+# routed through the gateway (they still work in direct mode). Cohere speaks its
+# own /v2/chat shape rather than the OpenAI/Anthropic/Gemini/Bedrock shapes the
+# gateway understands.
+GATEWAY_UNSUPPORTED_PROVIDERS = frozenset({"cohere"})
+
+
+def gateway_kwargs(use_gateway: bool, feature: str | None = None) -> dict:
+    """Build get_llm_instance kwargs for routing through the Majordomo gateway.
+
+    When routing through Steward, the provider API key is picked up from the
+    environment by the gateway itself; callers pass the Steward URL as base_url
+    and authenticate to Steward with the X-Majordomo-Key header.
+
+    Args:
+        use_gateway: When False, returns an empty dict so callers hit providers
+            directly (the unchanged default behavior).
+        feature: Optional value for the X-Majordomo-Feature header, which becomes
+            a filterable cost-attribution dimension in the Majordomo dashboard.
+
+    Returns:
+        Kwargs (base_url, default_headers) to splat into get_llm_instance, or an
+        empty dict when use_gateway is False.
+
+    Raises:
+        RuntimeError: If use_gateway is True but MAJORDOMO_API_KEY is unset.
+    """
+    if not use_gateway:
+        return {}
+
+    api_key = os.environ.get("MAJORDOMO_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "MAJORDOMO_API_KEY must be set to route through the Majordomo gateway."
+        )
+
+    base_url = os.environ.get("MAJORDOMO_GATEWAY_URL", DEFAULT_GATEWAY_URL)
+    headers = {"X-Majordomo-Key": api_key}
+    if feature:
+        headers["X-Majordomo-Feature"] = feature
+
+    return {"base_url": base_url, "default_headers": headers}
+
+
+def get_available_providers(use_gateway: bool = False) -> list[tuple[str, str]]:
     """Get all providers with API keys configured.
+
+    Args:
+        use_gateway: When True, drop providers whose wire format Steward cannot
+            route (see GATEWAY_UNSUPPORTED_PROVIDERS) so gateway runs don't hit
+            a guaranteed failure.
 
     Returns:
         List of (provider, model) tuples for providers whose required
@@ -52,17 +103,26 @@ def get_available_providers() -> list[tuple[str, str]]:
     """
     available = []
     missing = []
+    gateway_skipped = []
     for provider, model, env_vars in PROVIDERS:
         unset = [var for var in env_vars if not os.environ.get(var)]
-        if not unset:
-            available.append((provider, model))
-        else:
+        if unset:
             missing.append((provider, model, unset))
+        elif use_gateway and provider in GATEWAY_UNSUPPORTED_PROVIDERS:
+            gateway_skipped.append((provider, model))
+        else:
+            available.append((provider, model))
 
     if missing:
         print("Missing environment variables (these entries will be skipped):")
         for provider, model, unset in missing:
             print(f"  - {provider}:{model} requires {', '.join(unset)}")
+        print()
+
+    if gateway_skipped:
+        print("Not routable through the gateway (these entries will be skipped):")
+        for provider, model in gateway_skipped:
+            print(f"  - {provider}:{model} — Steward does not support its wire format")
         print()
 
     return available

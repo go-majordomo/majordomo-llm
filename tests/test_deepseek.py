@@ -358,6 +358,56 @@ class TestDeepSeekInit:
                 default_headers=None,
             )
 
+    def test_injects_steward_routing_header_when_proxying(self):
+        """When base_url is set (proxy routing), the provider auto-injects
+        ``x-majordomo-provider: deepseek`` so Steward can disambiguate DeepSeek
+        traffic from vanilla OpenAI (both speak the same wire shape)."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI") as mock_client:
+            DeepSeek(
+                model="deepseek-chat",
+                input_cost=0.28,
+                output_cost=0.42,
+                api_key="test-key",
+                base_url="https://gateway.example.com",
+            )
+            headers = mock_client.call_args.kwargs["default_headers"]
+            assert headers["x-majordomo-provider"] == "deepseek"
+
+    def test_does_not_inject_steward_header_when_direct(self):
+        """Direct DeepSeek calls must not get Majordomo headers — regression
+        guard against leaking proxy metadata to the real DeepSeek endpoint."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI") as mock_client:
+            DeepSeek(
+                model="deepseek-chat",
+                input_cost=0.28,
+                output_cost=0.42,
+                api_key="test-key",
+            )
+            headers = mock_client.call_args.kwargs["default_headers"]
+            assert headers is None or "x-majordomo-provider" not in headers
+
+    def test_merges_steward_header_with_caller_headers(self):
+        """Auto-injected routing header must merge with caller-supplied
+        default_headers rather than clobber them."""
+        with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI") as mock_client:
+            DeepSeek(
+                model="deepseek-chat",
+                input_cost=0.28,
+                output_cost=0.42,
+                api_key="test-key",
+                base_url="https://custom.example.com/v1",
+                default_headers={"X-Trace": "abc"},
+            )
+
+            mock_client.assert_called_once_with(
+                api_key="test-key",
+                base_url="https://custom.example.com/v1",
+                default_headers={
+                    "x-majordomo-provider": "deepseek",
+                    "X-Trace": "abc",
+                },
+            )
+
     def test_supports_temperature_by_default(self):
         """Should support temperature/top_p by default."""
         with patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"):

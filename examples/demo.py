@@ -16,14 +16,26 @@ Prerequisites:
        - CO_API_KEY
 
 Usage:
-    uv run python examples/demo.py
+    uv run python examples/demo.py            # call providers directly
+    uv run python examples/demo.py --gateway  # route through Majordomo Steward
+
+Gateway routing (--gateway) reads:
+    - MAJORDOMO_GATEWAY_URL (defaults to http://localhost:7680)
+    - MAJORDOMO_API_KEY (required)
 """
 
+import argparse
 import asyncio
 import json
 import traceback
 
-from shared import EXAMPLES_DIR, clear_database, get_available_providers, print_summary
+from shared import (
+    EXAMPLES_DIR,
+    clear_database,
+    gateway_kwargs,
+    get_available_providers,
+    print_summary,
+)
 
 from majordomo_llm import get_llm_instance
 from majordomo_llm.logging import FileStorageAdapter, LoggingLLM, SqliteAdapter
@@ -77,15 +89,24 @@ async def run_prompt(
         }
 
 
-async def main() -> None:
-    """Run the demo."""
+async def main(use_gateway: bool = False) -> None:
+    """Run the demo.
+
+    Args:
+        use_gateway: Route all requests through Majordomo Steward instead of
+            calling providers directly.
+    """
     print("=" * 80)
     print("majordomo-llm Demo: Multi-Provider LLM with Request Logging")
     print("=" * 80)
     print()
 
+    if use_gateway:
+        print("Routing through the Majordomo gateway (Steward).")
+        print()
+
     # Check available providers
-    available_providers = get_available_providers()
+    available_providers = get_available_providers(use_gateway=use_gateway)
     if not available_providers:
         print("No API keys found. Please set at least one API key to run the demo.")
         return
@@ -126,7 +147,11 @@ async def main() -> None:
 
                 # Create LLM with logging
                 try:
-                    llm = get_llm_instance(provider, model)
+                    llm = get_llm_instance(
+                        provider,
+                        model,
+                        **gateway_kwargs(use_gateway, feature="multi-provider-demo"),
+                    )
                 except Exception as e:
                     print(f"  Error creating LLM: {e}")
                     continue
@@ -165,4 +190,12 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        help="Route requests through Majordomo Steward "
+        "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
+    )
+    cli_args = parser.parse_args()
+    asyncio.run(main(use_gateway=cli_args.gateway))
