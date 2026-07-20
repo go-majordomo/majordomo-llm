@@ -3,7 +3,23 @@
 
 openai:
   models:
-    # GPT-5.5 family (latest)
+    # GPT-5.6 family (latest)
+    gpt-5.6-sol:
+      input_cost: 5.00
+      output_cost: 30.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+    gpt-5.6-terra:
+      input_cost: 2.50
+      output_cost: 15.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+    gpt-5.6-luna:
+      input_cost: 1.00
+      output_cost: 6.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+    # GPT-5.5 family
     gpt-5.5:
       input_cost: 5.00
       output_cost: 30.00
@@ -354,6 +370,16 @@ deprecated_models:
 # Single provider: alias_name: { provider: ..., model: ... }
 # Cascade (failover): alias_name: { cascade: [{ provider: ..., model: ... }, ...] }
 aliases:
+  # OpenAI GPT-5.6 flagship family
+  openai-smart:
+    provider: openai
+    model: gpt-5.6-sol
+  openai-balanced:
+    provider: openai
+    model: gpt-5.6-terra
+  openai-fast:
+    provider: openai
+    model: gpt-5.6-luna
   fast:
     provider: anthropic
     model: claude-haiku-4-5-20251001
