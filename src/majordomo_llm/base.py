@@ -168,6 +168,195 @@ def enforce_strict_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
+def _is_nullable_subschema(subschema: dict[str, Any]) -> bool:
+    """Return True if a property subschema admits a JSON null value.
+
+    Recognizes both strict-dialect encodings of optionality:
+
+    - ``anyOf``/``oneOf`` containing a ``{"type": "null"}`` branch, and
+    - a ``type`` array that lists ``"null"`` (e.g. ``["string", "null"]``).
+    """
+    for combinator in ("anyOf", "oneOf"):
+        branches = subschema.get(combinator)
+        if isinstance(branches, list) and any(
+            isinstance(branch, dict) and branch.get("type") == "null" for branch in branches
+        ):
+            return True
+    node_type = subschema.get("type")
+    return isinstance(node_type, list) and "null" in node_type
+
+
+def _unwrap_non_null_subschema(subschema: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite a nullable subschema to its non-null form, dropping ``default``.
+
+    ``anyOf``/``oneOf`` with a single surviving branch collapses onto that
+    branch; multiple survivors keep the combinator with the null branch
+    removed. A nullable ``type`` array drops ``"null"``. Sibling annotations
+    (``description``, ``title``) are preserved. The strict-dialect
+    ``default: null`` is discarded either way, since it is the signal that
+    invites the model to omit the property.
+    """
+    preserved = {key: value for key, value in subschema.items() if key != "default"}
+
+    for combinator in ("anyOf", "oneOf"):
+        branches = preserved.get(combinator)
+        if not isinstance(branches, list):
+            continue
+        survivors = [
+            branch
+            for branch in branches
+            if not (isinstance(branch, dict) and branch.get("type") == "null")
+        ]
+        preserved.pop(combinator)
+        if len(survivors) == 1 and isinstance(survivors[0], dict):
+            # Collapse onto the sole branch; keep outer annotations unless the
+            # branch supplies its own.
+            return {**preserved, **survivors[0]}
+        preserved[combinator] = survivors
+        return preserved
+
+    node_type = preserved.get("type")
+    if isinstance(node_type, list):
+        non_null = [entry for entry in node_type if entry != "null"]
+        preserved["type"] = non_null[0] if len(non_null) == 1 else non_null
+
+    return preserved
+
+
+def relax_strict_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Translate a strict-dialect JSON schema into Anthropic-friendly form.
+
+    The inverse of :func:`enforce_strict_object_schema`. OpenAI's strict mode
+    spells "optional" as a property that is listed in ``required`` but whose
+    value may be null (``anyOf: [T, null]`` with ``default: null``). Anthropic's
+    forced tool call is ordinary generation, not constrained decoding, and its
+    convention is to omit keys whose value is null — so a strict schema forces
+    the model to omit the very keys it demands, and the call fails validation.
+
+    Deep-copies, then for every object node removes each nullable property from
+    ``required`` and unwraps its subschema to the non-null branch. Non-nullable
+    required properties are left untouched, so genuinely required fields stay
+    enforced. ``additionalProperties`` is left as found.
+    """
+    import copy
+
+    schema = copy.deepcopy(schema)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            required = node.get("required")
+            if (
+                node.get("type") == "object"
+                and isinstance(properties, dict)
+                and isinstance(required, list)
+            ):
+                still_required = []
+                for name in required:
+                    subschema = properties.get(name)
+                    if isinstance(subschema, dict) and _is_nullable_subschema(subschema):
+                        properties[name] = _unwrap_non_null_subschema(subschema)
+                    else:
+                        still_required.append(name)
+                if still_required:
+                    node["required"] = still_required
+                else:
+                    node.pop("required", None)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
+    return schema
+
+
+def _select_non_null_branch(
+    branches: list[Any], instance: Any
+) -> dict[str, Any] | None:
+    """Pick the ``anyOf``/``oneOf`` branch matching an instance's JSON type."""
+    python_to_json = {
+        dict: "object",
+        list: "array",
+        str: "string",
+        bool: "boolean",
+        int: "integer",
+        float: "number",
+        type(None): "null",
+    }
+    instance_type = python_to_json.get(type(instance))
+
+    def branch_matches(branch: dict[str, Any]) -> bool:
+        branch_type = branch.get("type")
+        if isinstance(branch_type, list):
+            return instance_type in branch_type
+        if branch_type == instance_type:
+            return True
+        return branch_type == "number" and instance_type == "integer"
+
+    typed = [branch for branch in branches if isinstance(branch, dict)]
+    for branch in typed:
+        if branch_matches(branch):
+            return branch
+    for branch in typed:
+        if branch.get("type") != "null":
+            return branch
+    return None
+
+
+def fill_strict_nullable_defaults(instance: Any, schema: dict[str, Any]) -> Any:
+    """Populate omitted strict-nullable-optional properties from their defaults.
+
+    After a schema is relaxed for the Anthropic send path, the model may omit
+    nullable properties that the caller's *original* schema still lists in
+    ``required``. This walks the original schema and the returned instance in
+    parallel and fills each such property with its declared ``default`` (an
+    explicit null in strict dialect), so the validated object matches the shape
+    the OpenAI path produces for the same caller schema.
+
+    Keyed on the strict idiom — required, nullable, and carrying a ``default`` —
+    it is a no-op on plain non-strict schemas, whose optional properties are
+    absent from ``required``.
+    """
+    if not isinstance(schema, dict):
+        return instance
+
+    for combinator in ("anyOf", "oneOf"):
+        branches = schema.get(combinator)
+        if isinstance(branches, list) and instance is not None:
+            branch = _select_non_null_branch(branches, instance)
+            if branch is not None:
+                return fill_strict_nullable_defaults(instance, branch)
+
+    node_type = schema.get("type")
+
+    if node_type == "object" and isinstance(instance, dict):
+        properties = schema.get("properties")
+        required = schema.get("required") or []
+        if isinstance(properties, dict):
+            for name, subschema in properties.items():
+                if not isinstance(subschema, dict):
+                    continue
+                if name in instance:
+                    instance[name] = fill_strict_nullable_defaults(instance[name], subschema)
+                elif (
+                    name in required
+                    and _is_nullable_subschema(subschema)
+                    and "default" in subschema
+                ):
+                    instance[name] = subschema["default"]
+        return instance
+
+    if node_type == "array" and isinstance(instance, list):
+        items = schema.get("items")
+        if isinstance(items, dict):
+            return [fill_strict_nullable_defaults(element, items) for element in instance]
+        return instance
+
+    return instance
+
+
 def build_schema_prompt(schema: dict[str, Any], system_prompt: str | None = None) -> str:
     """Build a system prompt that includes a JSON schema instruction.
 

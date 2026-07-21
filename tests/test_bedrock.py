@@ -263,6 +263,47 @@ class TestBedrockStructuredResponse:
         spec = kwargs["toolConfig"]["tools"][0]["toolSpec"]
         assert spec["name"] == "CountryInfo"
 
+    async def test_relaxes_strict_dialect_schema_before_sending(self):
+        """Nullable-required properties are demoted before reaching the tool spec."""
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
+        client = _install_mock_client(llm)
+        client.converse.return_value = _tool_use_response("Answer", {"note": "n/a"})
+
+        await llm.get_json_schema_response(
+            user_prompt="Answer",
+            response_schema=_STRICT_DIALECT_SCHEMA,
+            schema_name="Answer",
+        )
+
+        sent = client.converse.call_args.kwargs["toolConfig"]["tools"][0]["toolSpec"]
+        schema = sent["inputSchema"]["json"]
+        assert "required" not in schema
+        assert schema["properties"]["note"] == {"type": "string"}
+
+    async def test_fills_omitted_nullable_optionals_to_match_strict_schema(self):
+        """An omitted nullable-optional is filled with its default before validation."""
+        llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
+        client = _install_mock_client(llm)
+        client.converse.return_value = _tool_use_response("Answer", {})
+
+        response = await llm.get_json_schema_response(
+            user_prompt="Answer",
+            response_schema=_STRICT_DIALECT_SCHEMA,
+            schema_name="Answer",
+        )
+
+        assert response.content == '{"note":null}'
+
+
+_STRICT_DIALECT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["note"],
+    "properties": {
+        "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+    },
+}
+
 
 class _FakeRequest:
     """Stand-in for the botocore request passed to before-send handlers."""

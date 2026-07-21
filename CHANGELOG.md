@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-21
+
+### Fixed
+
+- **Strict-dialect JSON schemas no longer fail on forced-tool-call providers.** `get_json_schema_response` accepts an arbitrary JSON Schema, but the Anthropic and Converse-based Bedrock providers forwarded it verbatim as a tool `input_schema`. A schema written in OpenAI's strict dialect — every property in `required`, optionality spelled as `anyOf: [T, null]` with `default: null` — conflicts with Anthropic's tool-calling convention (omit keys whose value is null), so the model omitted the very keys the schema demanded and the call failed at validation with `{}` or a placeholder wrapper key. Both providers now translate the schema on the way out and reconstruct the OpenAI-equivalent shape on the way back
+
+### Added
+
+- **`relax_strict_object_schema(schema)`** in `base.py` — the inverse of `enforce_strict_object_schema`. Walks every object node and, for each property listed in `required` whose subschema is nullable (`anyOf`/`oneOf` containing `{"type": "null"}`, or a `type` array containing `"null"`), removes it from `required` and unwraps the subschema to its non-null branch (dropping the `default: null` that invites omission). Non-nullable required properties are left enforced; `additionalProperties` is left as found
+- **`fill_strict_nullable_defaults(instance, schema)`** in `base.py` — after relaxation, populates any nullable-optional property the model omitted from its declared `default` (an explicit null in strict dialect), walking nested objects, arrays, and `anyOf`/`oneOf` branches. Keyed on the strict idiom, it is a no-op on plain non-strict schemas
+
+### Changed
+
+- **Anthropic** (`_get_json_schema_response` and the web-search helper) and **Bedrock** (`_get_json_schema_response`, Converse tool calling) now send `relax_strict_object_schema(response_schema)` as the tool `input_schema` and fill omitted nullable-optionals before validating against the caller's original schema. Validation still runs against the unmodified caller schema, matching the OpenAI path. `BedrockMantle` inherits the fix from `Anthropic`
+- Structured responses from these providers for strict-dialect schemas now contain explicit nulls for properties the model omitted, identical in shape to what the OpenAI path produces for the same caller schema. Non-strict schemas are unaffected
+
+### Note
+
+- The Pydantic-model paths (`get_structured_json_response`) are unaffected — they emit non-strict schemas via `model_json_schema()`. Gemini, Cohere, Together, Fireworks and DeepSeek use constrained decoding or prompt injection rather than forced tool calls and are outside this bug class; they were audited and left unchanged
+
 ## [0.12.0] - 2026-06-13
 
 ### Added

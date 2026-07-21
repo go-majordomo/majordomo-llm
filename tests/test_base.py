@@ -15,6 +15,9 @@ from majordomo_llm.base import (
     Usage,
     _StreamState,
     canonicalize_json_schema_output,
+    enforce_strict_object_schema,
+    fill_strict_nullable_defaults,
+    relax_strict_object_schema,
 )
 from majordomo_llm.exceptions import ResponseParsingError
 
@@ -63,6 +66,192 @@ class TestJSONSchemaOutputHelpers:
             canonicalize_json_schema_output(raw_content, COUNTRY_SCHEMA)
 
         assert exc_info.value.raw_content == raw_content
+
+
+STRICT_DIALECT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["group", "skip_reason", "clarifications"],
+    "properties": {
+        "group": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["label", "note"],
+                    "properties": {
+                        "label": {"type": "string"},
+                        "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+                    },
+                },
+                {"type": "null"},
+            ],
+            "default": None,
+        },
+        "skip_reason": {
+            "anyOf": [{"type": "string"}, {"type": "null"}],
+            "default": None,
+            "description": "Why the item was skipped.",
+        },
+        "clarifications": {
+            "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}],
+            "default": None,
+        },
+    },
+}
+
+
+class TestRelaxStrictObjectSchema:
+    """Tests for relax_strict_object_schema."""
+
+    def test_demotes_and_unwraps_nullable_required_properties(self):
+        """Nullable required properties become optional and lose their null branch."""
+        relaxed = relax_strict_object_schema(STRICT_DIALECT_SCHEMA)
+
+        assert "required" not in relaxed
+        assert relaxed["properties"]["skip_reason"] == {
+            "type": "string",
+            "description": "Why the item was skipped.",
+        }
+        assert relaxed["properties"]["clarifications"] == {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+
+    def test_recurses_into_unwrapped_object_branch(self):
+        """Nested strict objects are relaxed after their parent is unwrapped."""
+        relaxed = relax_strict_object_schema(STRICT_DIALECT_SCHEMA)
+
+        group = relaxed["properties"]["group"]
+        assert group["type"] == "object"
+        assert group["required"] == ["label"]
+        assert group["properties"]["note"] == {"type": "string"}
+
+    def test_preserves_additional_properties_as_found(self):
+        """additionalProperties is left untouched by the relaxer."""
+        relaxed = relax_strict_object_schema(STRICT_DIALECT_SCHEMA)
+
+        assert relaxed["additionalProperties"] is False
+
+    def test_leaves_non_nullable_required_properties_enforced(self):
+        """A genuinely required non-nullable property stays required."""
+        schema = {
+            "type": "object",
+            "required": ["name", "nickname"],
+            "properties": {
+                "name": {"type": "string"},
+                "nickname": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+            },
+        }
+
+        relaxed = relax_strict_object_schema(schema)
+
+        assert relaxed["required"] == ["name"]
+        assert relaxed["properties"]["name"] == {"type": "string"}
+
+    def test_handles_nullable_type_array(self):
+        """Optionality spelled as a nullable type array is also relaxed."""
+        schema = {
+            "type": "object",
+            "required": ["value"],
+            "properties": {"value": {"type": ["string", "null"]}},
+        }
+
+        relaxed = relax_strict_object_schema(schema)
+
+        assert "required" not in relaxed
+        assert relaxed["properties"]["value"]["type"] == "string"
+
+    def test_does_not_mutate_input(self):
+        """The caller's schema object is not modified in place."""
+        import copy
+
+        original = copy.deepcopy(STRICT_DIALECT_SCHEMA)
+
+        relax_strict_object_schema(STRICT_DIALECT_SCHEMA)
+
+        assert original == STRICT_DIALECT_SCHEMA
+
+    def test_non_strict_schema_is_unchanged(self):
+        """A plain schema without nullable-required props passes through intact."""
+        relaxed = relax_strict_object_schema(COUNTRY_SCHEMA)
+
+        assert relaxed == COUNTRY_SCHEMA
+
+    def test_round_trip_with_enforce_is_semantically_equivalent(self):
+        """relax(enforce(s)) restores optional nullable props to plain-optional."""
+        plain = {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string"},
+                "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+            },
+        }
+
+        relaxed = relax_strict_object_schema(enforce_strict_object_schema(plain))
+
+        assert relaxed["required"] == ["name"]
+        assert relaxed["properties"]["note"] == {"type": "string"}
+
+
+class TestFillStrictNullableDefaults:
+    """Tests for fill_strict_nullable_defaults."""
+
+    def test_fills_omitted_nullable_required_properties_with_defaults(self):
+        """Absent strict-optional properties are filled from their declared default."""
+        instance = {"group": None}
+
+        filled = fill_strict_nullable_defaults(instance, STRICT_DIALECT_SCHEMA)
+
+        assert filled == {"group": None, "skip_reason": None, "clarifications": None}
+
+    def test_fills_nested_object_properties(self):
+        """Defaults are filled inside populated nested objects too."""
+        instance = {"group": {"label": "A"}, "skip_reason": "n/a", "clarifications": []}
+
+        filled = fill_strict_nullable_defaults(instance, STRICT_DIALECT_SCHEMA)
+
+        assert filled["group"] == {"label": "A", "note": None}
+
+    def test_leaves_present_values_untouched(self):
+        """Values the model supplied are preserved verbatim."""
+        instance = {
+            "group": {"label": "A", "note": "hi"},
+            "skip_reason": "busy",
+            "clarifications": ["one"],
+        }
+
+        filled = fill_strict_nullable_defaults(instance, STRICT_DIALECT_SCHEMA)
+
+        assert filled == instance
+
+    def test_no_op_on_non_strict_schema(self):
+        """A plain schema whose optionals are absent from required is untouched."""
+        schema = {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string"},
+                "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+            },
+        }
+        instance = {"name": "Japan"}
+
+        filled = fill_strict_nullable_defaults(instance, schema)
+
+        assert filled == {"name": "Japan"}
+
+    def test_filled_object_validates_against_original_strict_schema(self):
+        """The filled object matches the original strict schema's required shape."""
+        instance = {"group": None}
+
+        canonical = canonicalize_json_schema_output(
+            fill_strict_nullable_defaults(instance, STRICT_DIALECT_SCHEMA),
+            STRICT_DIALECT_SCHEMA,
+        )
+
+        assert canonical == '{"clarifications":null,"group":null,"skip_reason":null}'
 
 
 class TestUsage:

@@ -24,6 +24,8 @@ from majordomo_llm.base import (
     T,
     _StreamState,
     canonicalize_json_schema_output,
+    fill_strict_nullable_defaults,
+    relax_strict_object_schema,
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
@@ -288,7 +290,7 @@ class Anthropic(LLM):
                     name=schema_name,
                     description=schema_description
                     or f"Provide a structured response using the {schema_name} JSON schema",
-                    input_schema=response_schema,
+                    input_schema=relax_strict_object_schema(response_schema),
                 )
             ]
 
@@ -326,6 +328,7 @@ class Anthropic(LLM):
             execution_time = time.time() - start_time
 
         content = _extract_tool_use_content(response.content, schema_name)
+        content = fill_strict_nullable_defaults(content, response_schema)
 
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
@@ -601,7 +604,7 @@ class Anthropic(LLM):
             name=schema_name,
             description=schema_description
             or f"Provide a structured response using the {schema_name} JSON schema",
-            input_schema=response_schema,
+            input_schema=relax_strict_object_schema(response_schema),
         )
         web_search_tool = WebSearchTool20250305Param(
             name="web_search",
