@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-22
+
+### Fixed
+
+- **Structured outputs no longer report an empty result as success (headline bug).** A forced tool call is mandatory to *invoke* but its arguments are ordinary generation, so Claude could return `{}` or an all-null object. The only validation gate (`canonicalize_json_schema_output`) ran `jsonschema.validate`, which *passes* an empty/all-null object whenever the schema's fields are optional/nullable — so the library returned a billed, schema-valid non-answer as a successful `LLMResponse`, indistinguishable from a real result. It now detects that case and raises
+
+### Added
+
+- **Configurable reasoning effort on Anthropic.** `reasoning_effort` (one of `low`/`medium`/`high`/`xhigh`/`max`) on the `Anthropic` provider and per-model in `llm_config.yaml`, applied as `output_config.effort` on every request (plain, streaming, native structured, and forced-tool paths). Previously every call ran at the API default (`high`); this lets callers dial down for routine extraction or up (`xhigh`) for agentic work. `None` (default) preserves today's behavior. Register the same SKU under multiple YAML keys via the `model` override to expose distinct effort profiles. Invalid values raise `ValueError`. Verified live against `claude-opus-4-8`
+- **Configurable thinking on Anthropic.** `thinking` (`adaptive` or `disabled`) on the `Anthropic` provider and per-model in `llm_config.yaml`, applied as the `thinking.type` request field on every path. `None` (default) omits it, so the model runs without thinking (today's behavior). Pairs with `reasoning_effort`, which only meaningfully modulates depth when thinking is on. Thinking blocks are filtered from the returned content (answer text only). Invalid values raise `ValueError`. Verified live against `claude-opus-4-8` (adaptive thinking, plain + native). Caveats documented in the constructor: `disabled` is rejected on Fable 5 (thinking always on), and with thinking on the fixed `max_tokens` covers thinking + answer — raise it via a dedicated config entry if answers truncate
+- **Three effort/thinking profiles of `claude-opus-4-8`** in `llm_config.yaml` (same SKU via the `model` override): `claude-opus-4-8-fast` (low effort, no thinking), `claude-opus-4-8-medium` (medium effort + adaptive thinking), and `claude-opus-4-8-deep` (`xhigh` effort + adaptive thinking). Verified live end-to-end
+- **Current flagship Anthropic models** in `llm_config.yaml`: `claude-fable-5` ($10/$50), `claude-opus-4-8` ($5/$25), and `claude-sonnet-5` ($3/$15) — the library previously topped out at the now-legacy 4.6/4.7 tier, and Opus 4.8 existed only under `bedrock_mantle`. All three are `supports_temperature_top_p: false` (the 4.7+/5 generation rejects sampling params) and `supports_structured_outputs: true` (verified live, 10/10 conforming). Opus 4.8 and Sonnet 5 are flagged `supports_web_search: true`; Fable 5 is left without it pending verification. Existing models are retained as legacy (no removals)
+- **`EmptyStructuredResponseError`** (subclass of `ResponseParsingError`) — raised when a structured result validates against the schema but is empty (`{}` or every top-level value `null`). It is **retryable**: the structured-output retry wrapper re-samples before it surfaces (wrapped in `tenacity.RetryError` on exhaustion, matching every other retryable error; `LLMCascade` unwraps it as usual)
+- **`is_empty_structured_result(content)`** and a `reject_empty: bool = True` parameter on `canonicalize_json_schema_output` in `base.py`. All providers route their structured output through that gate, so the check protects every provider; a caller that genuinely wants an all-null object can pass `reject_empty=False`
+- **Native structured outputs (constrained decoding) on Anthropic.** `supports_structured_outputs` per-model flag in `llm_config.yaml` (plumbed through `factory.py` and the `Anthropic`/`BedrockMantle` constructors). When set, `_get_json_schema_response` uses `client.messages.create(output_config={"format": {"type": "json_schema", "schema": …}})` — the model physically cannot emit malformed or missing-key output. Verified via a live N=10 harness (10/10 conforming, 0 empty) and enabled for `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-sonnet-4-5-20250929`, and `claude-haiku-4-5-20251001`. The wire schema is `strip_unsupported_schema_constraints(enforce_strict_object_schema(schema))` (the constrained decoder rejects `minimum`/`maximum`/`pattern`/`format`/array bounds and requires `additionalProperties: false` + full `required`); those keyword constraints are re-enforced post-hoc by validating the response against the caller's original schema. No `name` key is sent inside `format` (it 400s)
+
+### Changed
+
+- **Aliases repointed to current flagships:** `smart` → `claude-opus-4-8` (was `claude-opus-4-6`), `thinking` → `claude-sonnet-5` (was `claude-sonnet-4-6`). `fast` stays `claude-haiku-4-5-20251001`
+- **Anthropic forced tool calling is now the fallback**, used only for models without `supports_structured_outputs` and for web-search requests (which can't combine with `output_config`). It now sends the **strict** schema (`enforce_strict_object_schema`, full `required`) instead of a relaxed one, so an empty `{}` fails schema validation loudly and an all-null result is caught by the empty-check — both then re-sampled by the retry policy. In the live harness this path was also 10/10 on `claude-opus-4-7`
+- **Bedrock (Converse) structured output** gets the same treatment on its json-schema path: strict schema (`enforce_strict_object_schema`) instead of relaxed, and the empty-check via the shared gate
+- **`anthropic` dependency floor raised `>=0.76.0` → `>=0.116.0`** so `output_config` is available on the stable `client.messages.create` (it is beta-only in 0.76). `BedrockMantle` inherits the Anthropic path; its models default to the forced-tool fallback until Mantle's `output_config` support is separately verified
+
+### Removed
+
+- **`relax_strict_object_schema` and `fill_strict_nullable_defaults`** (added in 0.14.0). Relaxing the schema before a forced tool call — emptying `required` for nullable properties — was itself a primary cause of the empty results (it turned a loud parse failure into a silently-valid all-null object). The 0.14.0 spec's approach is superseded by native constrained decoding plus the strict-schema fallback and the empty-check
+- The dead `Anthropic._get_structured_response` override (and its web-search helpers) — the public Pydantic path already routes through `get_json_schema_response`, so dict-callers and Pydantic-callers now share one wire path
+
+### Audit (unchanged)
+
+- OpenAI, Gemini, Cohere, DeepSeek, Fireworks, and Together share the same "no emptiness check" gap but now inherit the shared `reject_empty` guard through `canonicalize_json_schema_output`. Their send-path schema handling (constrained decoding or prompt injection) is outside this change and was left as-is
+
 ## [0.14.0] - 2026-07-21
 
 ### Fixed

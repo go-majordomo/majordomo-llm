@@ -242,6 +242,15 @@ def get_llm_instance(
     if provider in ("openai", "anthropic", "gemini", "bedrock"):
         provider_kwargs["use_web_search"] = use_web_search
 
+    if provider in ("anthropic", "bedrock_mantle"):
+        provider_kwargs["supports_structured_outputs"] = model_attributes.get(
+            "supports_structured_outputs", False
+        )
+
+    if provider == "anthropic":
+        provider_kwargs["reasoning_effort"] = model_attributes.get("reasoning_effort")
+        provider_kwargs["thinking"] = model_attributes.get("thinking")
+
     # An entry may override its API model ID via the ``model`` attribute. This
     # lets the same underlying model be registered under multiple YAML keys —
     # e.g. distinct "reasoning effort" profiles that share one upstream SKU.

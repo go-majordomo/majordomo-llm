@@ -18,20 +18,27 @@ from anthropic.types import (
 
 from majordomo_llm.base import (
     LLM,
-    LLMJSONResponse,
     LLMResponse,
     LLMStreamResponse,
-    T,
     _StreamState,
     canonicalize_json_schema_output,
-    fill_strict_nullable_defaults,
-    relax_strict_object_schema,
+    enforce_strict_object_schema,
     resolve_api_key,
+    strip_unsupported_schema_constraints,
 )
 from majordomo_llm.exceptions import ProviderError, ResponseParsingError
 from majordomo_llm.retry import retry_provider_call
 
 logger = logging.getLogger(__name__)
+
+#: Valid ``output_config.effort`` levels (Claude 4.7+/5 generation).
+_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+#: Valid ``thinking.type`` modes. ``adaptive`` is the on-mode for the 4.6+/5
+#: generation (Claude decides depth); ``disabled`` turns thinking off (rejected
+#: on Fable 5, where thinking is always on). Legacy ``enabled`` + ``budget_tokens``
+#: is intentionally not exposed here.
+_THINKING_MODES = frozenset({"adaptive", "disabled"})
 
 
 class Anthropic(LLM):
@@ -61,6 +68,9 @@ class Anthropic(LLM):
         output_cost: float,
         supports_temperature_top_p: bool = True,
         use_web_search: bool = False,
+        supports_structured_outputs: bool = False,
+        reasoning_effort: str | None = None,
+        thinking: str | None = None,
         *,
         api_key: str | None = None,
         api_key_alias: str | None = None,
@@ -75,6 +85,26 @@ class Anthropic(LLM):
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
             use_web_search: Enable web search (requires claude-sonnet-4-5-20250929).
+            supports_structured_outputs: Whether the model supports native
+                structured outputs (constrained decoding via
+                ``output_config.format``). When False, structured JSON requests
+                fall back to forced tool calling. Defaults to False.
+            reasoning_effort: Optional ``output_config.effort`` level applied to
+                every request — one of ``low``, ``medium``, ``high``, ``xhigh``,
+                ``max``. Controls thinking depth and overall token spend on the
+                4.7+/5 generation. ``None`` (default) sends no effort, so the
+                API default (``high``) applies. Register the same SKU under
+                multiple YAML keys (via the ``model`` override) to expose
+                distinct effort profiles.
+            thinking: Optional ``thinking.type`` mode applied to every request —
+                ``adaptive`` (Claude decides how much to think; the on-mode for
+                the 4.6+/5 generation) or ``disabled``. ``None`` (default) omits
+                the field, so the model runs without thinking. Effort only
+                meaningfully modulates depth when thinking is on, so pair the two.
+                Note: ``disabled`` is rejected on Fable 5 (thinking is always on),
+                and with thinking on the fixed ``max_tokens`` (1024 for plain
+                responses, 4096/8192 for structured) covers thinking + answer —
+                raise it via a dedicated config entry if answers truncate.
             api_key: Optional API key. Defaults to ``ANTHROPIC_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -82,8 +112,20 @@ class Anthropic(LLM):
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
+            ValueError: If ``reasoning_effort`` or ``thinking`` is invalid.
         """
+        if reasoning_effort is not None and reasoning_effort not in _EFFORT_LEVELS:
+            valid = ", ".join(sorted(_EFFORT_LEVELS))
+            raise ValueError(
+                f"Invalid Anthropic reasoning_effort '{reasoning_effort}'. Valid: {valid}"
+            )
+        if thinking is not None and thinking not in _THINKING_MODES:
+            valid = ", ".join(sorted(_THINKING_MODES))
+            raise ValueError(f"Invalid Anthropic thinking mode '{thinking}'. Valid: {valid}")
         resolved_api_key = resolve_api_key(api_key, "ANTHROPIC_API_KEY", "Anthropic")
+        self.supports_structured_outputs = supports_structured_outputs
+        self.reasoning_effort = reasoning_effort
+        self.thinking = thinking
         super().__init__(
             provider="anthropic",
             model=model,
@@ -101,6 +143,27 @@ class Anthropic(LLM):
             base_url=self.base_url,
             default_headers=self.default_headers,
         )
+
+    def _config_create_kwargs(self, fmt: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build config-derived ``messages.create`` kwargs, for splatting.
+
+        Combines the optional structured-output ``format`` with the configured
+        ``reasoning_effort`` (both under ``output_config``) and the configured
+        ``thinking`` mode. Returns ``{}`` (a no-op splat) when none are present,
+        so callers can uniformly write ``**self._config_create_kwargs()`` without
+        a conditional.
+        """
+        kwargs: dict[str, Any] = {}
+        output_config: dict[str, Any] = {}
+        if fmt is not None:
+            output_config["format"] = fmt
+        if self.reasoning_effort is not None:
+            output_config["effort"] = self.reasoning_effort
+        if output_config:
+            kwargs["output_config"] = output_config
+        if self.thinking is not None:
+            kwargs["thinking"] = {"type": self.thinking}
+        return kwargs
 
     # Anthropic bills server-side web search at $10 per 1,000 requests.
     _WEB_SEARCH_COST_PER_REQUEST = 0.01
@@ -151,6 +214,7 @@ class Anthropic(LLM):
                     top_p=top_p,
                     tools=tools,
                     tool_choice=ToolChoiceAutoParam(type="auto"),
+                    **self._config_create_kwargs(),
                     extra_headers=extra_headers,
                 )
             else:
@@ -161,6 +225,7 @@ class Anthropic(LLM):
                     messages=messages,
                     tools=tools,
                     tool_choice=ToolChoiceAutoParam(type="auto"),
+                    **self._config_create_kwargs(),
                     extra_headers=extra_headers,
                 )
         except anthropic.APIError as e:
@@ -218,6 +283,7 @@ class Anthropic(LLM):
                     temperature=temperature,
                     top_p=top_p,
                     stream=True,
+                    **self._config_create_kwargs(),
                     extra_headers=extra_headers,
                 )
             else:
@@ -227,6 +293,7 @@ class Anthropic(LLM):
                     system=system_message,
                     messages=messages,
                     stream=True,
+                    **self._config_create_kwargs(),
                     extra_headers=extra_headers,
                 )
         except anthropic.APIError as e:
@@ -266,7 +333,17 @@ class Anthropic(LLM):
         top_p: float = 1.0,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Anthropic-specific implementation using forced tool calling."""
+        """Anthropic structured JSON output.
+
+        Uses native structured outputs (constrained decoding via
+        ``output_config.format``) on models that support it — the model
+        physically cannot emit malformed or missing-key output. Falls back to
+        forced tool calling on models without native support, and always uses
+        the forced-tool path when web search is enabled (structured outputs and
+        the ``web_search`` tool cannot be combined). Every path validates
+        against the caller's original schema and rejects an empty/all-null
+        result via :func:`canonicalize_json_schema_output`.
+        """
         if self.use_web_search:
             response, execution_time = await self._json_schema_response_with_web_search_helper(
                 user_prompt=user_prompt,
@@ -276,60 +353,185 @@ class Anthropic(LLM):
                 schema_description=schema_description,
                 extra_headers=extra_headers,
             )
-        else:
-            tool_instruction = f"Use the {schema_name} tool to provide your answer."
-            if system_prompt is None:
-                system_prompt = f"You are a helpful assistant. {tool_instruction}"
-            else:
-                system_prompt = f"{system_prompt}\n\n{tool_instruction}"
+            content = _extract_tool_use_content(response.content, schema_name)
+            return self._finalize_json_schema_response(
+                content, response, execution_time, response_schema
+            )
 
-            messages = _anthropic_user_message(user_prompt)
-            system_message = _anthropic_system_prompt(system_prompt)
-            tools = [
-                ToolParam(
-                    name=schema_name,
-                    description=schema_description
-                    or f"Provide a structured response using the {schema_name} JSON schema",
-                    input_schema=relax_strict_object_schema(response_schema),
+        if self.supports_structured_outputs:
+            return await self._native_json_schema_response(
+                user_prompt=user_prompt,
+                response_schema=response_schema,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                top_p=top_p,
+                extra_headers=extra_headers,
+            )
+
+        return await self._forced_tool_json_schema_response(
+            user_prompt=user_prompt,
+            response_schema=response_schema,
+            system_prompt=system_prompt,
+            schema_name=schema_name,
+            schema_description=schema_description,
+            temperature=temperature,
+            top_p=top_p,
+            extra_headers=extra_headers,
+        )
+
+    async def _native_json_schema_response(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None,
+        temperature: float,
+        top_p: float,
+        extra_headers: dict[str, str] | None,
+    ) -> LLMResponse:
+        """Native structured outputs via ``output_config.format`` (constrained decoding).
+
+        The constrained decoder requires strict object schemas
+        (``additionalProperties: false`` + full ``required``) and rejects a set
+        of validation keywords (numeric/string/array bounds, ``pattern``,
+        ``format``). Those are stripped from the wire schema and re-enforced
+        post-hoc by validating the response against the original schema.
+        """
+        sent_schema = strip_unsupported_schema_constraints(
+            enforce_strict_object_schema(response_schema)
+        )
+        output_config = self._config_create_kwargs(
+            fmt={"type": "json_schema", "schema": sent_schema}
+        )
+
+        if system_prompt is None:
+            system_prompt = "You are a helpful assistant."
+        messages = _anthropic_user_message(user_prompt)
+        system_message = _anthropic_system_prompt(system_prompt)
+
+        start_time = time.time()
+        try:
+            if self.supports_temperature_top_p:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=system_message,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    **output_config,
+                    extra_headers=extra_headers,
                 )
-            ]
+            else:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=8192,
+                    system=system_message,
+                    messages=messages,
+                    **output_config,
+                    extra_headers=extra_headers,
+                )
+        except anthropic.APIError as e:
+            raise ProviderError(
+                f"Anthropic API error: {e}",
+                provider="anthropic",
+                original_error=e,
+            ) from e
 
-            start_time = time.time()
-            try:
-                if self.supports_temperature_top_p:
-                    response = await self.client.messages.create(
-                        model=self.model,
-                        max_tokens=4096,
-                        system=system_message,
-                        messages=messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                        tools=tools,
-                        tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
-                        extra_headers=extra_headers,
-                    )
-                else:
-                    response = await self.client.messages.create(
-                        model=self.model,
-                        max_tokens=8192,
-                        system=system_message,
-                        messages=messages,
-                        tools=tools,
-                        tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
-                        extra_headers=extra_headers,
-                    )
-            except anthropic.APIError as e:
-                raise ProviderError(
-                    f"Anthropic API error: {e}",
-                    provider="anthropic",
-                    original_error=e,
-                ) from e
+        execution_time = time.time() - start_time
+        if response.stop_reason == "refusal":
+            raise ResponseParsingError(
+                "Anthropic refused the structured-output request.",
+                raw_content=str(response.content),
+            )
+        content = _extract_structured_text(response.content)
+        return self._finalize_json_schema_response(
+            content, response, execution_time, response_schema
+        )
 
-            execution_time = time.time() - start_time
+    async def _forced_tool_json_schema_response(
+        self,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        system_prompt: str | None,
+        schema_name: str,
+        schema_description: str | None,
+        temperature: float,
+        top_p: float,
+        extra_headers: dict[str, str] | None,
+    ) -> LLMResponse:
+        """Forced-tool fallback for models without native structured outputs.
 
+        Sends the schema in strict form (full ``required``) so an empty ``{}``
+        fails schema validation loudly; an all-null result is caught by the
+        emptiness check in :func:`canonicalize_json_schema_output`. Both surface
+        as :class:`EmptyStructuredResponseError`, which
+        :func:`~majordomo_llm.retry.retry_provider_call` re-samples before it
+        propagates.
+        """
+        tool_instruction = f"Use the {schema_name} tool to provide your answer."
+        if system_prompt is None:
+            system_prompt = f"You are a helpful assistant. {tool_instruction}"
+        else:
+            system_prompt = f"{system_prompt}\n\n{tool_instruction}"
+
+        messages = _anthropic_user_message(user_prompt)
+        system_message = _anthropic_system_prompt(system_prompt)
+        tools = [
+            ToolParam(
+                name=schema_name,
+                description=schema_description
+                or f"Provide a structured response using the {schema_name} JSON schema",
+                input_schema=enforce_strict_object_schema(response_schema),
+            )
+        ]
+
+        start_time = time.time()
+        try:
+            if self.supports_temperature_top_p:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=system_message,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    tools=tools,
+                    tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                    **self._config_create_kwargs(),
+                    extra_headers=extra_headers,
+                )
+            else:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=8192,
+                    system=system_message,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                    **self._config_create_kwargs(),
+                    extra_headers=extra_headers,
+                )
+        except anthropic.APIError as e:
+            raise ProviderError(
+                f"Anthropic API error: {e}",
+                provider="anthropic",
+                original_error=e,
+            ) from e
+
+        execution_time = time.time() - start_time
         content = _extract_tool_use_content(response.content, schema_name)
-        content = fill_strict_nullable_defaults(content, response_schema)
+        return self._finalize_json_schema_response(
+            content, response, execution_time, response_schema
+        )
 
+    def _finalize_json_schema_response(
+        self,
+        content: Any,
+        response: Any,
+        execution_time: float,
+        response_schema: dict[str, Any],
+    ) -> LLMResponse:
+        """Compute usage/cost and validate structured content into an ``LLMResponse``."""
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
@@ -348,248 +550,6 @@ class Anthropic(LLM):
             tool_use_cost=tool_use_cost,
         )
 
-    @retry_provider_call
-    async def _get_structured_response(
-        self,
-        response_model: type[T],
-        user_prompt: str,
-        system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
-        extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
-        """Anthropic-specific implementation using tool calling for structured outputs."""
-        if self.use_web_search:
-            return await self._get_structured_response_with_web_search(
-                response_model=response_model,
-                user_prompt=user_prompt,
-                system_prompt=system_prompt,
-                extra_headers=extra_headers,
-            )
-
-        schema = response_model.model_json_schema()
-
-        tool_instruction = "Use the structured_response tool to provide your answer."
-        if system_prompt is None:
-            system_prompt = f"You are a helpful assistant. {tool_instruction}"
-        else:
-            system_prompt = f"{system_prompt}\n\n{tool_instruction}"
-
-        messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
-        tool_desc = f"Provide a structured response using the {response_model.__name__} format"
-        tools = [
-            ToolParam(
-                name="structured_response",
-                description=tool_desc,
-                input_schema=schema,
-            )
-        ]
-
-        start_time = time.time()
-        try:
-            if self.supports_temperature_top_p:
-                response_message = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    system=system_message,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    tools=tools,
-                    tool_choice=ToolChoiceToolParam(type="tool", name="structured_response"),
-                    extra_headers=extra_headers,
-                )
-            else:
-                response_message = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=8192,
-                    system=system_message,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice=ToolChoiceToolParam(type="tool", name="structured_response"),
-                    extra_headers=extra_headers,
-                )
-        except anthropic.APIError as e:
-            raise ProviderError(
-                f"Anthropic API error: {e}",
-                provider="anthropic",
-                original_error=e,
-            ) from e
-
-        execution_time = time.time() - start_time
-
-        # Extract the tool use content
-        content = None
-        for block in response_message.content:
-            if block.type == "tool_use" and block.name == "structured_response":
-                content = block.input
-                break
-
-        if content is None:
-            raise ResponseParsingError(
-                "No structured response tool use found in Anthropic response",
-                raw_content=str(response_message.content),
-            )
-
-        input_tokens = response_message.usage.input_tokens
-        output_tokens = response_message.usage.output_tokens
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
-        tool_use_cost = self._compute_web_search_cost(response_message)
-        total_cost += tool_use_cost
-
-        return LLMJSONResponse(
-            content=content,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=response_message.usage.cache_read_input_tokens or 0,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
-            tool_use_cost=tool_use_cost,
-        )
-
-    async def _get_structured_response_with_web_search(
-        self,
-        response_model: type[T],
-        user_prompt: str,
-        system_prompt: str | None = None,
-        extra_headers: dict[str, str] | None = None,
-    ) -> LLMJSONResponse:
-        """Get structured response with web search enabled."""
-        response, execution_time = await self._structured_response_with_web_search_helper(
-            response_model=response_model,
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            extra_headers=extra_headers,
-        )
-
-        content = None
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "structured_response":
-                content = block.input
-                break
-
-        if content is None:
-            raise ResponseParsingError(
-                "No structured response tool use found in Anthropic response",
-                raw_content=str(response.content),
-            )
-
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
-        tool_use_cost = self._compute_web_search_cost(response)
-        total_cost += tool_use_cost
-
-        return LLMJSONResponse(
-            content=content,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=response.usage.cache_read_input_tokens or 0,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
-            tool_use_cost=tool_use_cost,
-        )
-
-    async def _structured_response_with_web_search_helper(
-        self,
-        response_model: type[T],
-        user_prompt: str,
-        system_prompt: str | None = None,
-        extra_headers: dict[str, str] | None = None,
-    ) -> tuple[Any, float]:
-        """Helper for web search with structured response."""
-        schema = response_model.model_json_schema()
-        structured_response_tool = ToolParam(
-            name="structured_response",
-            description=f"Provide a structured response using the {response_model.__name__} format",
-            input_schema=schema,
-        )
-        web_search_tool = WebSearchTool20250305Param(
-            name="web_search",
-            type="web_search_20250305",
-        )
-        tools: list[Any] = [structured_response_tool, web_search_tool]
-
-        tool_instruction = "Use the structured_response tool to provide your answer."
-        if system_prompt is None:
-            system_prompt = f"You are a helpful assistant. {tool_instruction}"
-        else:
-            system_prompt = f"{system_prompt}\n\n{tool_instruction}"
-
-        messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
-
-        start_time = time.time()
-        current_messages = messages.copy()
-        search_count = 0
-
-        try:
-            while search_count < 3:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=8192,
-                    system=system_message,
-                    messages=current_messages,
-                    tools=tools,
-                    tool_choice=ToolChoiceAutoParam(type="auto"),
-                    extra_headers=extra_headers,
-                )
-
-                # Check what tool was used
-                if response.stop_reason == "tool_use":
-                    tool_uses = [b for b in response.content if b.type == "tool_use"]
-
-                    # If structured_response was used, we're done!
-                    if any(t.name == "structured_response" for t in tool_uses):
-                        execution_time = time.time() - start_time
-                        return response, execution_time
-
-                    # If web_search was used, continue conversation
-                    if any(t.name == "web_search" for t in tool_uses):
-                        logger.info("Web search initiated (turn %d)", search_count + 1)
-                        search_count += 1
-
-                        # Add assistant response
-                        current_messages.append({
-                            "role": "assistant",
-                            "content": response.content,
-                        })
-
-                        # Add continuation prompt
-                        current_messages.append({
-                            "role": "user",
-                            "content": (
-                            "Continue with your analysis. Use the structured_response "
-                            "tool when ready to generate the final output."
-                        ),
-                        })
-                        continue
-                break
-
-            final_response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=_anthropic_system_prompt(system_prompt),
-                messages=current_messages,
-                tools=[structured_response_tool],
-                tool_choice=ToolChoiceToolParam(type="tool", name="structured_response"),
-                extra_headers=extra_headers,
-            )
-        except anthropic.APIError as e:
-            raise ProviderError(
-                f"Anthropic API error: {e}",
-                provider="anthropic",
-                original_error=e,
-            ) from e
-
-        execution_time = time.time() - start_time
-        return final_response, execution_time
-
     async def _json_schema_response_with_web_search_helper(
         self,
         user_prompt: str,
@@ -604,7 +564,7 @@ class Anthropic(LLM):
             name=schema_name,
             description=schema_description
             or f"Provide a structured response using the {schema_name} JSON schema",
-            input_schema=relax_strict_object_schema(response_schema),
+            input_schema=enforce_strict_object_schema(response_schema),
         )
         web_search_tool = WebSearchTool20250305Param(
             name="web_search",
@@ -634,6 +594,7 @@ class Anthropic(LLM):
                     messages=current_messages,
                     tools=tools,
                     tool_choice=ToolChoiceAutoParam(type="auto"),
+                    **self._config_create_kwargs(),
                     extra_headers=extra_headers,
                 )
 
@@ -664,6 +625,7 @@ class Anthropic(LLM):
                 messages=current_messages,
                 tools=[structured_response_tool],
                 tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                **self._config_create_kwargs(),
                 extra_headers=extra_headers,
             )
         except anthropic.APIError as e:
@@ -686,6 +648,17 @@ def _extract_tool_use_content(content_blocks: list[Any], tool_name: str) -> Any:
         f"No {tool_name} tool use found in Anthropic response",
         raw_content=str(content_blocks),
     )
+
+
+def _extract_structured_text(content_blocks: list[Any]) -> str:
+    """Extract the JSON text from a native structured-output (``output_config``) response."""
+    parts = [block.text for block in content_blocks if block.type == "text"]
+    if not parts:
+        raise ResponseParsingError(
+            "No text content in Anthropic structured-output response",
+            raw_content=str(content_blocks),
+        )
+    return "\n".join(parts)
 
 
 def _anthropic_system_prompt(system_prompt: str) -> list[TextBlockParam]:

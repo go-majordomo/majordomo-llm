@@ -94,3 +94,19 @@ class ResponseParsingError(MajordomoError):
         """
         super().__init__(message)
         self.raw_content = raw_content
+
+
+class EmptyStructuredResponseError(ResponseParsingError):
+    """Raised when a structured response is schema-valid but empty.
+
+    A forced tool call is mandatory to *invoke* but its arguments are ordinary
+    generation, so a model can return ``{}`` or an object whose every field is
+    ``null`` — a schema-valid non-answer. Rather than report that as a
+    successful response, the library raises this so callers (and
+    :class:`~majordomo_llm.cascade.LLMCascade` / the retry policy) can react. It
+    is retryable: the structured-output retry wrapper re-samples before it
+    surfaces.
+
+    Subclasses :class:`ResponseParsingError`; a caller that genuinely wants to
+    accept an all-null object can catch this type and read ``raw_content``.
+    """

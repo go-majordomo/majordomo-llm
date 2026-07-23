@@ -5,9 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
+from tenacity import RetryError
 
 from majordomo_llm.base import TOKENS_PER_MILLION
-from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.exceptions import ConfigurationError, EmptyStructuredResponseError
 from majordomo_llm.providers import Bedrock
 
 
@@ -263,42 +264,47 @@ class TestBedrockStructuredResponse:
         spec = kwargs["toolConfig"]["tools"][0]["toolSpec"]
         assert spec["name"] == "CountryInfo"
 
-    async def test_relaxes_strict_dialect_schema_before_sending(self):
-        """Nullable-required properties are demoted before reaching the tool spec."""
+    async def test_sends_strict_schema_to_tool_spec(self):
+        """The tool inputSchema is the strict (enforced) form, not relaxed."""
         llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
         client = _install_mock_client(llm)
-        client.converse.return_value = _tool_use_response("Answer", {"note": "n/a"})
+        client.converse.return_value = _tool_use_response(
+            "CountryInfo",
+            {"name": "France", "capital": "Paris", "population": 67000000},
+        )
 
         await llm.get_json_schema_response(
-            user_prompt="Answer",
-            response_schema=_STRICT_DIALECT_SCHEMA,
-            schema_name="Answer",
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
         )
 
         sent = client.converse.call_args.kwargs["toolConfig"]["tools"][0]["toolSpec"]
         schema = sent["inputSchema"]["json"]
-        assert "required" not in schema
-        assert schema["properties"]["note"] == {"type": "string"}
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == set(COUNTRY_SCHEMA["properties"].keys())
 
-    async def test_fills_omitted_nullable_optionals_to_match_strict_schema(self):
-        """An omitted nullable-optional is filled with its default before validation."""
+    async def test_empty_tool_result_raises(self):
+        """An all-null (schema-valid) tool result is an error, not a silent success.
+
+        Re-sampled three times, then surfaces as an EmptyStructuredResponseError
+        (wrapped in RetryError on exhaustion, matching every retryable error)."""
         llm = _make_bedrock(model=_TOOL_CALLING_FALLBACK_MODEL)
         client = _install_mock_client(llm)
-        client.converse.return_value = _tool_use_response("Answer", {})
+        client.converse.return_value = _tool_use_response("Answer", {"note": None})
 
-        response = await llm.get_json_schema_response(
-            user_prompt="Answer",
-            response_schema=_STRICT_DIALECT_SCHEMA,
-            schema_name="Answer",
-        )
+        with pytest.raises(RetryError) as exc_info:
+            await llm.get_json_schema_response(
+                user_prompt="Answer",
+                response_schema=_NULLABLE_SCHEMA,
+                schema_name="Answer",
+            )
 
-        assert response.content == '{"note":null}'
+        assert isinstance(exc_info.value.last_attempt.exception(), EmptyStructuredResponseError)
 
 
-_STRICT_DIALECT_SCHEMA = {
+_NULLABLE_SCHEMA = {
     "type": "object",
-    "additionalProperties": False,
-    "required": ["note"],
     "properties": {
         "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
     },

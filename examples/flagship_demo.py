@@ -2,8 +2,8 @@
 """Demo script comparing two flagship models side-by-side with logging.
 
 This script demonstrates:
-- Running the same prompts through Anthropic's claude-opus-4-7 and
-  OpenAI's gpt-5.5
+- Running the same prompts through Anthropic's claude-opus-4-8 (medium-effort
+  profile) and OpenAI's gpt-5.6-sol
 - Logging all requests to SQLite with local file storage
 - Comparing responses, costs, and performance between the two flagships
 
@@ -39,15 +39,14 @@ from majordomo_llm.logging import FileStorageAdapter, LoggingLLM, SqliteAdapter
 # against the same prompts.
 FLAGSHIPS: list[tuple[str, str, str]] = [
     # Closed-source frontier flagships, one per major vendor.
-    ("anthropic", "claude-opus-4-7", "ANTHROPIC_API_KEY"),
-    ("openai", "gpt-5.5", "OPENAI_API_KEY"),
-    ("gemini", "gemini-3.5-flash", "GEMINI_API_KEY"),
+    ("anthropic", "claude-opus-4-8-medium", "ANTHROPIC_API_KEY"),
+    ("openai", "gpt-5.6-sol", "OPENAI_API_KEY"),
+    ("gemini", "gemini-3.6-flash", "GEMINI_API_KEY"),
     # Native DeepSeek flagship (the reasoning model from api.deepseek.com).
     ("deepseek", "deepseek-reasoner", "DEEPSEEK_API_KEY"),
-    # Anthropic Claude via Bedrock Mantle. Apples-to-apples vs the anthropic
-    # entry above for Opus 4.7 — same model, different transport (AWS-native).
+    # Anthropic Claude via Bedrock Mantle — Opus 4.8 over AWS-native transport,
+    # a transport-level comparison against the direct anthropic entry above.
     ("bedrock_mantle", "anthropic.claude-opus-4-8", "AWS_BEARER_TOKEN_BEDROCK"),
-    ("bedrock_mantle", "anthropic.claude-opus-4-7", "AWS_BEARER_TOKEN_BEDROCK"),
     # Open-weight alternatives via Fireworks. Same upstream model, three
     # reasoning profiles — see llm_config.yaml for the effort settings.
     (
@@ -78,20 +77,33 @@ def load_prompts() -> list[dict]:
     return data["prompts"]
 
 
-def get_available_flagships() -> list[tuple[str, str]]:
-    """Return the flagship entries whose API key env var is set."""
+def get_available_flagships(provider: str | None = None) -> list[tuple[str, str]]:
+    """Return the flagship entries whose API key env var is set.
+
+    Args:
+        provider: When set, restrict to entries for this provider only. An
+            unknown provider name prints the known set and returns an empty list.
+    """
+    entries = FLAGSHIPS
+    if provider is not None:
+        entries = [e for e in FLAGSHIPS if e[0] == provider]
+        if not entries:
+            known = ", ".join(sorted({p for p, _, _ in FLAGSHIPS}))
+            print(f"Unknown provider '{provider}'. Known providers: {known}\n")
+            return []
+
     available = []
     missing = []
-    for provider, model, env_var in FLAGSHIPS:
+    for provider_name, model, env_var in entries:
         if os.environ.get(env_var):
-            available.append((provider, model))
+            available.append((provider_name, model))
         else:
-            missing.append((provider, model, env_var))
+            missing.append((provider_name, model, env_var))
 
     if missing:
         print("Missing environment variables (these entries will be skipped):")
-        for provider, model, env_var in missing:
-            print(f"  - {provider}:{model} requires {env_var}")
+        for provider_name, model, env_var in missing:
+            print(f"  - {provider_name}:{model} requires {env_var}")
         print()
 
     return available
@@ -133,15 +145,16 @@ async def run_prompt(
         }
 
 
-async def main(use_gateway: bool = False) -> None:
+async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     """Run the flagship comparison demo.
 
     Args:
         use_gateway: Route all requests through Majordomo Steward instead of
             calling providers directly.
+        provider: When set, run only this provider's entries.
     """
     print("=" * 80)
-    print("majordomo-llm Demo: Flagship Comparison (claude-opus-4-7 vs gpt-5.5)")
+    print("majordomo-llm Demo: Flagship Comparison (claude-opus-4-8 vs gpt-5.6-sol)")
     print("=" * 80)
     print()
 
@@ -149,7 +162,7 @@ async def main(use_gateway: bool = False) -> None:
         print("Routing through the Majordomo gateway (Steward).")
         print()
 
-    available = get_available_flagships()
+    available = get_available_flagships(provider=provider)
     if not available:
         print(
             "No flagship API keys found. Set ANTHROPIC_API_KEY and/or "
@@ -235,5 +248,9 @@ if __name__ == "__main__":
         help="Route requests through Majordomo Steward "
         "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
     )
+    parser.add_argument(
+        "--provider",
+        help="Run only this provider's entries (e.g. anthropic, openai, gemini).",
+    )
     cli_args = parser.parse_args()
-    asyncio.run(main(use_gateway=cli_args.gateway))
+    asyncio.run(main(use_gateway=cli_args.gateway, provider=cli_args.provider))

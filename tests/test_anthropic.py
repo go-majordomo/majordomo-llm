@@ -1,12 +1,17 @@
 """Tests for the Anthropic provider."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
+from tenacity import RetryError
 
 from majordomo_llm.base import TOKENS_PER_MILLION
-from majordomo_llm.exceptions import ConfigurationError
+from majordomo_llm.exceptions import (
+    ConfigurationError,
+    EmptyStructuredResponseError,
+    ResponseParsingError,
+)
 from majordomo_llm.providers import Anthropic
 
 
@@ -19,6 +24,48 @@ class CountryInfo(BaseModel):
 
 
 COUNTRY_SCHEMA = CountryInfo.model_json_schema()
+
+# A schema whose only field is nullable-optional: an empty/all-null result is
+# schema-valid, so it exercises the emptiness check rather than a plain
+# validation failure.
+NULLABLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "note": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+    },
+}
+
+
+def _usage_mock() -> MagicMock:
+    usage = MagicMock()
+    usage.input_tokens = 25
+    usage.output_tokens = 10
+    usage.cache_read_input_tokens = 0
+    usage.server_tool_use = None
+    return usage
+
+
+def _tool_use_response(name: str, value: dict, stop_reason: str = "tool_use") -> MagicMock:
+    block = MagicMock()
+    block.type = "tool_use"
+    block.name = name
+    block.input = value
+    response = MagicMock()
+    response.content = [block]
+    response.stop_reason = stop_reason
+    response.usage = _usage_mock()
+    return response
+
+
+def _text_response(text: str, stop_reason: str = "end_turn") -> MagicMock:
+    block = MagicMock()
+    block.type = "text"
+    block.text = text
+    response = MagicMock()
+    response.content = [block]
+    response.stop_reason = stop_reason
+    response.usage = _usage_mock()
+    return response
 
 
 class TestAnthropicGetResponse:
@@ -105,7 +152,7 @@ class TestAnthropicStructuredResponse:
 
     @pytest.fixture
     def anthropic_llm(self):
-        """Create Anthropic instance with mocked client."""
+        """Anthropic instance without native structured outputs (forced-tool fallback)."""
         with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
             llm = Anthropic(
                 model="claude-sonnet-4-20250514",
@@ -114,6 +161,19 @@ class TestAnthropicStructuredResponse:
                 api_key="test-key",
             )
             return llm
+
+    @pytest.fixture
+    def native_llm(self):
+        """Anthropic instance with native structured outputs (constrained decoding)."""
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model="claude-opus-4-7",
+                input_cost=5.0,
+                output_cost=25.0,
+                supports_temperature_top_p=False,
+                supports_structured_outputs=True,
+                api_key="test-key",
+            )
 
     async def test_extracts_tool_use_content(self, anthropic_llm, mock_anthropic_tool_response):
         """Should extract content from tool_use block."""
@@ -154,10 +214,12 @@ class TestAnthropicStructuredResponse:
         assert call_kwargs["tool_choice"]["type"] == "tool"
         assert call_kwargs["tool_choice"]["name"] == "CountryInfo"
 
-    async def test_json_schema_response_uses_schema_tool(
+    async def test_forced_tool_fallback_sends_strict_schema(
         self, anthropic_llm, mock_anthropic_tool_response
     ):
-        """Should pass raw schema as the forced tool input schema."""
+        """A model without native structured outputs uses forced tool calling
+        with a strict (enforced) input schema — not a relaxed one — and no
+        output_config."""
         anthropic_llm.client.messages.create = AsyncMock(return_value=mock_anthropic_tool_response)
 
         response = await anthropic_llm.get_json_schema_response(
@@ -167,9 +229,212 @@ class TestAnthropicStructuredResponse:
         )
 
         call_kwargs = anthropic_llm.client.messages.create.call_args.kwargs
+        sent = call_kwargs["tools"][0]["input_schema"]
         assert call_kwargs["tools"][0]["name"] == "CountryInfo"
-        assert call_kwargs["tools"][0]["input_schema"] == COUNTRY_SCHEMA
+        assert call_kwargs["tool_choice"]["name"] == "CountryInfo"
+        assert "output_config" not in call_kwargs
+        assert sent["additionalProperties"] is False
+        assert set(sent["required"]) == {"name", "capital", "population"}
         assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
+
+    async def test_native_structured_output_uses_output_config(self, native_llm):
+        """A model with native support uses output_config.format (constrained
+        decoding), not a tool call, and never sends a name key inside format."""
+        native_llm.client.messages.create = AsyncMock(
+            return_value=_text_response(
+                '{"name":"France","capital":"Paris","population":67000000}'
+            )
+        )
+
+        response = await native_llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        call_kwargs = native_llm.client.messages.create.call_args.kwargs
+        fmt = call_kwargs["output_config"]["format"]
+        assert "tools" not in call_kwargs
+        assert fmt["type"] == "json_schema"
+        assert "name" not in fmt  # a name key inside format is rejected with 400
+        assert fmt["schema"]["additionalProperties"] is False
+        assert set(fmt["schema"]["required"]) == {"name", "capital", "population"}
+        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
+
+    async def test_native_strips_unsupported_keywords(self, native_llm):
+        """Constrained-decoder-unsupported keywords are stripped from the wire
+        schema but still enforced post-hoc against the original schema."""
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["n"],
+            "properties": {"n": {"type": "integer", "minimum": 1, "maximum": 10}},
+        }
+        native_llm.client.messages.create = AsyncMock(return_value=_text_response('{"n":5}'))
+
+        await native_llm.get_json_schema_response(user_prompt="x", response_schema=schema)
+
+        sent = native_llm.client.messages.create.call_args.kwargs["output_config"]["format"][
+            "schema"
+        ]
+        assert "minimum" not in sent["properties"]["n"]
+        assert "maximum" not in sent["properties"]["n"]
+
+    async def test_native_refusal_raises(self, native_llm):
+        """A refusal stop_reason surfaces as an error rather than empty text."""
+        native_llm.client.messages.create = AsyncMock(
+            return_value=_text_response("", stop_reason="refusal")
+        )
+
+        with pytest.raises(ResponseParsingError):
+            await native_llm.get_json_schema_response(
+                user_prompt="x", response_schema=COUNTRY_SCHEMA
+            )
+
+    async def test_empty_forced_tool_result_raises(self, anthropic_llm):
+        """An all-null (schema-valid) forced-tool result surfaces as an error,
+        not a silent empty success. It is re-sampled three times, then surfaces
+        as an EmptyStructuredResponseError (wrapped in RetryError on exhaustion,
+        the library's convention for every retryable error)."""
+        anthropic_llm.client.messages.create = AsyncMock(
+            return_value=_tool_use_response("Answer", {"note": None})
+        )
+
+        with pytest.raises(RetryError) as exc_info:
+            await anthropic_llm.get_json_schema_response(
+                user_prompt="x", response_schema=NULLABLE_SCHEMA, schema_name="Answer"
+            )
+
+        assert isinstance(exc_info.value.last_attempt.exception(), EmptyStructuredResponseError)
+        assert anthropic_llm.client.messages.create.call_count == 3
+
+    async def test_retries_empty_then_succeeds(self, anthropic_llm):
+        """An empty first sample is re-sampled; a populated retry is returned."""
+        anthropic_llm.client.messages.create = AsyncMock(
+            side_effect=[
+                _tool_use_response("Answer", {"note": None}),
+                _tool_use_response("Answer", {"note": "hi"}),
+            ]
+        )
+
+        response = await anthropic_llm.get_json_schema_response(
+            user_prompt="x", response_schema=NULLABLE_SCHEMA, schema_name="Answer"
+        )
+
+        assert response.content == '{"note":"hi"}'
+        assert anthropic_llm.client.messages.create.call_count == 2
+
+
+class TestAnthropicReasoningEffort:
+    """Tests for the configurable output_config.effort level."""
+
+    def _llm(self, effort, *, native=True, model="claude-opus-4-8"):
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model=model,
+                input_cost=5.0,
+                output_cost=25.0,
+                supports_temperature_top_p=False,
+                supports_structured_outputs=native,
+                reasoning_effort=effort,
+                api_key="test-key",
+            )
+
+    async def test_effort_merged_into_native_output_config(self):
+        llm = self._llm("medium")
+        llm.client.messages.create = AsyncMock(return_value=_text_response('{"note":"hi"}'))
+
+        await llm.get_json_schema_response(user_prompt="x", response_schema=NULLABLE_SCHEMA)
+
+        output_config = llm.client.messages.create.call_args.kwargs["output_config"]
+        assert output_config["effort"] == "medium"
+        assert output_config["format"]["type"] == "json_schema"
+
+    async def test_effort_applied_to_plain_response(self):
+        llm = self._llm("low", native=False, model="claude-sonnet-4-20250514")
+        llm.client.messages.create = AsyncMock(return_value=_text_response("hi"))
+
+        await llm.get_response("hello")
+
+        assert llm.client.messages.create.call_args.kwargs["output_config"] == {"effort": "low"}
+
+    async def test_no_effort_omits_output_config_on_plain_response(self):
+        llm = self._llm(None, native=False, model="claude-sonnet-4-20250514")
+        llm.client.messages.create = AsyncMock(return_value=_text_response("hi"))
+
+        await llm.get_response("hello")
+
+        assert "output_config" not in llm.client.messages.create.call_args.kwargs
+
+    def test_invalid_effort_raises(self):
+        with (
+            patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"),
+            pytest.raises(ValueError, match="reasoning_effort"),
+        ):
+            Anthropic(
+                model="claude-opus-4-8",
+                input_cost=5.0,
+                output_cost=25.0,
+                reasoning_effort="turbo",
+                api_key="test-key",
+            )
+
+
+class TestAnthropicThinking:
+    """Tests for the configurable thinking mode."""
+
+    def _llm(self, thinking, *, effort=None, native=False, model="claude-opus-4-8"):
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model=model,
+                input_cost=5.0,
+                output_cost=25.0,
+                supports_temperature_top_p=False,
+                supports_structured_outputs=native,
+                reasoning_effort=effort,
+                thinking=thinking,
+                api_key="test-key",
+            )
+
+    async def test_thinking_applied_to_plain_response(self):
+        llm = self._llm("adaptive")
+        llm.client.messages.create = AsyncMock(return_value=_text_response("hi"))
+
+        await llm.get_response("hello")
+
+        assert llm.client.messages.create.call_args.kwargs["thinking"] == {"type": "adaptive"}
+
+    async def test_thinking_and_effort_both_applied_on_native(self):
+        llm = self._llm("adaptive", effort="high", native=True)
+        llm.client.messages.create = AsyncMock(return_value=_text_response('{"note":"hi"}'))
+
+        await llm.get_json_schema_response(user_prompt="x", response_schema=NULLABLE_SCHEMA)
+
+        kwargs = llm.client.messages.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "adaptive"}
+        assert kwargs["output_config"]["effort"] == "high"
+        assert kwargs["output_config"]["format"]["type"] == "json_schema"
+
+    async def test_no_thinking_omits_field(self):
+        llm = self._llm(None)
+        llm.client.messages.create = AsyncMock(return_value=_text_response("hi"))
+
+        await llm.get_response("hello")
+
+        assert "thinking" not in llm.client.messages.create.call_args.kwargs
+
+    def test_invalid_thinking_raises(self):
+        with (
+            patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"),
+            pytest.raises(ValueError, match="thinking mode"),
+        ):
+            Anthropic(
+                model="claude-opus-4-8",
+                input_cost=5.0,
+                output_cost=25.0,
+                thinking="enabled",
+                api_key="test-key",
+            )
 
 
 class TestAnthropicInit:

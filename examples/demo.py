@@ -89,12 +89,13 @@ async def run_prompt(
         }
 
 
-async def main(use_gateway: bool = False) -> None:
+async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     """Run the demo.
 
     Args:
         use_gateway: Route all requests through Majordomo Steward instead of
             calling providers directly.
+        provider: When set, run only this provider's entries.
     """
     print("=" * 80)
     print("majordomo-llm Demo: Multi-Provider LLM with Request Logging")
@@ -106,7 +107,7 @@ async def main(use_gateway: bool = False) -> None:
         print()
 
     # Check available providers
-    available_providers = get_available_providers(use_gateway=use_gateway)
+    available_providers = get_available_providers(use_gateway=use_gateway, provider=provider)
     if not available_providers:
         print("No API keys found. Please set at least one API key to run the demo.")
         return
@@ -197,5 +198,9 @@ if __name__ == "__main__":
         help="Route requests through Majordomo Steward "
         "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
     )
+    parser.add_argument(
+        "--provider",
+        help="Run only this provider's entries (e.g. anthropic, openai, gemini).",
+    )
     cli_args = parser.parse_args()
-    asyncio.run(main(use_gateway=cli_args.gateway))
+    asyncio.run(main(use_gateway=cli_args.gateway, provider=cli_args.provider))

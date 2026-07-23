@@ -25,6 +25,7 @@ from majordomo_llm.base import (
 from majordomo_llm.cascade import LLMCascade
 from majordomo_llm.exceptions import (
     ConfigurationError,
+    EmptyStructuredResponseError,
     MajordomoError,
     ProviderError,
     ResponseParsingError,
@@ -62,7 +63,7 @@ from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 __all__ = [
     # Base classes and types
@@ -78,6 +79,7 @@ __all__ = [
     "HookBlocked",
     "ProviderError",
     "ResponseParsingError",
+    "EmptyStructuredResponseError",
     "StructuredOutputUnsupported",
     # Hooks
     "HookContext",

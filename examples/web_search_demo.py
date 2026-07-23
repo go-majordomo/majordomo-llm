@@ -16,25 +16,28 @@ Prerequisites:
        - GEMINI_API_KEY
 
 Usage:
-    uv run python examples/web_search_demo.py
+    uv run python examples/web_search_demo.py            # call providers directly
+    uv run python examples/web_search_demo.py --gateway  # route through Steward
+
+Gateway routing (--gateway) reads:
+    - MAJORDOMO_GATEWAY_URL (defaults to http://localhost:7680)
+    - MAJORDOMO_API_KEY (required)
 """
 
+import argparse
 import asyncio
 import os
 
-from dotenv import load_dotenv
+from shared import gateway_kwargs
 
 from majordomo_llm import get_llm_instance
-
-load_dotenv()
-
 
 # One web-search-capable model per provider. Each entry's model has
 # supports_web_search: true in llm_config.yaml.
 PROVIDERS: list[tuple[str, str, str]] = [
-    ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
-    ("openai", "gpt-5.4-mini", "OPENAI_API_KEY"),
-    ("gemini", "gemini-3.1-flash-lite", "GEMINI_API_KEY"),
+    ("anthropic", "claude-opus-4-8-fast", "ANTHROPIC_API_KEY"),
+    ("openai", "gpt-5.6-luna", "OPENAI_API_KEY"),
+    ("gemini", "gemini-3.5-flash-lite", "GEMINI_API_KEY"),
 ]
 
 # A prompt that should trigger a grounded lookup. Recency-sensitive on purpose
@@ -46,9 +49,14 @@ PROMPT = (
 )
 
 
-async def demo_web_search(provider: str, model: str) -> bool:
+async def demo_web_search(provider: str, model: str, use_gateway: bool = False) -> bool:
     """Run a single grounded query and print the result + cost breakdown."""
-    llm = get_llm_instance(provider, model, use_web_search=True)
+    llm = get_llm_instance(
+        provider,
+        model,
+        use_web_search=True,
+        **gateway_kwargs(use_gateway, feature="web-search-demo"),
+    )
 
     print(f"\n  [{provider}/{model}]")
 
@@ -76,12 +84,21 @@ async def demo_web_search(provider: str, model: str) -> bool:
     return True
 
 
-async def main() -> None:
+async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     print("=" * 80)
     print("majordomo-llm: Web Search Demo")
     print("=" * 80)
 
-    available = [(p, m) for p, m, env in PROVIDERS if os.environ.get(env)]
+    if use_gateway:
+        print("Routing through the Majordomo gateway (Steward).")
+
+    entries = PROVIDERS if provider is None else [e for e in PROVIDERS if e[0] == provider]
+    if provider is not None and not entries:
+        known = ", ".join(sorted({p for p, _, _ in PROVIDERS}))
+        print(f"Unknown provider '{provider}'. Known providers: {known}")
+        return
+
+    available = [(p, m) for p, m, env in entries if os.environ.get(env)]
     if not available:
         print("No API keys found. Set at least one of:")
         print("  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY")
@@ -92,7 +109,7 @@ async def main() -> None:
 
     failures = 0
     for provider, model in available:
-        ok = await demo_web_search(provider, model)
+        ok = await demo_web_search(provider, model, use_gateway=use_gateway)
         if not ok:
             failures += 1
 
@@ -102,4 +119,16 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        help="Route requests through Majordomo Steward "
+        "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
+    )
+    parser.add_argument(
+        "--provider",
+        help="Run only this provider's entries (e.g. anthropic, openai, gemini).",
+    )
+    cli_args = parser.parse_args()
+    asyncio.run(main(use_gateway=cli_args.gateway, provider=cli_args.provider))

@@ -13,10 +13,12 @@ load_dotenv()
 # Each entry is (provider, model, (env_var, ...)) — all listed env vars must
 # be set for the entry to be selected.
 PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
-    # Native provider SDKs — using the latest fast/small model from each.
-    ("openai", "gpt-5.4-mini", ("OPENAI_API_KEY",)),
+    # Native provider SDKs — the latest fast/small model from each, plus a
+    # low-effort Opus 4.8 profile so a frontier model appears in the sweep.
+    ("openai", "gpt-5.6-luna", ("OPENAI_API_KEY",)),
     ("anthropic", "claude-haiku-4-5-20251001", ("ANTHROPIC_API_KEY",)),
-    ("gemini", "gemini-3.5-flash", ("GEMINI_API_KEY",)),
+    ("anthropic", "claude-opus-4-8-fast", ("ANTHROPIC_API_KEY",)),
+    ("gemini", "gemini-3.6-flash", ("GEMINI_API_KEY",)),
     ("deepseek", "deepseek-v4-flash", ("DEEPSEEK_API_KEY",)),
     ("cohere", "command-a-03-2025", ("CO_API_KEY",)),
     # Amazon Bedrock Mantle — Claude via AWS-native Anthropic Messages API.
@@ -27,7 +29,6 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
     ),
     # Amazon Bedrock (Converse API) — non-Anthropic upstream providers.
     ("bedrock", "moonshotai.kimi-k2.5", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
-    ("bedrock", "nvidia.nemotron-nano-12b-v2", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
     (
         "bedrock",
         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -89,40 +90,52 @@ def gateway_kwargs(use_gateway: bool, feature: str | None = None) -> dict:
     return {"base_url": base_url, "default_headers": headers}
 
 
-def get_available_providers(use_gateway: bool = False) -> list[tuple[str, str]]:
+def get_available_providers(
+    use_gateway: bool = False, provider: str | None = None
+) -> list[tuple[str, str]]:
     """Get all providers with API keys configured.
 
     Args:
         use_gateway: When True, drop providers whose wire format Steward cannot
             route (see GATEWAY_UNSUPPORTED_PROVIDERS) so gateway runs don't hit
             a guaranteed failure.
+        provider: When set, restrict to entries for this provider only. An
+            unknown provider name prints the known set and returns an empty list.
 
     Returns:
         List of (provider, model) tuples for providers whose required
         environment variables are all set.
     """
+    entries = PROVIDERS
+    if provider is not None:
+        entries = [e for e in PROVIDERS if e[0] == provider]
+        if not entries:
+            known = ", ".join(sorted({p for p, _, _ in PROVIDERS}))
+            print(f"Unknown provider '{provider}'. Known providers: {known}\n")
+            return []
+
     available = []
     missing = []
     gateway_skipped = []
-    for provider, model, env_vars in PROVIDERS:
+    for provider_name, model, env_vars in entries:
         unset = [var for var in env_vars if not os.environ.get(var)]
         if unset:
-            missing.append((provider, model, unset))
-        elif use_gateway and provider in GATEWAY_UNSUPPORTED_PROVIDERS:
-            gateway_skipped.append((provider, model))
+            missing.append((provider_name, model, unset))
+        elif use_gateway and provider_name in GATEWAY_UNSUPPORTED_PROVIDERS:
+            gateway_skipped.append((provider_name, model))
         else:
-            available.append((provider, model))
+            available.append((provider_name, model))
 
     if missing:
         print("Missing environment variables (these entries will be skipped):")
-        for provider, model, unset in missing:
-            print(f"  - {provider}:{model} requires {', '.join(unset)}")
+        for provider_name, model, unset in missing:
+            print(f"  - {provider_name}:{model} requires {', '.join(unset)}")
         print()
 
     if gateway_skipped:
         print("Not routable through the gateway (these entries will be skipped):")
-        for provider, model in gateway_skipped:
-            print(f"  - {provider}:{model} — Steward does not support its wire format")
+        for provider_name, model in gateway_skipped:
+            print(f"  - {provider_name}:{model} — Steward does not support its wire format")
         print()
 
     return available

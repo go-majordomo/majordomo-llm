@@ -11,7 +11,7 @@ from cohere.core.api_error import ApiError as CohereApiError
 from google.genai import errors as genai_errors
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from majordomo_llm.exceptions import ProviderError
+from majordomo_llm.exceptions import EmptyStructuredResponseError, ProviderError
 
 RETRYABLE_STATUS_CODES = frozenset({408, 500, 502, 503, 504})
 
@@ -30,6 +30,11 @@ def retry_provider_call[**P, R](
 
 def is_retryable_exception(exc: BaseException) -> bool:
     """Return whether an exception should be retried by provider wrappers."""
+    if isinstance(exc, EmptyStructuredResponseError):
+        # A schema-valid but empty structured result is a model punt (only
+        # possible on the forced-tool fallback path — constrained decoding
+        # cannot produce it). Re-sampling usually recovers a real answer.
+        return True
     if isinstance(exc, ProviderError):
         return is_retryable_provider_error(exc)
     return is_retryable_transport_error(exc)

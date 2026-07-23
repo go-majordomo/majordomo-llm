@@ -83,22 +83,82 @@ openai:
 
 anthropic:
   models:
-    # Claude 4.6 family (latest)
+    # supports_structured_outputs enables native constrained decoding
+    # (output_config.format). Set from a live N=10 harness (10/10 conforming,
+    # 0 empty) — the docs "supported models" table is stale, so gate on the
+    # live API, not the table. Models left without the flag use the forced-tool
+    # fallback, which is also reliable now that it sends the strict schema and
+    # rejects/retries empty results.
+    #
+    # Current flagship models. supports_temperature_top_p is false across the
+    # 4.7+ / 5 generation (temperature/top_p are rejected).
+    claude-fable-5:
+      input_cost: 10.00
+      output_cost: 50.00
+      supports_temperature_top_p: false
+      supports_structured_outputs: true
+    claude-opus-4-8:
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+      supports_structured_outputs: true
+    # Effort/thinking profiles of claude-opus-4-8 (same SKU via the `model`
+    # override; costs/flags are duplicated because entries don't inherit).
+    #   -fast    low effort, no thinking    — latency- and cost-sensitive
+    #   -medium  medium effort + adaptive   — balanced
+    #   -deep    xhigh effort + adaptive    — hardest reasoning/agentic work
+    claude-opus-4-8-fast:
+      model: claude-opus-4-8
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+      supports_structured_outputs: true
+      reasoning_effort: low
+    claude-opus-4-8-medium:
+      model: claude-opus-4-8
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+      supports_structured_outputs: true
+      thinking: adaptive
+      reasoning_effort: medium
+    claude-opus-4-8-deep:
+      model: claude-opus-4-8
+      input_cost: 5.00
+      output_cost: 25.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+      supports_structured_outputs: true
+      thinking: adaptive
+      reasoning_effort: xhigh
+    claude-sonnet-5:
+      input_cost: 3.00
+      output_cost: 15.00
+      supports_temperature_top_p: false
+      supports_web_search: true
+      supports_structured_outputs: true
+    # Legacy models (still available)
     claude-opus-4-7:
       input_cost: 5.00
       output_cost: 25.00
       supports_temperature_top_p: false
       supports_web_search: true
+      supports_structured_outputs: true
     claude-opus-4-6:
       input_cost: 5.00
       output_cost: 25.00
       supports_temperature_top_p: false
       supports_web_search: true
+      supports_structured_outputs: true
     claude-sonnet-4-6:
       input_cost: 3.00
       output_cost: 15.00
       supports_temperature_top_p: false
       supports_web_search: true
+      supports_structured_outputs: true
     # Claude 4.5 family
     claude-opus-4-5-20251101:
       input_cost: 5.00
@@ -109,11 +169,13 @@ anthropic:
       output_cost: 15.00
       supports_temperature_top_p: false
       supports_web_search: true
+      supports_structured_outputs: true
     claude-haiku-4-5-20251001:
       input_cost: 1.00
       output_cost: 5.00
       supports_temperature_top_p: false
       supports_web_search: true
+      supports_structured_outputs: true
     # Claude 4 family
     claude-opus-4-1-20250805:
       input_cost: 15.00
@@ -127,10 +189,19 @@ anthropic:
 
 gemini:
   models:
-    # Gemini 3.5 family (current flagship)
+    # Gemini 3.6 family (current flagship)
+    gemini-3.6-flash:
+      input_cost: 1.50
+      output_cost: 7.50
+      supports_web_search: true
+    # Gemini 3.5 family
     gemini-3.5-flash:
       input_cost: 1.50
       output_cost: 9.00
+      supports_web_search: true
+    gemini-3.5-flash-lite:
+      input_cost: 0.30
+      output_cost: 2.50
       supports_web_search: true
     # Gemini 3.1 family
     # Pro Preview uses tiered pricing: ≤200K tokens at $2.00/$12.00,
@@ -385,10 +456,10 @@ aliases:
     model: claude-haiku-4-5-20251001
   thinking:
     provider: anthropic
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
   smart:
     provider: anthropic
-    model: claude-opus-4-6
+    model: claude-opus-4-8
   cheap:
     provider: gemini
     model: gemini-2.5-flash-lite

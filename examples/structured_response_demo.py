@@ -17,9 +17,15 @@ Prerequisites:
        - CO_API_KEY
 
 Usage:
-    uv run python examples/structured_response_demo.py
+    uv run python examples/structured_response_demo.py            # call providers directly
+    uv run python examples/structured_response_demo.py --gateway  # route through Steward
+
+Gateway routing (--gateway) reads:
+    - MAJORDOMO_GATEWAY_URL (defaults to http://localhost:7680)
+    - MAJORDOMO_API_KEY (required)
 """
 
+import argparse
 import asyncio
 from enum import Enum
 
@@ -27,6 +33,7 @@ from pydantic import BaseModel, Field
 from shared import (
     EXAMPLES_DIR,
     clear_database,
+    gateway_kwargs,
     get_available_providers,
     print_summary,
 )
@@ -239,14 +246,23 @@ async def demo_product_recommendations(
 # =============================================================================
 
 
-async def main() -> None:
-    """Run all structured response demos across all available providers."""
+async def main(use_gateway: bool = False, provider: str | None = None) -> None:
+    """Run all structured response demos across all available providers.
+
+    Args:
+        use_gateway: Route all requests through Majordomo Steward instead of
+            calling providers directly.
+        provider: When set, run only this provider's entries.
+    """
     print("=" * 100)
     print("majordomo-llm: Structured Response Demo (All Providers)")
     print("=" * 100)
 
+    if use_gateway:
+        print("Routing through the Majordomo gateway (Steward).")
+
     # Get all available providers
-    available_providers = get_available_providers()
+    available_providers = get_available_providers(use_gateway=use_gateway, provider=provider)
     if not available_providers:
         print("No API keys found. Please set at least one of:")
         print("  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,")
@@ -273,7 +289,11 @@ async def main() -> None:
         print("Demo 1: Sentiment Analysis (Enum fields)")
         print("-" * 100)
         for provider, model in available_providers:
-            llm = get_llm_instance(provider, model)
+            llm = get_llm_instance(
+                provider,
+                model,
+                **gateway_kwargs(use_gateway, feature="structured-response-demo"),
+            )
             logged_llm = LoggingLLM(llm, db, storage)
             logged_llms.append(logged_llm)
             await demo_sentiment_analysis(logged_llm, provider, model)
@@ -283,7 +303,11 @@ async def main() -> None:
         print("Demo 2: Text Analysis (Nested models with lists)")
         print("-" * 100)
         for provider, model in available_providers:
-            llm = get_llm_instance(provider, model)
+            llm = get_llm_instance(
+                provider,
+                model,
+                **gateway_kwargs(use_gateway, feature="structured-response-demo"),
+            )
             logged_llm = LoggingLLM(llm, db, storage)
             logged_llms.append(logged_llm)
             await demo_text_analysis(logged_llm, provider, model)
@@ -293,7 +317,11 @@ async def main() -> None:
         print("Demo 3: Code Review (Constrained integers, booleans)")
         print("-" * 100)
         for provider, model in available_providers:
-            llm = get_llm_instance(provider, model)
+            llm = get_llm_instance(
+                provider,
+                model,
+                **gateway_kwargs(use_gateway, feature="structured-response-demo"),
+            )
             logged_llm = LoggingLLM(llm, db, storage)
             logged_llms.append(logged_llm)
             await demo_code_review(logged_llm, provider, model)
@@ -303,7 +331,11 @@ async def main() -> None:
         print("Demo 4: Product Recommendations (Complex nested lists)")
         print("-" * 100)
         for provider, model in available_providers:
-            llm = get_llm_instance(provider, model)
+            llm = get_llm_instance(
+                provider,
+                model,
+                **gateway_kwargs(use_gateway, feature="structured-response-demo"),
+            )
             logged_llm = LoggingLLM(llm, db, storage)
             logged_llms.append(logged_llm)
             await demo_product_recommendations(logged_llm, provider, model)
@@ -323,4 +355,16 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        help="Route requests through Majordomo Steward "
+        "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
+    )
+    parser.add_argument(
+        "--provider",
+        help="Run only this provider's entries (e.g. anthropic, openai, gemini).",
+    )
+    cli_args = parser.parse_args()
+    asyncio.run(main(use_gateway=cli_args.gateway, provider=cli_args.provider))

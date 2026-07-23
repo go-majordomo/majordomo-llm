@@ -18,8 +18,7 @@ from majordomo_llm.base import (
     T,
     _StreamState,
     canonicalize_json_schema_output,
-    fill_strict_nullable_defaults,
-    relax_strict_object_schema,
+    enforce_strict_object_schema,
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ConfigurationError, ProviderError, ResponseParsingError
@@ -303,7 +302,7 @@ class Bedrock(LLM):
         tool_config = _bedrock_tool_config(
             name=schema_name,
             description=description,
-            schema=relax_strict_object_schema(response_schema),
+            schema=enforce_strict_object_schema(response_schema),
             model_id=self.model,
         )
 
@@ -326,7 +325,6 @@ class Bedrock(LLM):
 
         execution_time = time.time() - start_time
         content = _extract_tool_use_input(response, schema_name)
-        content = fill_strict_nullable_defaults(content, response_schema)
         input_tokens, output_tokens, cached_tokens = _extract_usage(response)
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
