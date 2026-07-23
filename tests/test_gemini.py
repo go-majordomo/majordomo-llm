@@ -1,5 +1,6 @@
 """Tests for the Gemini provider."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -165,6 +166,39 @@ class TestGeminiStructuredResponse:
         config = call_kwargs["config"]
         assert config.response_schema is not None
         assert config.response_mime_type == "application/json"
+
+    async def test_inlines_nested_model_refs(self, gemini_llm):
+        """Nested models emit $defs/$ref, which Gemini cannot resolve; inline them."""
+
+        class Address(BaseModel):
+            city: str
+            country: str
+
+        class Company(BaseModel):
+            name: str
+            headquarters: Address
+
+        mock_response = MagicMock()
+        mock_response.text = (
+            '{"name": "Acme", "headquarters": {"city": "Berlin", "country": "Germany"}}'
+        )
+        mock_response.usage_metadata.prompt_token_count = 30
+        mock_response.usage_metadata.candidates_token_count = 20
+
+        gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        await gemini_llm.get_structured_json_response(
+            response_model=Company,
+            user_prompt="Describe Acme",
+        )
+
+        config = gemini_llm.client.aio.models.generate_content.call_args.kwargs["config"]
+        schema_str = json.dumps(config.response_schema)
+        assert "$defs" not in schema_str
+        assert "$ref" not in schema_str
+        headquarters = config.response_schema["properties"]["headquarters"]
+        assert headquarters["type"] == "object"
+        assert set(headquarters["properties"]) == {"city", "country"}
 
     async def test_json_schema_response_returns_canonical_json(self, gemini_llm):
         """Should pass raw schema and return canonical JSON string."""
@@ -384,3 +418,32 @@ class TestGeminiWebSearch:
             )
 
         assert "grounded web search" in str(exc_info.value)
+
+    async def test_structured_call_allows_grounding_for_gemini_3(self):
+        """Gemini 3 series models may combine grounding with a response schema."""
+        with patch("majordomo_llm.providers.gemini.genai.Client"):
+            llm = Gemini(
+                model="gemini-3.6-flash",
+                input_cost=0.30,
+                output_cost=2.50,
+                use_web_search=True,
+                api_key="test-key",
+            )
+
+        mock_response = MagicMock()
+        mock_response.text = '{"status": "ok"}'
+        mock_response.usage_metadata.prompt_token_count = 30
+        mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.candidates = []
+        llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        response = await llm.get_json_schema_response(
+            "Return status",
+            response_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+        )
+
+        config = llm.client.aio.models.generate_content.call_args.kwargs["config"]
+        assert config.tools is not None
+        assert config.tools[0].google_search is not None
+        assert config.response_mime_type == "application/json"
+        assert response.content == '{"status":"ok"}'
