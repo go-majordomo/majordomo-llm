@@ -1,6 +1,9 @@
 """Shared utilities for example scripts."""
 
+import argparse
+import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import aiosqlite
@@ -8,6 +11,35 @@ from dotenv import load_dotenv
 
 # Load API keys from .env file
 load_dotenv()
+
+
+def run_demo(
+    main: Callable[..., Awaitable[None]], description: str | None = None
+) -> None:
+    """Parse the shared ``--gateway`` / ``--provider`` CLI flags and run a demo.
+
+    Every example exposes the same two flags and a ``main(use_gateway, provider)``
+    coroutine, so the argparse boilerplate lives here rather than being copied
+    into each script's ``__main__`` block.
+
+    Args:
+        main: The demo's async entry point, accepting ``use_gateway`` (bool) and
+            ``provider`` (str | None) keyword arguments.
+        description: Help text for ``--help`` — typically the module ``__doc__``.
+    """
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        help="Route requests through Majordomo Steward "
+        "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
+    )
+    parser.add_argument(
+        "--provider",
+        help="Run only this provider's entries (e.g. anthropic, openai, gemini).",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(use_gateway=args.gateway, provider=args.provider))
 
 # Provider/model pairs with their required environment variables.
 # Each entry is (provider, model, (env_var, ...)) — all listed env vars must

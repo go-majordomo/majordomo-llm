@@ -233,3 +233,31 @@ class TestUseWebSearchForwarding:
         # resulting instance should still report use_web_search=False.
         llm = get_llm_instance("cohere", "command-a-03-2025", use_web_search=True)
         assert llm.use_web_search is False
+
+
+class TestUsePromptCachingForwarding:
+    """Tests for use_prompt_caching forwarding/override from the factory."""
+
+    def test_default_is_true_for_anthropic(self, mock_all_clients):
+        llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+        assert llm.use_prompt_caching is True
+
+    def test_override_disables_caching(self, mock_all_clients):
+        llm = get_llm_instance(
+            "anthropic", "claude-sonnet-4-6", use_prompt_caching=False
+        )
+        assert llm.use_prompt_caching is False
+
+    def test_override_forwarded_to_bedrock_mantle(self, mock_all_clients):
+        llm = get_llm_instance(
+            "bedrock_mantle",
+            "anthropic.claude-haiku-4-5",
+            use_prompt_caching=False,
+            region="us-east-1",
+        )
+        assert llm.use_prompt_caching is False
+
+    def test_cache_costs_loaded_from_config(self, mock_all_clients):
+        llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+        assert llm.cached_input_cost == 0.30
+        assert llm.cache_write_cost == 3.75

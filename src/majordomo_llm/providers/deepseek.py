@@ -50,6 +50,8 @@ class DeepSeek(LLM):
         output_cost: float,
         supports_temperature_top_p: bool = True,
         *,
+        cached_input_cost: float | None = None,
+        cache_write_cost: float | None = None,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -64,6 +66,10 @@ class DeepSeek(LLM):
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
+            cached_input_cost: Cost per million cache-hit (cache-read) tokens in
+                USD; a subset of input tokens re-priced below ``input_cost``.
+            cache_write_cost: Unused by DeepSeek; accepted for a uniform factory
+                signature.
             api_key: Optional API key. Defaults to ``DEEPSEEK_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL. Overrides DEEPSEEK_BASE_URL when set.
@@ -101,6 +107,8 @@ class DeepSeek(LLM):
             model=model,
             input_cost=input_cost,
             output_cost=output_cost,
+            cached_input_cost=cached_input_cost,
+            cache_write_cost=cache_write_cost,
             supports_temperature_top_p=supports_temperature_top_p,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
@@ -190,7 +198,9 @@ class DeepSeek(LLM):
             )
             or 0
         )
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens
+        )
 
         return LLMResponse(
             content=response.choices[0].message.content or "",
@@ -345,7 +355,9 @@ class DeepSeek(LLM):
             )
             or 0
         )
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens
+        )
 
         return LLMResponse(
             content=canonicalize_json_schema_output(

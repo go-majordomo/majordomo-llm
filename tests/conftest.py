@@ -15,6 +15,7 @@ def mock_anthropic_text_response():
     response.usage.input_tokens = 25
     response.usage.output_tokens = 10
     response.usage.cache_read_input_tokens = 0
+    response.usage.cache_creation_input_tokens = 0
     response.usage.server_tool_use = None
     response.stop_reason = "end_turn"
     return response
@@ -33,6 +34,7 @@ def mock_anthropic_tool_response():
     response.usage.input_tokens = 50
     response.usage.output_tokens = 30
     response.usage.cache_read_input_tokens = 5
+    response.usage.cache_creation_input_tokens = 0
     response.usage.server_tool_use = None
     response.stop_reason = "tool_use"
     return response
@@ -74,6 +76,7 @@ def mock_gemini_text_response():
     response.text = "Gemini says hello!"
     response.usage_metadata.prompt_token_count = 15
     response.usage_metadata.candidates_token_count = 5
+    response.usage_metadata.cached_content_token_count = 0
     response.candidates = []
     return response
 
@@ -85,6 +88,7 @@ def mock_gemini_json_response():
     response.text = '{"status": "success", "value": 123}'
     response.usage_metadata.prompt_token_count = 20
     response.usage_metadata.candidates_token_count = 12
+    response.usage_metadata.cached_content_token_count = 0
     response.candidates = []
     return response
 
@@ -124,6 +128,7 @@ def mock_anthropic_stream_events():
     msg_start.type = "message_start"
     msg_start.message.usage.input_tokens = 25
     msg_start.message.usage.cache_read_input_tokens = 0
+    msg_start.message.usage.cache_creation_input_tokens = 0
 
     delta1 = MagicMock()
     delta1.type = "content_block_delta"
@@ -159,6 +164,7 @@ def mock_gemini_stream_chunks():
     chunk2.text = " world"
     chunk2.usage_metadata.prompt_token_count = 15
     chunk2.usage_metadata.candidates_token_count = 5
+    chunk2.usage_metadata.cached_content_token_count = 0
 
     async def stream():
         yield chunk1

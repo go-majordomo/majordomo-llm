@@ -300,6 +300,93 @@ class TestLLMCostCalculation:
         assert output_cost == 15.0  # Exactly $15
         assert total_cost == 18.0
 
+    def test_subset_accounting_reprices_cached_reads(self):
+        """Subset providers re-price cached tokens (a subset of input) downward."""
+        llm = self.ConcreteLLM(
+            provider="test",
+            model="test-model",
+            input_cost=3.0,
+            output_cost=15.0,
+            cached_input_cost=0.3,
+        )
+
+        input_cost, _, total_cost = llm._calculate_costs(
+            input_tokens=1000,
+            output_tokens=0,
+            cached_tokens=400,
+        )
+
+        # 600 uncached @ $3 + 400 cached @ $0.30, all per million.
+        expected_input = (600 * 3.0 + 400 * 0.3) / TOKENS_PER_MILLION
+        assert input_cost == expected_input
+        assert total_cost == expected_input
+
+    def test_subset_accounting_without_rate_bills_at_input_cost(self):
+        """With no cached rate, subset cached tokens stay at full input_cost (no-op)."""
+        llm = self.ConcreteLLM(
+            provider="test",
+            model="test-model",
+            input_cost=3.0,
+            output_cost=15.0,
+        )
+
+        input_cost, _, _ = llm._calculate_costs(
+            input_tokens=1000,
+            output_tokens=0,
+            cached_tokens=400,
+        )
+
+        assert input_cost == 1000 * 3.0 / TOKENS_PER_MILLION
+
+    def test_additive_accounting_adds_cache_read_and_write(self):
+        """Additive providers add cache read/write on top of uncached input."""
+
+        class AdditiveLLM(self.ConcreteLLM):
+            _cache_accounting = "additive"
+
+        llm = AdditiveLLM(
+            provider="test",
+            model="test-model",
+            input_cost=3.0,
+            output_cost=15.0,
+            cached_input_cost=0.3,
+            cache_write_cost=3.75,
+        )
+
+        input_cost, _, total_cost = llm._calculate_costs(
+            input_tokens=1000,
+            output_tokens=0,
+            cached_tokens=200,
+            cache_creation_tokens=300,
+        )
+
+        # input_tokens are NOT reduced by cached/creation in additive mode.
+        expected_input = (1000 * 3.0 + 200 * 0.3 + 300 * 3.75) / TOKENS_PER_MILLION
+        assert input_cost == expected_input
+        assert total_cost == expected_input
+
+    def test_additive_accounting_without_rates_ignores_cache_tokens(self):
+        """With no cache rates, additive cache tokens contribute nothing (prior behaviour)."""
+
+        class AdditiveLLM(self.ConcreteLLM):
+            _cache_accounting = "additive"
+
+        llm = AdditiveLLM(
+            provider="test",
+            model="test-model",
+            input_cost=3.0,
+            output_cost=15.0,
+        )
+
+        input_cost, _, _ = llm._calculate_costs(
+            input_tokens=1000,
+            output_tokens=0,
+            cached_tokens=200,
+            cache_creation_tokens=300,
+        )
+
+        assert input_cost == 1000 * 3.0 / TOKENS_PER_MILLION
+
 
 class TestLLMFullModelName:
     """Tests for LLM.get_full_model_name method."""

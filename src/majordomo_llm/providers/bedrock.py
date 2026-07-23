@@ -47,6 +47,11 @@ class Bedrock(LLM):
         >>> response = await llm.get_response("Hello!")
     """
 
+    #: Bedrock Converse reports ``cacheReadInputTokens`` /
+    #: ``cacheWriteInputTokens`` separately from ``inputTokens``, so cache cost is
+    #: added on top of the uncached input.
+    _cache_accounting = "additive"
+
     def __init__(
         self,
         model: str,
@@ -55,6 +60,8 @@ class Bedrock(LLM):
         supports_temperature_top_p: bool = True,
         use_web_search: bool = False,
         *,
+        cached_input_cost: float | None = None,
+        cache_write_cost: float | None = None,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -69,6 +76,10 @@ class Bedrock(LLM):
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
+            cached_input_cost: Cost per million cache-read tokens
+                (``cacheReadInputTokens``) in USD, billed on top of input.
+            cache_write_cost: Cost per million cache-creation tokens
+                (``cacheWriteInputTokens``) in USD, billed on top of input.
             use_web_search: Accepted for interface parity; Bedrock Converse has
                 no native web search and this flag is ignored.
             api_key: Optional Bedrock API key. Defaults to
@@ -106,6 +117,8 @@ class Bedrock(LLM):
             model=model,
             input_cost=input_cost,
             output_cost=output_cost,
+            cached_input_cost=cached_input_cost,
+            cache_write_cost=cache_write_cost,
             supports_temperature_top_p=supports_temperature_top_p,
             use_web_search=use_web_search,
             api_key=resolved_api_key,
@@ -205,14 +218,17 @@ class Bedrock(LLM):
 
         execution_time = time.time() - start_time
         content = _extract_text_content(response)
-        input_tokens, output_tokens, cached_tokens = _extract_usage(response)
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_tokens, output_tokens, cached_tokens, cache_creation_tokens = _extract_usage(response)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        )
 
         return LLMResponse(
             content=content,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -257,6 +273,9 @@ class Bedrock(LLM):
                             state.output_tokens = usage.get("outputTokens", state.output_tokens)
                             state.cached_tokens = usage.get(
                                 "cacheReadInputTokens", state.cached_tokens
+                            )
+                            state.cache_creation_tokens = usage.get(
+                                "cacheWriteInputTokens", state.cache_creation_tokens
                             )
             except (ClientError, BotoCoreError) as e:
                 raise ProviderError(
@@ -325,14 +344,17 @@ class Bedrock(LLM):
 
         execution_time = time.time() - start_time
         content = _extract_tool_use_input(response, schema_name)
-        input_tokens, output_tokens, cached_tokens = _extract_usage(response)
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_tokens, output_tokens, cached_tokens, cache_creation_tokens = _extract_usage(response)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        )
 
         return LLMResponse(
             content=canonicalize_json_schema_output(content, response_schema),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -392,14 +414,17 @@ class Bedrock(LLM):
 
         execution_time = time.time() - start_time
         content = _extract_tool_use_input(response, "structured_response")
-        input_tokens, output_tokens, cached_tokens = _extract_usage(response)
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_tokens, output_tokens, cached_tokens, cache_creation_tokens = _extract_usage(response)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        )
 
         return LLMJSONResponse(
             content=content,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -466,10 +491,11 @@ def _extract_tool_use_input(response: dict[str, Any], tool_name: str) -> Any:
     )
 
 
-def _extract_usage(response: dict[str, Any]) -> tuple[int, int, int]:
+def _extract_usage(response: dict[str, Any]) -> tuple[int, int, int, int]:
     usage = response.get("usage", {}) or {}
     return (
         int(usage.get("inputTokens", 0)),
         int(usage.get("outputTokens", 0)),
         int(usage.get("cacheReadInputTokens", 0) or 0),
+        int(usage.get("cacheWriteInputTokens", 0) or 0),
     )

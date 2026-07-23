@@ -371,8 +371,16 @@ class Usage:
     Attributes:
         input_tokens: Number of tokens in the input/prompt.
         output_tokens: Number of tokens in the response.
-        cached_tokens: Number of tokens served from cache (provider-specific).
-        input_cost: Cost for input tokens in USD.
+        cached_tokens: Number of prompt tokens served from cache (cache reads,
+            provider-specific). Its relationship to ``input_tokens`` differs by
+            provider: for OpenAI-family providers cached tokens are a subset of
+            ``input_tokens``; for Anthropic/Bedrock they are reported separately
+            and excluded from ``input_tokens``.
+        cache_creation_tokens: Number of prompt tokens written to the cache
+            (cache-creation/cache-write). Only populated by providers that bill a
+            distinct cache-write rate (Anthropic, Bedrock); ``0`` elsewhere.
+        input_cost: Prompt-side cost in USD (uncached input plus any cache
+            read/write cost) after cache pricing is applied.
         output_cost: Cost for output tokens in USD.
         total_cost: Total cost (input + output + tool use) in USD.
         response_time: Time taken for the request in seconds.
@@ -386,6 +394,7 @@ class Usage:
     output_cost: float
     total_cost: float
     response_time: float
+    cache_creation_tokens: int = field(default=0, kw_only=True)
     tool_use_cost: float = field(default=0.0, kw_only=True)
 
 
@@ -442,6 +451,7 @@ class _StreamState:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    cache_creation_tokens: int = 0
     start_time: float = field(default_factory=time.time)
 
 
@@ -495,12 +505,16 @@ class LLMStreamResponse:
         self._consumed = True
         response_time = time.time() - self._state.start_time
         input_cost, output_cost, total_cost = self._llm._calculate_costs(
-            self._state.input_tokens, self._state.output_tokens
+            self._state.input_tokens,
+            self._state.output_tokens,
+            self._state.cached_tokens,
+            self._state.cache_creation_tokens,
         )
         self._usage = Usage(
             input_tokens=self._state.input_tokens,
             output_tokens=self._state.output_tokens,
             cached_tokens=self._state.cached_tokens,
+            cache_creation_tokens=self._state.cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -525,6 +539,7 @@ class LLMStreamResponse:
             input_tokens=self._usage.input_tokens,
             output_tokens=self._usage.output_tokens,
             cached_tokens=self._usage.cached_tokens,
+            cache_creation_tokens=self._usage.cache_creation_tokens,
             input_cost=self._usage.input_cost,
             output_cost=self._usage.output_cost,
             total_cost=self._usage.total_cost,
@@ -562,6 +577,19 @@ class LLM(ABC):
         >>> print(f"Cost: ${response.total_cost:.6f}")
     """
 
+    #: How the provider accounts for cached prompt tokens, which determines the
+    #: cache cost formula in :meth:`_calculate_costs`:
+    #:
+    #: - ``"subset"`` (default): ``cached_tokens`` are already counted in
+    #:   ``input_tokens`` (OpenAI, Gemini, DeepSeek, Fireworks, Together). Cost
+    #:   re-prices those tokens down from ``input_cost`` to ``cached_input_cost``.
+    #: - ``"additive"``: ``cached_tokens`` / ``cache_creation_tokens`` are
+    #:   reported separately and excluded from ``input_tokens`` (Anthropic,
+    #:   Bedrock). Cost adds cache read/write on top of the uncached input.
+    #:
+    #: Providers whose accounting is "additive" override this class attribute.
+    _cache_accounting: str = "subset"
+
     def __init__(
         self,
         provider: str,
@@ -575,6 +603,9 @@ class LLM(ABC):
         base_url: str | None = None,
         default_headers: dict[str, str] | None = None,
         hook_pipeline: HookPipeline | None = None,
+        cached_input_cost: float | None = None,
+        cache_write_cost: float | None = None,
+        use_prompt_caching: bool = True,
     ) -> None:
         """Initialize the LLM instance.
 
@@ -592,11 +623,23 @@ class LLM(ABC):
             hook_pipeline: Optional :class:`HookPipeline` that wraps every
                 text-producing call. ``get_response_stream`` does not run
                 hooks; streaming-chunk interception is deferred.
+            cached_input_cost: Cost per million cache-read tokens in USD. When
+                ``None``, no cache-read discount is applied (see
+                :meth:`_calculate_costs`).
+            cache_write_cost: Cost per million cache-creation tokens in USD, for
+                providers with a distinct cache-write rate (Anthropic, Bedrock).
+                When ``None``, cache writes are not billed.
+            use_prompt_caching: Whether to request prompt caching on providers
+                that support explicit cache breakpoints (Anthropic). Defaults to
+                ``True``. Ignored by providers without explicit cache control.
         """
         self.provider = provider
         self.model = model
         self.input_cost = input_cost
         self.output_cost = output_cost
+        self.cached_input_cost = cached_input_cost
+        self.cache_write_cost = cache_write_cost
+        self.use_prompt_caching = use_prompt_caching
         self.supports_temperature_top_p = supports_temperature_top_p
         self.use_web_search = use_web_search
         self.api_key_hash = _hash_api_key(api_key) if api_key else None
@@ -616,18 +659,51 @@ class LLM(ABC):
         return f"{self.provider}:{self.model}"
 
     def _calculate_costs(
-        self, input_tokens: int, output_tokens: int
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int = 0,
+        cache_creation_tokens: int = 0,
     ) -> tuple[float, float, float]:
-        """Calculate costs for a request.
+        """Calculate costs for a request, accounting for prompt caching.
+
+        The returned ``input_cost`` is the full prompt-side cost: uncached input
+        plus any cache read/write cost. How cached tokens fold in depends on the
+        provider's :attr:`_cache_accounting` mode:
+
+        - ``"subset"``: ``cached_tokens`` are part of ``input_tokens`` already.
+          They are re-priced from ``input_cost`` down to ``cached_input_cost``
+          (falling back to ``input_cost`` — i.e. no discount — when unset).
+        - ``"additive"``: ``cached_tokens`` (reads) and ``cache_creation_tokens``
+          (writes) are separate from ``input_tokens`` and are added on top at
+          ``cached_input_cost`` / ``cache_write_cost`` (each contributing ``0``
+          when its rate is unset, matching prior un-modelled behaviour).
 
         Args:
-            input_tokens: Number of input tokens.
+            input_tokens: Number of input tokens (provider-reported).
             output_tokens: Number of output tokens.
+            cached_tokens: Number of cache-read prompt tokens.
+            cache_creation_tokens: Number of cache-write prompt tokens.
 
         Returns:
             Tuple of (input_cost, output_cost, total_cost) in USD.
         """
-        input_cost = (input_tokens * self.input_cost) / TOKENS_PER_MILLION
+        if self._cache_accounting == "additive":
+            read_rate = self.cached_input_cost if self.cached_input_cost is not None else 0.0
+            write_rate = self.cache_write_cost if self.cache_write_cost is not None else 0.0
+            input_cost = (
+                input_tokens * self.input_cost
+                + cached_tokens * read_rate
+                + cache_creation_tokens * write_rate
+            ) / TOKENS_PER_MILLION
+        else:
+            cached_rate = (
+                self.cached_input_cost if self.cached_input_cost is not None else self.input_cost
+            )
+            uncached_tokens = max(input_tokens - cached_tokens, 0)
+            input_cost = (
+                uncached_tokens * self.input_cost + cached_tokens * cached_rate
+            ) / TOKENS_PER_MILLION
         output_cost = (output_tokens * self.output_cost) / TOKENS_PER_MILLION
         return input_cost, output_cost, input_cost + output_cost
 
@@ -751,6 +827,7 @@ class LLM(ABC):
             input_tokens=captured.input_tokens,
             output_tokens=captured.output_tokens,
             cached_tokens=captured.cached_tokens,
+            cache_creation_tokens=captured.cache_creation_tokens,
             input_cost=captured.input_cost,
             output_cost=captured.output_cost,
             total_cost=captured.total_cost,
@@ -809,6 +886,7 @@ class LLM(ABC):
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cached_tokens=response.cached_tokens,
+            cache_creation_tokens=response.cache_creation_tokens,
             input_cost=response.input_cost,
             output_cost=response.output_cost,
             total_cost=response.total_cost,
@@ -877,6 +955,7 @@ class LLM(ABC):
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cached_tokens=response.cached_tokens,
+            cache_creation_tokens=response.cache_creation_tokens,
             input_cost=response.input_cost,
             output_cost=response.output_cost,
             total_cost=response.total_cost,
@@ -1019,6 +1098,7 @@ class LLM(ABC):
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cached_tokens=response.cached_tokens,
+            cache_creation_tokens=response.cache_creation_tokens,
             input_cost=response.input_cost,
             output_cost=response.output_cost,
             total_cost=response.total_cost,

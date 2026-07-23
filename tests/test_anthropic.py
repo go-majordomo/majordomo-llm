@@ -41,6 +41,7 @@ def _usage_mock() -> MagicMock:
     usage.input_tokens = 25
     usage.output_tokens = 10
     usage.cache_read_input_tokens = 0
+    usage.cache_creation_input_tokens = 0
     usage.server_tool_use = None
     return usage
 
@@ -625,3 +626,52 @@ class TestAnthropicWebSearch:
         assert response.total_cost == pytest.approx(
             expected_input_cost + expected_output_cost + 0.02
         )
+
+
+class TestAnthropicPromptCaching:
+    """Tests for the configurable prompt-cache breakpoint and cache costing."""
+
+    def _make_llm(self, **kwargs):
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model="claude-sonnet-4-20250514",
+                input_cost=3.0,
+                output_cost=15.0,
+                api_key="test-key",
+                **kwargs,
+            )
+
+    async def test_cache_control_present_by_default(self, mock_anthropic_text_response):
+        """The system block carries an ephemeral cache_control breakpoint by default."""
+        llm = self._make_llm()
+        llm.client.messages.create = AsyncMock(return_value=mock_anthropic_text_response)
+
+        await llm.get_response("Hello", system_prompt="You are helpful.")
+
+        system = llm.client.messages.create.call_args.kwargs["system"]
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    async def test_cache_control_omitted_when_disabled(self, mock_anthropic_text_response):
+        """use_prompt_caching=False drops the cache_control breakpoint."""
+        llm = self._make_llm(use_prompt_caching=False)
+        llm.client.messages.create = AsyncMock(return_value=mock_anthropic_text_response)
+
+        await llm.get_response("Hello", system_prompt="You are helpful.")
+
+        system = llm.client.messages.create.call_args.kwargs["system"]
+        assert "cache_control" not in system[0]
+
+    async def test_cache_read_and_write_costs_applied(self, mock_anthropic_text_response):
+        """Cache read/write tokens are billed on top of uncached input (additive)."""
+        mock_anthropic_text_response.usage.input_tokens = 25
+        mock_anthropic_text_response.usage.cache_read_input_tokens = 100
+        mock_anthropic_text_response.usage.cache_creation_input_tokens = 200
+        llm = self._make_llm(cached_input_cost=0.3, cache_write_cost=3.75)
+        llm.client.messages.create = AsyncMock(return_value=mock_anthropic_text_response)
+
+        response = await llm.get_response("Hello")
+
+        assert response.cached_tokens == 100
+        assert response.cache_creation_tokens == 200
+        expected_input = (25 * 3.0 + 100 * 0.3 + 200 * 3.75) / TOKENS_PER_MILLION
+        assert response.input_cost == pytest.approx(expected_input)

@@ -43,11 +43,14 @@ class MySQLAdapter(DatabaseAdapter):
                     """
                     INSERT INTO llm_requests (
                         request_id, provider, model, timestamp, response_time,
-                        input_tokens, output_tokens, cached_tokens,
+                        input_tokens, output_tokens, cached_tokens, cache_creation_tokens,
                         input_cost, output_cost, total_cost,
                         s3_request_key, s3_response_key, status, error_message,
                         api_key_hash, api_key_alias
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
                     """,
                     (
                         str(entry.request_id),
@@ -58,6 +61,7 @@ class MySQLAdapter(DatabaseAdapter):
                         entry.input_tokens,
                         entry.output_tokens,
                         entry.cached_tokens,
+                        entry.cache_creation_tokens,
                         entry.input_cost,
                         entry.output_cost,
                         entry.total_cost,

@@ -61,6 +61,10 @@ class Anthropic(LLM):
         >>> response = await llm.get_response("Hello, Claude!")
     """
 
+    #: Anthropic reports cache-read/cache-write tokens separately from
+    #: ``input_tokens``, so cache cost is added on top of the uncached input.
+    _cache_accounting = "additive"
+
     def __init__(
         self,
         model: str,
@@ -72,6 +76,9 @@ class Anthropic(LLM):
         reasoning_effort: str | None = None,
         thinking: str | None = None,
         *,
+        cached_input_cost: float | None = None,
+        cache_write_cost: float | None = None,
+        use_prompt_caching: bool = True,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -105,6 +112,14 @@ class Anthropic(LLM):
                 and with thinking on the fixed ``max_tokens`` (1024 for plain
                 responses, 4096/8192 for structured) covers thinking + answer —
                 raise it via a dedicated config entry if answers truncate.
+            cached_input_cost: Cost per million cache-read tokens in USD
+                (``cache_read_input_tokens``), billed on top of uncached input.
+            cache_write_cost: Cost per million cache-creation tokens in USD
+                (``cache_creation_input_tokens``), billed on top of uncached input.
+            use_prompt_caching: When ``True`` (default), the system prompt is sent
+                with an ephemeral ``cache_control`` breakpoint so Anthropic caches
+                it. Set ``False`` to disable prompt caching (e.g. for short,
+                non-reused system prompts where the cache-write premium is wasted).
             api_key: Optional API key. Defaults to ``ANTHROPIC_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -131,6 +146,9 @@ class Anthropic(LLM):
             model=model,
             input_cost=input_cost,
             output_cost=output_cost,
+            cached_input_cost=cached_input_cost,
+            cache_write_cost=cache_write_cost,
+            use_prompt_caching=use_prompt_caching,
             supports_temperature_top_p=supports_temperature_top_p,
             use_web_search=use_web_search,
             api_key=resolved_api_key,
@@ -195,7 +213,7 @@ class Anthropic(LLM):
         start_time = time.time()
 
         messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
+        system_message = _anthropic_system_prompt(system_prompt, self.use_prompt_caching)
 
         tools: list[Any] = []
         if self.use_web_search:
@@ -240,7 +258,11 @@ class Anthropic(LLM):
 
         input_tokens = response_message.usage.input_tokens
         output_tokens = response_message.usage.output_tokens
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        cached_tokens = response_message.usage.cache_read_input_tokens or 0
+        cache_creation_tokens = response_message.usage.cache_creation_input_tokens or 0
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        )
         tool_use_cost = self._compute_web_search_cost(response_message)
         total_cost += tool_use_cost
 
@@ -248,7 +270,8 @@ class Anthropic(LLM):
             content="\n".join(final_response),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cached_tokens=response_message.usage.cache_read_input_tokens or 0,
+            cached_tokens=cached_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -271,7 +294,7 @@ class Anthropic(LLM):
 
         state = _StreamState()
         messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
+        system_message = _anthropic_system_prompt(system_prompt, self.use_prompt_caching)
 
         try:
             if self.supports_temperature_top_p:
@@ -309,6 +332,9 @@ class Anthropic(LLM):
                     if event.type == "message_start":
                         state.input_tokens = event.message.usage.input_tokens
                         state.cached_tokens = event.message.usage.cache_read_input_tokens or 0
+                        state.cache_creation_tokens = (
+                            event.message.usage.cache_creation_input_tokens or 0
+                        )
                     elif event.type == "content_block_delta" and event.delta.type == "text_delta":
                         yield event.delta.text
                     elif event.type == "message_delta":
@@ -406,7 +432,7 @@ class Anthropic(LLM):
         if system_prompt is None:
             system_prompt = "You are a helpful assistant."
         messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
+        system_message = _anthropic_system_prompt(system_prompt, self.use_prompt_caching)
 
         start_time = time.time()
         try:
@@ -475,7 +501,7 @@ class Anthropic(LLM):
             system_prompt = f"{system_prompt}\n\n{tool_instruction}"
 
         messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
+        system_message = _anthropic_system_prompt(system_prompt, self.use_prompt_caching)
         tools = [
             ToolParam(
                 name=schema_name,
@@ -534,7 +560,11 @@ class Anthropic(LLM):
         """Compute usage/cost and validate structured content into an ``LLMResponse``."""
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        cached_tokens = response.usage.cache_read_input_tokens or 0
+        cache_creation_tokens = response.usage.cache_creation_input_tokens or 0
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        )
         tool_use_cost = self._compute_web_search_cost(response)
         total_cost += tool_use_cost
 
@@ -542,7 +572,8 @@ class Anthropic(LLM):
             content=canonicalize_json_schema_output(content, response_schema),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cached_tokens=response.usage.cache_read_input_tokens or 0,
+            cached_tokens=cached_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -579,7 +610,7 @@ class Anthropic(LLM):
             system_prompt = f"{system_prompt}\n\n{tool_instruction}"
 
         messages = _anthropic_user_message(user_prompt)
-        system_message = _anthropic_system_prompt(system_prompt)
+        system_message = _anthropic_system_prompt(system_prompt, self.use_prompt_caching)
 
         start_time = time.time()
         current_messages = messages.copy()
@@ -621,7 +652,7 @@ class Anthropic(LLM):
             final_response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
-                system=_anthropic_system_prompt(system_prompt),
+                system=_anthropic_system_prompt(system_prompt, self.use_prompt_caching),
                 messages=current_messages,
                 tools=[structured_response_tool],
                 tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
@@ -661,15 +692,24 @@ def _extract_structured_text(content_blocks: list[Any]) -> str:
     return "\n".join(parts)
 
 
-def _anthropic_system_prompt(system_prompt: str) -> list[TextBlockParam]:
-    """Create Anthropic system prompt with cache control."""
-    return [
-        TextBlockParam(
-            type="text",
-            text=system_prompt,
-            cache_control=CacheControlEphemeralParam(type="ephemeral"),
-        )
-    ]
+def _anthropic_system_prompt(
+    system_prompt: str, use_prompt_caching: bool = True
+) -> list[TextBlockParam]:
+    """Create an Anthropic system prompt block.
+
+    When ``use_prompt_caching`` is ``True`` the block carries an ephemeral
+    ``cache_control`` breakpoint so Anthropic caches the system prompt; when
+    ``False`` the breakpoint is omitted and no cache is created.
+    """
+    if use_prompt_caching:
+        return [
+            TextBlockParam(
+                type="text",
+                text=system_prompt,
+                cache_control=CacheControlEphemeralParam(type="ephemeral"),
+            )
+        ]
+    return [TextBlockParam(type="text", text=system_prompt)]
 
 
 def _anthropic_user_message(user_prompt: str) -> list[MessageParam]:

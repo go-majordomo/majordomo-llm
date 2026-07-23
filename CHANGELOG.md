@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-23
+
+### Added
+
+- **Configurable prompt caching on the Anthropic-family providers.** `use_prompt_caching` is now a per-model flag in `llm_config.yaml` (default `true`), a constructor argument on `Anthropic`/`BedrockMantle`, and an override on `get_llm_instance(..., use_prompt_caching=…)` (mirroring `use_web_search`; `None` keeps the config default). It gates the ephemeral `cache_control` breakpoint stamped on the system prompt — set it `False` to suppress caching for short, non-reused system prompts where the cache-write premium is wasted. Providers without an explicit cache breakpoint (OpenAI, Gemini, DeepSeek, Fireworks, Together, Cohere, Bedrock Converse) ignore it. Verified live end-to-end against `claude-sonnet-5`, `claude-opus-4-8-fast`, and `bedrock_mantle` Haiku 4.5 (cold write → warm read → toggle-off)
+- **Cache-aware cost accounting.** `_calculate_costs` now folds cache read/write tokens into `input_cost` according to a per-provider accounting mode (`_cache_accounting`): **subset** for OpenAI/Gemini/DeepSeek/Fireworks/Together (cached reads are part of `input_tokens` and re-priced down to `cached_input_cost`) and **additive** for Anthropic/Bedrock (cache read/write are reported separately and added on top at `cached_input_cost` / `cache_write_cost`). When a rate is unset the cost is computed exactly as before, so the change is backward compatible. Verified: additive `input_cost = (input·rate + read·read_rate + write·write_rate)/1M` matches the live API to the cent
+- **`cached_input_cost` / `cache_write_cost` per-model pricing in `llm_config.yaml`,** populated for every cache-capable provider using each vendor's published, stable convention (Anthropic/Bedrock Mantle: read 0.10× input, 5-min write 1.25×; OpenAI GPT-5 line 0.10×, GPT-4.1/o-series 0.25×; Gemini 0.25×; DeepSeek 0.10×). Fireworks/Together are intentionally left unset (no separate cache tier — cached reads bill at `input_cost`); Bedrock Converse is left unset (no cache points are inserted). A header comment documents the multiplier basis
+- **`cache_creation_tokens` on `Usage`** (and `LLMResponse`/`LLMJSONResponse`/`LLMStructuredResponse`, streaming `_StreamState`, and the logging layer). Captured from Anthropic (`cache_creation_input_tokens`) and Bedrock (`cacheWriteInputTokens`). Gemini now also captures cache **reads** (`cached_content_token_count`), which were previously hard-coded to `0`. A `cache_creation_tokens` column was added to the SQLite `CREATE TABLE` and all three log-adapter INSERTs (SQLite/Postgres/MySQL)
+- **`examples/prompt_caching_demo.py`** demonstrating both caching flavors side by side: explicit create → read → `use_prompt_caching=False` toggle (Anthropic, Bedrock Mantle) and automatic cache-read + subset discount (OpenAI, Gemini, DeepSeek), with per-call token/cost breakdowns and per-read savings
+- **`run_demo(main, description)` in `examples/shared.py`** — factors the identical `--gateway`/`--provider` argparse boilerplate out of all six example scripts into one helper
+
+### Changed
+
+- **`_calculate_costs` signature** extended with optional `cached_tokens` and `cache_creation_tokens` parameters (both default `0`), so the ~19 existing call sites compile unchanged and only cache-bearing providers pass the new arguments
+- **`Usage.cache_creation_tokens`** is keyword-only with a `0` default, so existing positional/keyword `Usage` construction is unaffected
+
 ## [0.15.0] - 2026-07-22
 
 ### Fixed

@@ -57,6 +57,64 @@ Demo 2: Collect stream into LLMResponse
   Tokens: 22 in / 15 out | Cost: $0.000041
 ```
 
+## Prompt Caching Demo
+
+The `prompt_caching_demo.py` script showcases both prompt caching flavors side
+by side, using a large reused system prompt as the cacheable prefix:
+
+- **Explicit caching** (Anthropic `claude-sonnet-5` / `claude-opus-4-8-fast`,
+  Bedrock Mantle) — this library controls the `cache_control` breakpoint, so it
+  demonstrates cache **creation** (`cache_creation_tokens` > 0 on the cold
+  call), cache **read** (`cached_tokens` > 0 on the warm call), and the
+  `use_prompt_caching=False` toggle on `get_llm_instance` that suppresses the
+  breakpoint entirely.
+- **Automatic caching** (OpenAI `gpt-5.6-luna`, Gemini `gemini-3.6-flash`,
+  DeepSeek `deepseek-v4-flash`) — the provider caches repeated prefixes
+  server-side; there is no creation step or toggle, but `cached_tokens` populate
+  on the warm call and bill at the discounted `cached_input_cost` rate.
+
+Cache-aware cost accounting is shown for both: `input_cost` folds in cache
+read/write tokens (additive for the explicit providers, subset re-pricing for
+the automatic ones) using the rates in `llm_config.yaml`.
+
+### Run
+
+```bash
+uv run python examples/prompt_caching_demo.py
+uv run python examples/prompt_caching_demo.py --provider anthropic
+```
+
+### Example Output
+
+```
+  [anthropic/claude-sonnet-5]  (explicit cache-control), system prompt ~24200 chars
+
+    Flow A — reuse the same system prompt across two calls:
+    Call 1 (cold — expect cache WRITE > 0):
+      Tokens: 24 in / 18 out | cache write 3050 / cache read 0
+      Cost: $0.011... (input $0.011... + output $0.000...)
+    Call 2 (warm — expect cache READ > 0):
+      Tokens: 26 in / 41 out | cache write 0 / cache read 3050
+      Cost: $0.001... (input $0.000... + output $0.000...)
+      Cache hit: 3050 tokens read; prompt-side savings vs. uncached ~= $0.008235
+
+    Flow B — caching OFF (use_prompt_caching=False):
+    Call (expect cache write/read == 0):
+      Tokens: 3074 in / 18 out | cache write 0 / cache read 0
+      Cost: $0.009... (input $0.009... + output $0.000...)
+
+  [openai/gpt-5.6-luna]  (automatic caching), system prompt ~24200 chars
+
+    Flow A — reuse the same system prompt across two calls:
+    Call 1 (cold — expect cache read 0):
+      Tokens: 3072 in / 20 out | cache write 0 / cache read 0
+    Call 2 (warm — expect cache READ > 0):
+      Tokens: 3074 in / 44 out | cache write 0 / cache read 2944
+      Cache hit: 2944 tokens read; prompt-side savings vs. uncached ~= $0.002650
+
+    (No use_prompt_caching toggle — this provider caches automatically ...)
+```
+
 ## Demo: Multi-Provider Comparison with Logging
 
 The `demo.py` script showcases:
