@@ -14,6 +14,7 @@ from majordomo_llm.base import (
     LLMStreamResponse,
     _StreamState,
     canonicalize_json_schema_output,
+    inline_schema_refs,
     resolve_api_key,
 )
 from majordomo_llm.exceptions import ConfigurationError, ProviderError
@@ -98,6 +99,19 @@ class Gemini(LLM):
         if not self.use_web_search:
             return
         config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+
+    def _supports_search_with_structured_output(self) -> bool:
+        """Whether this model can combine a grounding tool with a response schema.
+
+        Grounded structured outputs are a Gemini 3 series preview feature; 2.5
+        and earlier reject a request that sets both a grounding tool and a
+        response schema.
+        """
+        return (
+            self.model.startswith("gemini-3.")
+            or self.model.startswith("gemini-3-")
+            or self.model == "gemini-3"
+        )
 
     def _compute_web_search_cost(self, response: Any) -> float:
         """Return the per-call grounded-query fee charged by Gemini.
@@ -237,11 +251,12 @@ class Gemini(LLM):
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Gemini-specific implementation using response schema for structured outputs."""
-        if self.use_web_search:
+        if self.use_web_search and not self._supports_search_with_structured_output():
             raise ConfigurationError(
-                "Gemini does not support combining grounded web search with "
-                "response_schema in the same request. Use a separate Gemini "
-                "instance with use_web_search=False for structured calls."
+                f"Gemini model '{self.model}' does not support combining grounded "
+                "web search with response_schema in the same request. Only Gemini 3 "
+                "series models support grounded structured outputs. Use a separate "
+                "Gemini instance with use_web_search=False for structured calls."
             )
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
@@ -252,6 +267,7 @@ class Gemini(LLM):
         }
         if extra_headers:
             config_kwargs["http_options"] = types.HttpOptions(headers=extra_headers)
+        self._apply_web_search(config_kwargs)
 
         start_time = time.time()
         try:
@@ -270,6 +286,8 @@ class Gemini(LLM):
 
         input_tokens, output_tokens = _gemini_token_counts(response)
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        tool_use_cost = self._compute_web_search_cost(response)
+        total_cost += tool_use_cost
 
         return LLMResponse(
             content=canonicalize_json_schema_output(response.text or "", response_schema),
@@ -280,11 +298,20 @@ class Gemini(LLM):
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=execution_time,
+            tool_use_cost=tool_use_cost,
         )
 
 
 def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Return a Gemini-compatible copy of a JSON schema."""
+    """Return a Gemini-compatible copy of a JSON schema.
+
+    Nested Pydantic models emit their sub-models under ``$defs`` and reference
+    them with ``$ref`` pointers. Gemini's ``generateContent`` schema compiler
+    does not resolve named ``$ref``s, so we inline them first (via
+    :func:`inline_schema_refs`) and then strip the remaining keywords Gemini
+    rejects.
+    """
+    schema = inline_schema_refs(schema)
     unsupported_keywords = {"$schema", "$id", "additionalProperties"}
 
     def strip_unsupported(value: Any) -> Any:
