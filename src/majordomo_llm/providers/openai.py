@@ -53,6 +53,8 @@ class OpenAI(LLM):
         supports_temperature_top_p: bool = True,
         use_web_search: bool = False,
         *,
+        cached_input_cost: float | None = None,
+        cache_write_cost: float | None = None,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -66,6 +68,11 @@ class OpenAI(LLM):
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
             use_web_search: Enable Responses API ``web_search_preview`` tool.
+            cached_input_cost: Cost per million cache-read tokens in USD. OpenAI
+                reports cached tokens as a subset of input tokens, so this
+                re-prices them below ``input_cost``.
+            cache_write_cost: Unused by OpenAI (no distinct cache-write rate);
+                accepted for a uniform factory signature.
             api_key: Optional API key. Defaults to ``OPENAI_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -80,6 +87,8 @@ class OpenAI(LLM):
             model=model,
             input_cost=input_cost,
             output_cost=output_cost,
+            cached_input_cost=cached_input_cost,
+            cache_write_cost=cache_write_cost,
             supports_temperature_top_p=supports_temperature_top_p,
             use_web_search=use_web_search,
             api_key=resolved_api_key,
@@ -158,13 +167,16 @@ class OpenAI(LLM):
         assert response.usage is not None
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        cached_tokens = response.usage.input_tokens_details.cached_tokens
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens
+        )
 
         return LLMResponse(
             content=response.output_text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cached_tokens=response.usage.input_tokens_details.cached_tokens,
+            cached_tokens=cached_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -289,12 +301,14 @@ class OpenAI(LLM):
         assert response.usage is not None
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
         cached_tokens = getattr(
             getattr(response.usage, "input_tokens_details", None),
             "cached_tokens",
             0,
         ) or 0
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens
+        )
 
         return LLMResponse(
             content=canonicalize_json_schema_output(response.output_text, response_schema),

@@ -121,6 +121,7 @@ class LoggingLLM(LLM):
             input_tokens=response.input_tokens if response else None,
             output_tokens=response.output_tokens if response else None,
             cached_tokens=response.cached_tokens if response else None,
+            cache_creation_tokens=response.cache_creation_tokens if response else None,
             input_cost=response.input_cost if response else None,
             output_cost=response.output_cost if response else None,
             total_cost=response.total_cost if response else None,

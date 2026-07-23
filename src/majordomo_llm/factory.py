@@ -140,6 +140,7 @@ def get_llm_instance(
     default_headers: dict[str, str] | None = None,
     region: str | None = None,
     use_web_search: bool = False,
+    use_prompt_caching: bool | None = None,
 ) -> LLM:
     """Create an LLM instance for the specified provider and model.
 
@@ -162,6 +163,11 @@ def get_llm_instance(
             ``llm_config.yaml``. Silently ignored for providers that do not
             implement web search (cohere, deepseek, fireworks, together,
             bedrock_mantle).
+        use_prompt_caching: Override the model's ``use_prompt_caching`` config
+            default for providers with an explicit cache breakpoint (Anthropic,
+            Bedrock Mantle). ``None`` (default) keeps the config value (which
+            itself defaults to ``True``); ``True``/``False`` force caching on or
+            off. Ignored by providers without explicit cache control.
 
     Returns:
         An LLM instance configured for the specified provider and model.
@@ -246,6 +252,11 @@ def get_llm_instance(
         provider_kwargs["supports_structured_outputs"] = model_attributes.get(
             "supports_structured_outputs", False
         )
+        provider_kwargs["use_prompt_caching"] = (
+            use_prompt_caching
+            if use_prompt_caching is not None
+            else model_attributes.get("use_prompt_caching", True)
+        )
 
     if provider == "anthropic":
         provider_kwargs["reasoning_effort"] = model_attributes.get("reasoning_effort")
@@ -260,6 +271,8 @@ def get_llm_instance(
         model=api_model,
         input_cost=model_attributes["input_cost"],
         output_cost=model_attributes["output_cost"],
+        cached_input_cost=model_attributes.get("cached_input_cost"),
+        cache_write_cost=model_attributes.get("cache_write_cost"),
         supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
         api_key=api_key,
         base_url=base_url,

@@ -49,6 +49,8 @@ class Gemini(LLM):
         *,
         supports_temperature_top_p: bool = True,
         use_web_search: bool = False,
+        cached_input_cost: float | None = None,
+        cache_write_cost: float | None = None,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -62,6 +64,11 @@ class Gemini(LLM):
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether the model supports temperature/top_p.
             use_web_search: Enable the Google Search grounding tool.
+            cached_input_cost: Cost per million cached-content (cache-read) tokens
+                in USD. Gemini reports cached content as a subset of prompt
+                tokens, so this re-prices them below ``input_cost``.
+            cache_write_cost: Unused by Gemini (implicit caching has no per-token
+                write fee); accepted for a uniform factory signature.
             api_key: Optional API key. Defaults to ``GEMINI_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -76,6 +83,8 @@ class Gemini(LLM):
             model=model,
             input_cost=input_cost,
             output_cost=output_cost,
+            cached_input_cost=cached_input_cost,
+            cache_write_cost=cache_write_cost,
             supports_temperature_top_p=True,
             use_web_search=use_web_search,
             api_key=resolved_api_key,
@@ -172,8 +181,10 @@ class Gemini(LLM):
             ) from e
         execution_time = time.time() - start_time
 
-        input_tokens, output_tokens = _gemini_token_counts(response)
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_tokens, output_tokens, cached_tokens = _gemini_token_counts(response)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens
+        )
         tool_use_cost = self._compute_web_search_cost(response)
         total_cost += tool_use_cost
 
@@ -181,7 +192,7 @@ class Gemini(LLM):
             content=response.text or "",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cached_tokens=0,
+            cached_tokens=cached_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -230,6 +241,9 @@ class Gemini(LLM):
                     if chunk.usage_metadata:
                         state.input_tokens = chunk.usage_metadata.prompt_token_count or 0
                         state.output_tokens = chunk.usage_metadata.candidates_token_count or 0
+                        state.cached_tokens = (
+                            chunk.usage_metadata.cached_content_token_count or 0
+                        )
             except genai_errors.APIError as e:
                 raise ProviderError(
                     f"Gemini API error: {e}",
@@ -284,8 +298,10 @@ class Gemini(LLM):
             ) from e
         execution_time = time.time() - start_time
 
-        input_tokens, output_tokens = _gemini_token_counts(response)
-        input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
+        input_tokens, output_tokens, cached_tokens = _gemini_token_counts(response)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens
+        )
         tool_use_cost = self._compute_web_search_cost(response)
         total_cost += tool_use_cost
 
@@ -293,7 +309,7 @@ class Gemini(LLM):
             content=canonicalize_json_schema_output(response.text or "", response_schema),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cached_tokens=0,
+            cached_tokens=cached_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -328,11 +344,18 @@ def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], strip_unsupported(schema))
 
 
-def _gemini_token_counts(response: Any) -> tuple[int, int]:
-    """Extract Gemini token counts with typed non-None defaults."""
+def _gemini_token_counts(response: Any) -> tuple[int, int, int]:
+    """Extract Gemini token counts with typed non-None defaults.
+
+    Returns ``(input_tokens, output_tokens, cached_tokens)``. Gemini's
+    ``prompt_token_count`` is the full prompt size and already includes
+    ``cached_content_token_count`` (cache reads), so the cached count is a subset
+    of the input count.
+    """
     usage_metadata = response.usage_metadata
     assert usage_metadata is not None
     return (
         int(usage_metadata.prompt_token_count or 0),
         int(usage_metadata.candidates_token_count or 0),
+        int(usage_metadata.cached_content_token_count or 0),
     )

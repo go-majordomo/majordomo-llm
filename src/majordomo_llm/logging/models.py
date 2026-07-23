@@ -17,6 +17,7 @@ class LogEntry:
     input_tokens: int | None
     output_tokens: int | None
     cached_tokens: int | None
+    cache_creation_tokens: int | None
     input_cost: float | None
     output_cost: float | None
     total_cost: float | None

@@ -1,5 +1,21 @@
 # LLM Provider Configuration
 # Costs are specified in USD per million tokens.
+#
+# Prompt-cache pricing (optional per model):
+#   cached_input_cost  – price per million cache-READ tokens.
+#   cache_write_cost   – price per million cache-CREATION tokens (Anthropic /
+#                        Bedrock only; other providers have no distinct write rate).
+# When a field is omitted, no cache cost is modelled for that token class:
+#   - OpenAI-family (subset accounting): cached reads fall back to input_cost.
+#   - Anthropic/Bedrock (additive accounting): cache read/write contribute 0.
+# The values below follow each provider's published, stable cache-pricing
+# convention rather than per-model quotes:
+#   - Anthropic / Bedrock Mantle: read = 0.10x input, 5-min write = 1.25x input.
+#   - OpenAI GPT-5 line: cached = 0.10x input; GPT-4.1 / o-series: 0.25x input.
+#   - Gemini: implicit-cache read = 0.25x input (storage fees not modelled).
+#   - DeepSeek: cache-hit read = 0.10x input.
+#   - Fireworks / Together: no separate cache tier — cached reads bill at
+#     input_cost, so cached_input_cost is intentionally left unset.
 
 openai:
   models:
@@ -7,78 +23,94 @@ openai:
     gpt-5.6-sol:
       input_cost: 5.00
       output_cost: 30.00
+      cached_input_cost: 0.50
       supports_temperature_top_p: false
       supports_web_search: true
     gpt-5.6-terra:
       input_cost: 2.50
       output_cost: 15.00
+      cached_input_cost: 0.25
       supports_temperature_top_p: false
       supports_web_search: true
     gpt-5.6-luna:
       input_cost: 1.00
       output_cost: 6.00
+      cached_input_cost: 0.10
       supports_temperature_top_p: false
       supports_web_search: true
     # GPT-5.5 family
     gpt-5.5:
       input_cost: 5.00
       output_cost: 30.00
+      cached_input_cost: 0.50
       supports_temperature_top_p: false
       supports_web_search: true
     # GPT-5.4 family
     gpt-5.4:
       input_cost: 2.50
       output_cost: 15.00
+      cached_input_cost: 0.25
       supports_temperature_top_p: false
       supports_web_search: true
     gpt-5.4-mini:
       input_cost: 0.75
       output_cost: 4.50
+      cached_input_cost: 0.075
       supports_temperature_top_p: false
       supports_web_search: true
     gpt-5.4-nano:
       input_cost: 0.20
       output_cost: 1.25
+      cached_input_cost: 0.02
       supports_temperature_top_p: false
     gpt-5.4-pro:
       input_cost: 30.00
       output_cost: 180.00
+      cached_input_cost: 3.00
       supports_temperature_top_p: false
     # GPT-5 family
     gpt-5:
       input_cost: 1.25
       output_cost: 10.00
+      cached_input_cost: 0.125
       supports_temperature_top_p: false
       supports_web_search: true
     gpt-5-mini:
       input_cost: 0.25
       output_cost: 2.00
+      cached_input_cost: 0.025
       supports_temperature_top_p: false
       supports_web_search: true
     gpt-5-nano:
       input_cost: 0.05
       output_cost: 0.40
+      cached_input_cost: 0.005
       supports_temperature_top_p: false
     # GPT-4.1 family
     gpt-4.1:
       input_cost: 2.00
       output_cost: 8.00
+      cached_input_cost: 0.50
       supports_web_search: true
     gpt-4.1-mini:
       input_cost: 0.40
       output_cost: 1.60
+      cached_input_cost: 0.10
       supports_web_search: true
     gpt-4.1-nano:
       input_cost: 0.10
       output_cost: 0.40
+      cached_input_cost: 0.025
     # o-series reasoning models
     o3:
       input_cost: 2.00
       output_cost: 8.00
+      cached_input_cost: 0.50
       supports_temperature_top_p: false
     o4-mini:
       input_cost: 1.10
       output_cost: 4.40
+      cached_input_cost: 0.275
       supports_temperature_top_p: false
 
 anthropic:
@@ -95,11 +127,15 @@ anthropic:
     claude-fable-5:
       input_cost: 10.00
       output_cost: 50.00
+      cached_input_cost: 1.00
+      cache_write_cost: 12.50
       supports_temperature_top_p: false
       supports_structured_outputs: true
     claude-opus-4-8:
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -112,6 +148,8 @@ anthropic:
       model: claude-opus-4-8
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -120,6 +158,8 @@ anthropic:
       model: claude-opus-4-8
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -129,6 +169,8 @@ anthropic:
       model: claude-opus-4-8
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -137,6 +179,8 @@ anthropic:
     claude-sonnet-5:
       input_cost: 3.00
       output_cost: 15.00
+      cached_input_cost: 0.30
+      cache_write_cost: 3.75
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -144,18 +188,24 @@ anthropic:
     claude-opus-4-7:
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
     claude-opus-4-6:
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
     claude-sonnet-4-6:
       input_cost: 3.00
       output_cost: 15.00
+      cached_input_cost: 0.30
+      cache_write_cost: 3.75
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -163,16 +213,22 @@ anthropic:
     claude-opus-4-5-20251101:
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_web_search: true
     claude-sonnet-4-5-20250929:
       input_cost: 3.00
       output_cost: 15.00
+      cached_input_cost: 0.30
+      cache_write_cost: 3.75
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
     claude-haiku-4-5-20251001:
       input_cost: 1.00
       output_cost: 5.00
+      cached_input_cost: 0.10
+      cache_write_cost: 1.25
       supports_temperature_top_p: false
       supports_web_search: true
       supports_structured_outputs: true
@@ -180,12 +236,18 @@ anthropic:
     claude-opus-4-1-20250805:
       input_cost: 15.00
       output_cost: 75.00
+      cached_input_cost: 1.50
+      cache_write_cost: 18.75
     claude-opus-4-20250514:
       input_cost: 15.00
       output_cost: 75.00
+      cached_input_cost: 1.50
+      cache_write_cost: 18.75
     claude-sonnet-4-20250514:
       input_cost: 3.00
       output_cost: 15.00
+      cached_input_cost: 0.30
+      cache_write_cost: 3.75
 
 gemini:
   models:
@@ -193,15 +255,18 @@ gemini:
     gemini-3.6-flash:
       input_cost: 1.50
       output_cost: 7.50
+      cached_input_cost: 0.375
       supports_web_search: true
     # Gemini 3.5 family
     gemini-3.5-flash:
       input_cost: 1.50
       output_cost: 9.00
+      cached_input_cost: 0.375
       supports_web_search: true
     gemini-3.5-flash-lite:
       input_cost: 0.30
       output_cost: 2.50
+      cached_input_cost: 0.075
       supports_web_search: true
     # Gemini 3.1 family
     # Pro Preview uses tiered pricing: ≤200K tokens at $2.00/$12.00,
@@ -209,38 +274,46 @@ gemini:
     gemini-3.1-pro-preview:
       input_cost: 2.00
       output_cost: 12.00
+      cached_input_cost: 0.50
       supports_web_search: true
     gemini-3.1-flash-lite:
       input_cost: 0.25
       output_cost: 1.50
+      cached_input_cost: 0.0625
       supports_web_search: true
     # Gemini 3 family (preview)
     gemini-3-flash-preview:
       input_cost: 0.50
       output_cost: 3.00
+      cached_input_cost: 0.125
       supports_web_search: true
     # Gemini 2.5 family (stable, prior generation)
     gemini-2.5-pro:
       input_cost: 1.25
       output_cost: 10.00
+      cached_input_cost: 0.3125
       supports_web_search: true
     gemini-2.5-flash:
       input_cost: 0.30
       output_cost: 2.50
+      cached_input_cost: 0.075
       supports_web_search: true
     gemini-2.5-flash-lite:
       input_cost: 0.10
       output_cost: 0.40
+      cached_input_cost: 0.025
 
 deepseek:
   models:
     deepseek-v4-flash:
       input_cost: 0.14
       output_cost: 0.28
+      cached_input_cost: 0.014
       reasoning_effort: medium
     deepseek-v4-pro:
       input_cost: 0.435
       output_cost: 0.87
+      cached_input_cost: 0.0435
       reasoning_effort: medium
     # Reasoning profile — Sonnet-with-extended-thinking class. Use for code
     # review, multi-step analysis, structured extraction under ambiguity.
@@ -248,6 +321,7 @@ deepseek:
       model: deepseek-v4-pro
       input_cost: 0.435
       output_cost: 0.87
+      cached_input_cost: 0.0435
       thinking: enabled
       reasoning_effort: medium
     # Hard problems — Opus-tier work: math, complex planning, deep debugging.
@@ -255,14 +329,17 @@ deepseek:
       model: deepseek-v4-pro
       input_cost: 0.435
       output_cost: 0.87
+      cached_input_cost: 0.0435
       thinking: enabled
       reasoning_effort: high
     deepseek-chat:
       input_cost: 0.28
       output_cost: 0.42
+      cached_input_cost: 0.028
     deepseek-reasoner:
       input_cost: 0.28
       output_cost: 1.68
+      cached_input_cost: 0.028
 
 cohere:
   models:
@@ -288,6 +365,9 @@ cohere:
 # Model IDs here use the "us." cross-region inference profile prefix when
 # AWS publishes one (Llama 4). Moonshot / NVIDIA Nemotron / DeepSeek use the
 # bare model ID and are region-pinned.
+# Prompt caching is not wired for these Converse models (no cachePoint blocks
+# are inserted), so cache-read/write token counts are always 0 and no cache
+# pricing is configured.
 bedrock:
   models:
     # Moonshot (Kimi) on Bedrock — base model IDs, no cross-region profile.
@@ -335,22 +415,30 @@ bedrock_mantle:
     anthropic.claude-opus-4-8:
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
     anthropic.claude-opus-4-7:
       input_cost: 5.00
       output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
       supports_temperature_top_p: false
     # Sonnet 4.6 is not yet available on Bedrock Mantle (returns 404
     # not_found_error). Add when AWS lists it on the platform.claude.com page.
     anthropic.claude-haiku-4-5:
       input_cost: 1.00
       output_cost: 5.00
+      cached_input_cost: 0.10
+      cache_write_cost: 1.25
       supports_temperature_top_p: false
 
 # Fireworks AI (OpenAI-compatible). Serverless inference only.
 # Model IDs are fully qualified: accounts/fireworks/models/<slug>.
 # Qwen3 and Llama 4 SKUs use parameter-count tier pricing rather than per-model
 # headline pricing and are intentionally omitted here pending clarification.
+# Fireworks does not bill cached prompt tokens at a separate rate, so
+# cached_input_cost is left unset (cached reads bill at input_cost).
 fireworks:
   models:
     accounts/fireworks/models/deepseek-v4-pro:
@@ -380,6 +468,8 @@ fireworks:
 
 # Together AI (OpenAI-compatible). Serverless inference only.
 # Model IDs are slash-delimited HF-style and case-sensitive.
+# Together does not bill cached prompt tokens at a separate rate, so
+# cached_input_cost is left unset (cached reads bill at input_cost).
 together:
   models:
     deepseek-ai/DeepSeek-V4-Pro:

@@ -24,8 +24,6 @@ Gateway routing (--gateway) reads:
     - MAJORDOMO_API_KEY (required)
 """
 
-import argparse
-import asyncio
 import json
 import traceback
 
@@ -35,6 +33,7 @@ from shared import (
     gateway_kwargs,
     get_available_providers,
     print_summary,
+    run_demo,
 )
 
 from majordomo_llm import get_llm_instance
@@ -191,16 +190,4 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--gateway",
-        action="store_true",
-        help="Route requests through Majordomo Steward "
-        "(reads MAJORDOMO_GATEWAY_URL and MAJORDOMO_API_KEY).",
-    )
-    parser.add_argument(
-        "--provider",
-        help="Run only this provider's entries (e.g. anthropic, openai, gemini).",
-    )
-    cli_args = parser.parse_args()
-    asyncio.run(main(use_gateway=cli_args.gateway, provider=cli_args.provider))
+    run_demo(main, description=__doc__)
