@@ -124,6 +124,14 @@ anthropic:
     #
     # Current flagship models. supports_temperature_top_p is false across the
     # 4.7+ / 5 generation (temperature/top_p are rejected).
+    claude-opus-5:
+      input_cost: 5.00
+      output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
+      supports_temperature_top_p: false
+      supports_web_search: true
+      supports_structured_outputs: true
     claude-fable-5:
       input_cost: 10.00
       output_cost: 50.00
@@ -412,6 +420,12 @@ bedrock:
 # https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock
 bedrock_mantle:
   models:
+    anthropic.claude-opus-5:
+      input_cost: 5.00
+      output_cost: 25.00
+      cached_input_cost: 0.50
+      cache_write_cost: 6.25
+      supports_temperature_top_p: false
     anthropic.claude-opus-4-8:
       input_cost: 5.00
       output_cost: 25.00

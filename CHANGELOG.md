@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-28
+
+### Added
+
+- **Claude Opus 5** (`claude-opus-5`, $5/$25 per MTok) registered in `llm_config.yaml` under both the `anthropic` provider and `bedrock_mantle` (`anthropic.claude-opus-5`). Mirrors the `claude-opus-4-8` shape: cache pricing per Anthropic's published convention (`cached_input_cost` 0.10× input = 0.50, `cache_write_cost` 1.25× = 6.25), `supports_temperature_top_p: false` (the 5-generation rejects sampling params). The direct Anthropic entry is additionally flagged `supports_web_search: true` and `supports_structured_outputs: true`. The factory picks it up automatically; no code changes required
+
 ## [0.17.0] - 2026-07-23
 
 ### Added

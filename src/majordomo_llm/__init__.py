@@ -63,7 +63,7 @@ from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 __all__ = [
     # Base classes and types
