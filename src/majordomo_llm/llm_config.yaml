@@ -451,8 +451,9 @@ bedrock_mantle:
 # Model IDs are fully qualified: accounts/fireworks/models/<slug>.
 # Qwen3 and Llama 4 SKUs use parameter-count tier pricing rather than per-model
 # headline pricing and are intentionally omitted here pending clarification.
-# Fireworks does not bill cached prompt tokens at a separate rate, so
-# cached_input_cost is left unset (cached reads bill at input_cost).
+# Older Fireworks SKUs bill cached prompt tokens at the input rate, so their
+# cached_input_cost is left unset (cached reads bill at input_cost). Newer SKUs
+# (kimi-k3, glm-5p2) expose a discounted cache tier and set cached_input_cost.
 fireworks:
   models:
     accounts/fireworks/models/deepseek-v4-pro:
@@ -476,14 +477,27 @@ fireworks:
     accounts/fireworks/models/kimi-k2p6:
       input_cost: 0.95
       output_cost: 4.00
+    accounts/fireworks/models/kimi-k3:
+      input_cost: 3.00
+      output_cost: 15.00
+      cached_input_cost: 0.30
     accounts/fireworks/models/glm-5p1:
       input_cost: 1.40
       output_cost: 4.40
+    accounts/fireworks/models/glm-5p2:
+      input_cost: 1.40
+      output_cost: 4.40
+      cached_input_cost: 0.14
+    accounts/fireworks/models/inkling:
+      input_cost: 1.00
+      output_cost: 4.05
+      cached_input_cost: 0.17
 
 # Together AI (OpenAI-compatible). Serverless inference only.
 # Model IDs are slash-delimited HF-style and case-sensitive.
-# Together does not bill cached prompt tokens at a separate rate, so
-# cached_input_cost is left unset (cached reads bill at input_cost).
+# Older Together SKUs bill cached prompt tokens at the input rate, so their
+# cached_input_cost is left unset (cached reads bill at input_cost). Newer SKUs
+# (Kimi-K3, GLM-5.2) expose a discounted cache tier and set cached_input_cost.
 together:
   models:
     deepseek-ai/DeepSeek-V4-Pro:
@@ -505,6 +519,10 @@ together:
     moonshotai/Kimi-K2.6:
       input_cost: 1.20
       output_cost: 4.50
+    moonshotai/Kimi-K3:
+      input_cost: 3.00
+      output_cost: 15.00
+      cached_input_cost: 0.30
     Qwen/Qwen3.6-Plus:
       input_cost: 0.50
       output_cost: 3.00
@@ -517,9 +535,17 @@ together:
     zai-org/GLM-5.1:
       input_cost: 1.40
       output_cost: 4.40
+    zai-org/GLM-5.2:
+      input_cost: 1.40
+      output_cost: 4.40
+      cached_input_cost: 0.26
     zai-org/GLM-5:
       input_cost: 1.00
       output_cost: 3.20
+    thinkingmachines/Inkling:
+      input_cost: 1.00
+      output_cost: 4.05
+      cached_input_cost: 0.17
 
 # Deprecated model mappings
 # When a user requests a deprecated model, it is automatically replaced with
@@ -613,3 +639,21 @@ aliases:
         model: accounts/fireworks/models/glm-5p1
       - provider: together
         model: zai-org/GLM-5.1
+  kimi-k3:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/kimi-k3
+      - provider: together
+        model: moonshotai/Kimi-K3
+  glm-5.2:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/glm-5p2
+      - provider: together
+        model: zai-org/GLM-5.2
+  inkling:
+    cascade:
+      - provider: fireworks
+        model: accounts/fireworks/models/inkling
+      - provider: together
+        model: thinkingmachines/Inkling

@@ -54,11 +54,17 @@ FLAGSHIPS: list[tuple[str, str, str]] = [
     ),
     ("fireworks", "deepseek-v4-pro-reasoning", "FIREWORKS_API_KEY"),
     ("fireworks", "deepseek-v4-pro-hard", "FIREWORKS_API_KEY"),
+    ("fireworks", "accounts/fireworks/models/glm-5p2", "FIREWORKS_API_KEY"),
+    ("fireworks", "accounts/fireworks/models/kimi-k3", "FIREWORKS_API_KEY"),
+    ("fireworks", "accounts/fireworks/models/inkling", "FIREWORKS_API_KEY"),
     # Same model, same three profiles, hosted by Together — lets you compare
     # vendor-level price/latency/quality variation for an identical model.
     ("together", "deepseek-ai/DeepSeek-V4-Pro", "TOGETHER_API_KEY"),
     ("together", "deepseek-v4-pro-reasoning", "TOGETHER_API_KEY"),
     ("together", "deepseek-v4-pro-hard", "TOGETHER_API_KEY"),
+    ("together", "zai-org/GLM-5.2", "TOGETHER_API_KEY"),
+    ("together", "moonshotai/Kimi-K3", "TOGETHER_API_KEY"),
+    ("together", "thinkingmachines/Inkling", "TOGETHER_API_KEY"),
 ]
 
 # Output paths — separate from demo.py so the two demos do not clobber

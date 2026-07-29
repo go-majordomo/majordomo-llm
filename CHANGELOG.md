@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-28
+
+### Added
+
+- **Kimi K3 and GLM-5.2 across Fireworks and Together** in `llm_config.yaml`, exposed as Fireworks→Together failover cascade aliases (`kimi-k3`, `glm-5.2`) mirroring the existing `kimi-k2.6` / `glm-5.1` pattern. Fireworks: `accounts/fireworks/models/kimi-k3` ($3.00/$0.30/$15.00) and `accounts/fireworks/models/glm-5p2` ($1.40/$0.14/$4.40). Together: `moonshotai/Kimi-K3` ($3.00/$0.30/$15.00) and `zai-org/GLM-5.2` ($1.40/$0.26/$4.40). Unlike the older SKUs on both providers, these expose a discounted cache tier and set `cached_input_cost`; the Fireworks and Together block header comments were updated to document that newer SKUs carry a cache tier while older ones bill cached reads at `input_cost`
+- **Inkling (Thinking Machines) across Fireworks and Together** in `llm_config.yaml`, exposed as an `inkling` Fireworks→Together failover cascade alias. Fireworks `accounts/fireworks/models/inkling` and Together `thinkingmachines/Inkling`, both $1.00/$0.17/$4.05 (input/cached/output) with `cached_input_cost` set
+
 ## [0.18.0] - 2026-07-28
 
 ### Added
