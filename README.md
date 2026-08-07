@@ -37,7 +37,7 @@ uv add majordomo-llm
 To enable request logging to PostgreSQL, MySQL, or S3:
 
 ```bash
-pip install majordomo-llm[logging]
+pip install 'majordomo-llm[logging]'
 ```
 
 ## Quick Start
