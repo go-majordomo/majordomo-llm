@@ -1,0 +1,245 @@
+---
+name: majordomo-llm
+description: |
+  How to use the majordomo-llm Python library to make LLM calls in code.
+  Load this skill when the user says "use majordomo-llm", "call an LLM with majordomo",
+  or when building Python code that needs LLM text, JSON, or structured responses.
+  Also load when the user asks about cost tracking, provider failover/cascade,
+  or logging LLM requests to a database.
+  Do NOT load for Go projects or non-LLM tasks. For routing calls through a Majordomo
+  gateway (cost tracking, metadata, agent-run waterfalls), use the majordomo-gateway
+  skill — though the "Custom base URL" section below shows the basic hookup.
+allowed-tools: Read, Write, Bash
+---
+
+## Installation
+
+```bash
+# Basic (text + JSON responses)
+uv add majordomo-llm
+
+# With request logging to a database
+uv add "majordomo-llm[logging]"
+```
+
+## Getting an LLM Instance
+
+Use the factory — never instantiate providers directly:
+
+```python
+from majordomo_llm import get_llm_instance
+
+llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+llm = get_llm_instance("openai", "gpt-5-mini")
+llm = get_llm_instance("gemini", "gemini-2.5-flash")
+llm = get_llm_instance("deepseek", "deepseek-v4-pro")
+llm = get_llm_instance("cohere", "command-a-03-2025")
+
+# Custom base URL (e.g. route through a Majordomo gateway)
+llm = get_llm_instance(
+    "anthropic", "claude-sonnet-4-6",
+    base_url="http://localhost:7680",
+    default_headers={"X-Majordomo-Key": "mdm_sk_your_key_here"},
+)
+```
+
+To route through a gateway for centralized cost tracking, metadata attribution, and
+agent-run observability, see the **majordomo-gateway** skill.
+
+API keys come from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `CO_API_KEY`. Pass `api_key=` to override.
+
+## Supported Providers and Models
+
+```python
+from majordomo_llm import get_supported_providers, get_supported_models
+
+get_supported_providers()          # openai, anthropic, gemini, deepseek, cohere, bedrock, fireworks, together, ...
+get_supported_models("anthropic")  # ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6", ...]
+get_supported_models("openai")     # ["gpt-5", "gpt-5-mini", "gpt-4.1", "o3", "o4-mini", ...]
+```
+
+## Text Response
+
+```python
+response = await llm.get_response(
+    user_prompt="Summarize this article: ...",
+    system_prompt="You are a concise summarizer.",  # optional
+    temperature=0.3,   # default 0.3
+    top_p=1.0,         # default 1.0
+)
+
+response.content        # str — the LLM's reply
+response.input_tokens   # int
+response.output_tokens  # int
+response.cached_tokens  # int (Anthropic prompt caching)
+response.input_cost     # float USD
+response.output_cost    # float USD
+response.total_cost     # float USD
+response.response_time  # float seconds
+response.deprecation_warning  # str | None — set if model was auto-replaced
+```
+
+## Streaming Response
+
+```python
+stream = await llm.get_response_stream(
+    user_prompt="Write a long story about...",
+    system_prompt="You are a creative writer.",
+)
+
+async for chunk in stream:          # chunk: str
+    print(chunk, end="", flush=True)
+
+# Usage is available after the stream is fully consumed:
+stream.usage.total_cost             # float USD
+
+# Alternatively, collect the full response at once:
+response = await stream.collect()   # returns LLMResponse
+```
+
+## JSON Response
+
+Automatically strips markdown code fences and parses the response as JSON:
+
+```python
+response = await llm.get_json_response(
+    user_prompt='Extract: {"name": "John", "age": 30}',
+    system_prompt="Return valid JSON only.",
+)
+
+response.content   # dict — the parsed JSON
+```
+
+## Structured Response (Pydantic)
+
+Returns a validated Pydantic model instance. Uses provider-native structured output
+(Anthropic: tool calling; others: response schema or prompt injection):
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class Article(BaseModel):
+    title: str
+    summary: str
+    sentiment: Literal["positive", "negative", "neutral"]
+
+response = await llm.get_structured_json_response(
+    response_model=Article,
+    user_prompt="Analyze this article: ...",
+    system_prompt="You are a content analyst.",
+)
+
+response.content           # Article — validated Pydantic instance
+response.content.title     # str
+response.content.sentiment # str
+response.total_cost        # float USD (usage on structured responses too)
+```
+
+## Cascade (Automatic Failover)
+
+Tries providers in order; catches `ProviderError` and falls back to the next:
+
+```python
+from majordomo_llm import LLMCascade
+
+cascade = LLMCascade([
+    ("anthropic", "claude-sonnet-4-6"),   # primary
+    ("openai", "gpt-5-mini"),             # fallback
+    ("gemini", "gemini-2.5-flash"),       # last resort
+])
+
+response = await cascade.get_response("Hello!")  # same interface as LLM
+```
+
+## Named Aliases
+
+Aliases are pre-configured in `llm_config.yaml` and can also be registered at runtime:
+
+```python
+from majordomo_llm import get_llm_by_alias, register_alias
+
+llm = get_llm_by_alias("fast")        # single-model alias → LLM instance
+llm = get_llm_by_alias("resilient")   # cascade alias → LLMCascade instance
+
+# Register a runtime alias
+register_alias("my-fast", ("anthropic", "claude-haiku-4-5-20251001"))
+register_alias("my-cascade", [
+    ("anthropic", "claude-sonnet-4-6"),
+    ("openai", "gpt-5-mini"),
+])
+```
+
+## Request Logging (optional, requires `[logging]` extra)
+
+`LoggingLLM` wraps any LLM. Logging is fire-and-forget — never blocks the response.
+
+```python
+from majordomo_llm import get_llm_instance
+from majordomo_llm.logging import LoggingLLM
+from majordomo_llm.logging.adapters import PostgresAdapter, S3Adapter
+
+llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+
+db = await PostgresAdapter.create(
+    host="localhost", port=5432,
+    database="majordomo", user="user", password="pass",
+)
+storage = await S3Adapter.create(bucket="my-llm-logs")  # optional
+
+logged_llm = LoggingLLM(llm, db, storage)
+
+response = await logged_llm.get_response("Hello!")   # same interface as LLM
+
+await logged_llm.close()   # flush pending log tasks + close connections
+```
+
+Other adapters: `MySQLAdapter`, `SqliteAdapter`, `FileStorageAdapter`.
+
+## Error Handling
+
+```python
+from majordomo_llm.exceptions import (
+    MajordomoError,       # base — catch-all for library errors
+    ConfigurationError,   # missing/invalid API key or unknown provider/model
+    ProviderError,        # upstream API failure; has .provider and .original_error
+    ResponseParsingError, # JSON parse failure; has .raw_content
+)
+
+try:
+    response = await llm.get_response("Hello")
+except ProviderError as e:
+    print(f"Provider {e.provider} failed: {e.original_error}")
+except ConfigurationError as e:
+    print(f"Config error: {e}")
+```
+
+All public `get_response` and `get_json_response` methods automatically retry up to 3 times
+with exponential backoff on transient failures before raising `ProviderError`.
+
+## Complete Example
+
+```python
+import asyncio
+from pydantic import BaseModel
+from majordomo_llm import get_llm_instance
+from majordomo_llm.exceptions import ProviderError
+
+class SentimentResult(BaseModel):
+    sentiment: str
+    confidence: float
+    reasoning: str
+
+async def analyze(text: str) -> SentimentResult:
+    llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+    response = await llm.get_structured_json_response(
+        response_model=SentimentResult,
+        user_prompt=f"Analyze the sentiment of: {text}",
+    )
+    print(f"Cost: ${response.total_cost:.6f}")
+    return response.content
+
+result = asyncio.run(analyze("I love this product!"))
+print(result.sentiment)  # "positive"
+```
