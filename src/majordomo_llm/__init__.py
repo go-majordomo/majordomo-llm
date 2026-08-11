@@ -33,11 +33,13 @@ from majordomo_llm.exceptions import (
 )
 from majordomo_llm.factory import (
     LLM_CONFIG,
+    ModelPricing,
     clear_aliases,
     get_aliases,
     get_all_llm_instances,
     get_llm_by_alias,
     get_llm_instance,
+    get_model_pricing,
     get_supported_models,
     get_supported_providers,
     register_alias,
@@ -60,10 +62,11 @@ from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
+from majordomo_llm.providers.majordomo import Majordomo
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
-__version__ = "0.19.0"
+__version__ = "0.20.0"
 
 __all__ = [
     # Base classes and types
@@ -94,6 +97,8 @@ __all__ = [
     "get_all_llm_instances",
     "get_supported_providers",
     "get_supported_models",
+    "get_model_pricing",
+    "ModelPricing",
     "LLM_CONFIG",
     # Alias functions
     "get_llm_by_alias",
@@ -111,6 +116,7 @@ __all__ = [
     "DeepSeek",
     "Fireworks",
     "Gemini",
+    "Majordomo",
     "OpenAI",
     "Together",
     # Version

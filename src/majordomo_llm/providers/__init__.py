@@ -14,6 +14,7 @@ from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
+from majordomo_llm.providers.majordomo import Majordomo
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
@@ -25,6 +26,7 @@ __all__ = [
     "DeepSeek",
     "Fireworks",
     "Gemini",
+    "Majordomo",
     "OpenAI",
     "Together",
 ]

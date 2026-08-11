@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-11
+
+### Added
+
+- **`majordomo` gateway provider with server-side optimal routing.** A new pseudo-provider (`providers/majordomo.py`, registered in the factory and exported from the package) that names a canonical open-weight model — `deepseek-v4-pro`, `kimi-k2.6`, `kimi-k3`, `glm-5.1`, `glm-5.2`, `inkling` — and lets Majordomo Steward pick the optimal backend at request time, rather than pinning a provider. It signals routing to the gateway with `x-majordomo-provider: majordomo`, **requires** `base_url` (the gateway URL) and `MAJORDOMO_API_KEY` (auto-injected as the `X-Majordomo-Key` header), and speaks the OpenAI-compatible wire protocol. Because the backend is only known after the call, cost is **not** taken from a fixed config entry: the provider reads the gateway's `X-Majordomo-Routed-Provider` / `X-Majordomo-Routed-Model` response headers and prices the usage against that pair's rates in `llm_config.yaml` (e.g. GLM-5.2's cached read is 0.14 on Fireworks vs 0.26 on Together). Missing or unconfigured routed pairs degrade to zero cost with a warning rather than crashing. Supports text, streaming, and structured/JSON-schema output
+- **`routed_provider` / `routed_model` on `LLMResponse`** — the concrete backend the gateway selected, surfaced for observability (`None` on direct provider calls)
+- **`get_model_pricing(provider, model) -> ModelPricing | None`** in the factory (and exported from the package) — resolves a concrete pair's per-million rates and cache-accounting mode from `llm_config.yaml` without instantiating a client. Used to price gateway-routed calls after the fact
+- **`compute_costs(...)` in `base.py`** — the stateless core of `LLM._calculate_costs`, extracted so a request can be priced against rates other than the calling instance's own (the routed backend's). `_calculate_costs` now delegates to it with no behaviour change
+- **`_StreamState.price_override`** — an optional pricing hook applied at stream finalization, so a streamed Majordomo call prices its final usage against the routed backend instead of the provider's (empty) rates. Defaults to `None` (existing providers unaffected)
+
+### Changed
+
+- **`get_all_llm_instances()` skips gateway-routed providers** (`majordomo`), which cannot be instantiated without a live gateway `base_url`
+
 ## [0.19.0] - 2026-07-28
 
 ### Added

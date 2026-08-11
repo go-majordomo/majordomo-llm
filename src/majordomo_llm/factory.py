@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import logging
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import yaml
 
@@ -18,6 +18,7 @@ from majordomo_llm.providers.cohere import Cohere
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
+from majordomo_llm.providers.majordomo import Majordomo
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
@@ -25,6 +26,29 @@ logger = logging.getLogger(__name__)
 
 #: Type for alias targets: single (provider, model) or cascade list.
 AliasTarget = tuple[str, str] | list[tuple[str, str]]
+
+#: Mapping of provider name to its implementing class. Module-level so pricing
+#: lookups (:func:`get_model_pricing`) can read a provider's cache-accounting
+#: mode without instantiating a client.
+_PROVIDER_CLASSES: dict[str, type[LLM]] = {
+    "openai": OpenAI,
+    "anthropic": Anthropic,
+    "gemini": Gemini,
+    "deepseek": DeepSeek,
+    "cohere": Cohere,
+    "bedrock": Bedrock,
+    "bedrock_mantle": BedrockMantle,
+    "fireworks": Fireworks,
+    "together": Together,
+    "majordomo": Majordomo,
+}
+
+#: Gateway-routed pseudo-providers. These require a live gateway (``base_url`` +
+#: gateway key) and cannot be instantiated standalone, so :func:`get_llm_instance`
+#: treats their per-model token costs as optional (cost is resolved per request
+#: from the backend the gateway selects) and :func:`get_all_llm_instances` skips
+#: them entirely.
+_GATEWAY_PROVIDERS = frozenset({"majordomo"})
 
 
 def _load_llm_config() -> dict[str, dict[str, Any]]:
@@ -131,6 +155,56 @@ def get_supported_models(provider: str) -> list[str]:
     return list(provider_config.get("models", {}).keys())
 
 
+class ModelPricing(NamedTuple):
+    """Resolved per-million token rates for a (provider, model) pair.
+
+    Returned by :func:`get_model_pricing` so a request can be priced against a
+    backend other than the calling instance — used by the Majordomo provider to
+    price a call using the rates of whichever backend the gateway routed to.
+    """
+
+    input_cost: float
+    output_cost: float
+    cached_input_cost: float | None
+    cache_write_cost: float | None
+    cache_accounting: str
+
+
+def get_model_pricing(provider: str, model: str) -> ModelPricing | None:
+    """Resolve the token pricing for a concrete (provider, model) pair.
+
+    Looks the pair up in ``llm_config.yaml`` and pairs its rates with the
+    provider's cache-accounting mode (read from the provider class without
+    instantiating a client). Intended for pricing a call after the fact — e.g.
+    the Majordomo gateway reports which backend it routed to, and the caller
+    prices the usage against that backend's published rates.
+
+    Args:
+        provider: The concrete backend provider name (e.g. "fireworks").
+        model: The backend's native model identifier (e.g.
+            "accounts/fireworks/models/kimi-k3").
+
+    Returns:
+        A :class:`ModelPricing` for the pair, or ``None`` if the provider or
+        model is not present in the configuration.
+    """
+    provider_config = LLM_CONFIG.get(provider)
+    if provider_config is None:
+        return None
+    model_attributes = provider_config.get("models", {}).get(model)
+    if model_attributes is None:
+        return None
+    cls = _PROVIDER_CLASSES.get(provider)
+    cache_accounting = getattr(cls, "_cache_accounting", "subset") if cls is not None else "subset"
+    return ModelPricing(
+        input_cost=model_attributes["input_cost"],
+        output_cost=model_attributes["output_cost"],
+        cached_input_cost=model_attributes.get("cached_input_cost"),
+        cache_write_cost=model_attributes.get("cache_write_cost"),
+        cache_accounting=cache_accounting,
+    )
+
+
 def get_llm_instance(
     provider: str,
     model: str,
@@ -221,17 +295,6 @@ def get_llm_instance(
             f"Model '{model}' for provider '{provider}' does not support web search."
         )
 
-    _PROVIDER_CLASSES: dict[str, type[LLM]] = {
-        "openai": OpenAI,
-        "anthropic": Anthropic,
-        "gemini": Gemini,
-        "deepseek": DeepSeek,
-        "cohere": Cohere,
-        "bedrock": Bedrock,
-        "bedrock_mantle": BedrockMantle,
-        "fireworks": Fireworks,
-        "together": Together,
-    }
     cls = _PROVIDER_CLASSES.get(provider)
     if cls is None:
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")
@@ -267,10 +330,20 @@ def get_llm_instance(
     # e.g. distinct "reasoning effort" profiles that share one upstream SKU.
     api_model = model_attributes.get("model", model)
 
+    # Gateway-routed providers (majordomo) price each call from the backend the
+    # gateway actually selects, so their config entries carry no token costs;
+    # the placeholder rates below are never used to price a request.
+    if provider in _GATEWAY_PROVIDERS:
+        input_cost = model_attributes.get("input_cost", 0.0)
+        output_cost = model_attributes.get("output_cost", 0.0)
+    else:
+        input_cost = model_attributes["input_cost"]
+        output_cost = model_attributes["output_cost"]
+
     llm = cls(
         model=api_model,
-        input_cost=model_attributes["input_cost"],
-        output_cost=model_attributes["output_cost"],
+        input_cost=input_cost,
+        output_cost=output_cost,
         cached_input_cost=model_attributes.get("cached_input_cost"),
         cache_write_cost=model_attributes.get("cache_write_cost"),
         supports_temperature_top_p=model_attributes.get("supports_temperature_top_p", True),
@@ -291,16 +364,20 @@ def get_all_llm_instances() -> Iterator[LLM]:
     """Create LLM instances for all configured providers and models.
 
     Yields LLM instances one at a time, which is useful for initialization
-    or testing all available models.
+    or testing all available models. Gateway-routed pseudo-providers
+    (:data:`_GATEWAY_PROVIDERS`) are skipped, as they cannot be instantiated
+    without a live gateway ``base_url``.
 
     Yields:
-        LLM instances for each configured provider/model combination.
+        LLM instances for each directly-callable provider/model combination.
 
     Example:
         >>> for llm in get_all_llm_instances():
         ...     print(llm.get_full_model_name())
     """
     for provider, provider_config in LLM_CONFIG.items():
+        if provider in _GATEWAY_PROVIDERS:
+            continue
         models = provider_config.get("models", {})
         for model in models:
             logger.debug("Creating LLM instance: %s/%s", provider, model)

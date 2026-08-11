@@ -364,6 +364,59 @@ T = TypeVar("T", bound=BaseModel)
 TOKENS_PER_MILLION = 1_000_000
 
 
+def compute_costs(
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    *,
+    input_cost: float,
+    output_cost: float,
+    cached_input_cost: float | None = None,
+    cache_write_cost: float | None = None,
+    cache_accounting: str = "subset",
+) -> tuple[float, float, float]:
+    """Price a request from explicit per-million rates.
+
+    This is the stateless core of :meth:`LLM._calculate_costs`, extracted so a
+    request can be priced against rates that are not the calling instance's own
+    — e.g. the Majordomo provider prices a call using the rates of whichever
+    backend the gateway actually routed to. See :meth:`LLM._calculate_costs`
+    for the meaning of ``cache_accounting`` ("subset" vs "additive").
+
+    Args:
+        input_tokens: Number of input tokens (provider-reported).
+        output_tokens: Number of output tokens.
+        cached_tokens: Number of cache-read prompt tokens.
+        cache_creation_tokens: Number of cache-write prompt tokens.
+        input_cost: Cost per million input tokens in USD.
+        output_cost: Cost per million output tokens in USD.
+        cached_input_cost: Cost per million cache-read tokens in USD, or ``None``.
+        cache_write_cost: Cost per million cache-write tokens in USD, or ``None``.
+        cache_accounting: ``"subset"`` or ``"additive"`` (see
+            :meth:`LLM._calculate_costs`).
+
+    Returns:
+        Tuple of (input_cost, output_cost, total_cost) in USD.
+    """
+    if cache_accounting == "additive":
+        read_rate = cached_input_cost if cached_input_cost is not None else 0.0
+        write_rate = cache_write_cost if cache_write_cost is not None else 0.0
+        in_cost = (
+            input_tokens * input_cost
+            + cached_tokens * read_rate
+            + cache_creation_tokens * write_rate
+        ) / TOKENS_PER_MILLION
+    else:
+        cached_rate = cached_input_cost if cached_input_cost is not None else input_cost
+        uncached_tokens = max(input_tokens - cached_tokens, 0)
+        in_cost = (
+            uncached_tokens * input_cost + cached_tokens * cached_rate
+        ) / TOKENS_PER_MILLION
+    out_cost = (output_tokens * output_cost) / TOKENS_PER_MILLION
+    return in_cost, out_cost, in_cost + out_cost
+
+
 @dataclass
 class Usage:
     """Token usage and cost metrics for an LLM request.
@@ -407,10 +460,17 @@ class LLMResponse(Usage):
     Attributes:
         content: The text content of the LLM response.
         deprecation_warning: Warning if a deprecated model was auto-replaced.
+        routed_provider: When routed through the Majordomo gateway's optimal
+            router, the concrete backend the gateway selected (e.g. "fireworks");
+            ``None`` for direct provider calls.
+        routed_model: When routed through the Majordomo gateway, the backend's
+            native model identifier the call actually ran on; ``None`` otherwise.
     """
 
     content: str
     deprecation_warning: str | None = None
+    routed_provider: str | None = None
+    routed_model: str | None = None
 
 
 @dataclass
@@ -453,6 +513,13 @@ class _StreamState:
     cached_tokens: int = 0
     cache_creation_tokens: int = 0
     start_time: float = field(default_factory=time.time)
+    #: Optional pricing override applied at finalization instead of the owning
+    #: LLM's own rates. Set by providers (e.g. Majordomo) that only learn the
+    #: authoritative per-million rates mid-stream — from the routed backend the
+    #: gateway selected. Called as ``price_override(input_tokens, output_tokens,
+    #: cached_tokens, cache_creation_tokens) -> (input_cost, output_cost,
+    #: total_cost)``. ``None`` uses ``LLM._calculate_costs`` (default behaviour).
+    price_override: Callable[[int, int, int, int], tuple[float, float, float]] | None = None
 
 
 class LLMStreamResponse:
@@ -504,12 +571,20 @@ class LLMStreamResponse:
             return
         self._consumed = True
         response_time = time.time() - self._state.start_time
-        input_cost, output_cost, total_cost = self._llm._calculate_costs(
-            self._state.input_tokens,
-            self._state.output_tokens,
-            self._state.cached_tokens,
-            self._state.cache_creation_tokens,
-        )
+        if self._state.price_override is not None:
+            input_cost, output_cost, total_cost = self._state.price_override(
+                self._state.input_tokens,
+                self._state.output_tokens,
+                self._state.cached_tokens,
+                self._state.cache_creation_tokens,
+            )
+        else:
+            input_cost, output_cost, total_cost = self._llm._calculate_costs(
+                self._state.input_tokens,
+                self._state.output_tokens,
+                self._state.cached_tokens,
+                self._state.cache_creation_tokens,
+            )
         self._usage = Usage(
             input_tokens=self._state.input_tokens,
             output_tokens=self._state.output_tokens,
@@ -688,24 +763,17 @@ class LLM(ABC):
         Returns:
             Tuple of (input_cost, output_cost, total_cost) in USD.
         """
-        if self._cache_accounting == "additive":
-            read_rate = self.cached_input_cost if self.cached_input_cost is not None else 0.0
-            write_rate = self.cache_write_cost if self.cache_write_cost is not None else 0.0
-            input_cost = (
-                input_tokens * self.input_cost
-                + cached_tokens * read_rate
-                + cache_creation_tokens * write_rate
-            ) / TOKENS_PER_MILLION
-        else:
-            cached_rate = (
-                self.cached_input_cost if self.cached_input_cost is not None else self.input_cost
-            )
-            uncached_tokens = max(input_tokens - cached_tokens, 0)
-            input_cost = (
-                uncached_tokens * self.input_cost + cached_tokens * cached_rate
-            ) / TOKENS_PER_MILLION
-        output_cost = (output_tokens * self.output_cost) / TOKENS_PER_MILLION
-        return input_cost, output_cost, input_cost + output_cost
+        return compute_costs(
+            input_tokens,
+            output_tokens,
+            cached_tokens,
+            cache_creation_tokens,
+            input_cost=self.input_cost,
+            output_cost=self.output_cost,
+            cached_input_cost=self.cached_input_cost,
+            cache_write_cost=self.cache_write_cost,
+            cache_accounting=self._cache_accounting,
+        )
 
     @abstractmethod
     async def _get_response_impl(

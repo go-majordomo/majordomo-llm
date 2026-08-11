@@ -164,12 +164,15 @@ class TestGetAllLLMInstances:
     """Tests for get_all_llm_instances function."""
 
     def test_yields_instances_for_all_configured_models(self, mock_all_clients):
-        """Should yield an LLM instance for each configured model."""
+        """Should yield an LLM instance for each directly-callable model."""
         instances = list(get_all_llm_instances())
 
-        # Count expected models
+        # Count expected models, excluding gateway-only providers (majordomo),
+        # which are not directly instantiable and are skipped by enumeration.
         expected_count = sum(
-            len(provider_config["models"]) for provider_config in LLM_CONFIG.values()
+            len(provider_config["models"])
+            for provider, provider_config in LLM_CONFIG.items()
+            if provider != "majordomo"
         )
 
         assert len(instances) == expected_count
@@ -202,8 +205,15 @@ class TestLLMConfig:
             assert len(config["models"]) > 0, f"{provider} has no models"
 
     def test_all_models_have_required_costs(self):
-        """Each model should have input_cost and output_cost."""
+        """Each model should have input_cost and output_cost.
+
+        Gateway-only providers (majordomo) are exempt: their cost is resolved
+        per request from the backend the gateway routes to, so their config
+        entries intentionally carry no token costs.
+        """
         for provider, config in LLM_CONFIG.items():
+            if provider == "majordomo":
+                continue
             for model, model_config in config["models"].items():
                 assert "input_cost" in model_config, f"{provider}/{model} missing input_cost"
                 assert "output_cost" in model_config, f"{provider}/{model} missing output_cost"

@@ -547,6 +547,22 @@ together:
       output_cost: 4.05
       cached_input_cost: 0.17
 
+# Majordomo gateway (optimal routing). Canonical open-weight model names the
+# Majordomo Steward gateway routes to the optimal backend (Fireworks, Together,
+# …) at request time. These entries carry NO cost: the actual price is resolved
+# per request from the backend the gateway selects, reported back via the
+# X-Majordomo-Routed-Provider / X-Majordomo-Routed-Model response headers and
+# looked up against that provider's rates above. Requires routing through the
+# gateway (base_url + MAJORDOMO_API_KEY).
+majordomo:
+  models:
+    deepseek-v4-pro: {}
+    kimi-k2.6: {}
+    kimi-k3: {}
+    glm-5.1: {}
+    glm-5.2: {}
+    inkling: {}
+
 # Deprecated model mappings
 # When a user requests a deprecated model, it is automatically replaced with
 # the provider-recommended replacement and a warning is logged.
