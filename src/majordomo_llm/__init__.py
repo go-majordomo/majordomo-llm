@@ -66,7 +66,7 @@ from majordomo_llm.providers.majordomo import Majordomo
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
-__version__ = "0.20.0"
+__version__ = "0.20.1"
 
 __all__ = [
     # Base classes and types

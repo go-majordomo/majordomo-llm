@@ -93,8 +93,9 @@ class TestMajordomoConstruction:
         assert llm.default_headers["X-Majordomo-Key"] == "env-key"
 
     def test_injects_routing_and_auth_headers(self, majordomo_llm):
-        """Should signal optimal routing and authenticate via headers."""
+        """Should signal optimal routing (provider + model) and authenticate."""
         assert majordomo_llm.default_headers["x-majordomo-provider"] == "majordomo"
+        assert majordomo_llm.default_headers["x-majordomo-model"] == "glm-5.2"
         assert majordomo_llm.default_headers["X-Majordomo-Key"] == "mdm-test-key"
 
     def test_caller_headers_win(self):

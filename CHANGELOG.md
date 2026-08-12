@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-08-11
+
+### Fixed
+
+- The `majordomo` provider now also sends the canonical model name as the `x-majordomo-model` request header (alongside `x-majordomo-provider`), so the gateway can route on the header rather than parsing the request body's `model` field
+
 ## [0.20.0] - 2026-08-11
 
 ### Added

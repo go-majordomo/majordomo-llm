@@ -102,10 +102,13 @@ class Majordomo(LLM):
 
         resolved_api_key = resolve_api_key(api_key, "MAJORDOMO_API_KEY", "Majordomo")
 
-        # Signal optimal routing and authenticate to the gateway. Caller-supplied
+        # Signal optimal routing and authenticate to the gateway. The gateway
+        # routes on x-majordomo-model (the canonical model name), not the wire
+        # body's "model" field, so it is sent as a header too. Caller-supplied
         # default_headers win on key collision.
         merged_headers: dict[str, str] = {
             "x-majordomo-provider": "majordomo",
+            "x-majordomo-model": model,
             "X-Majordomo-Key": resolved_api_key,
         }
         if default_headers:
