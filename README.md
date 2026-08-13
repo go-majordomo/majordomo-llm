@@ -15,6 +15,7 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 - **Structured Outputs** - Native support for Pydantic models and raw JSON Schema dicts
 - **Automatic Retries** - Built-in exponential backoff retry logic using tenacity
 - **Automatic Fallback** - Cascade across providers with `LLMCascade` for resilience
+- **Optimal Routing** - The `majordomo` provider lets the Majordomo gateway pick the best backend for a canonical open-weight model at request time, with cost resolved from the routed backend
 - **Request Logging** - Optional async logging to PostgreSQL/MySQL/SQLite with S3 or local file storage for request/response bodies
 - **API Key Tracking** - Log hashed API keys and optional aliases for usage attribution
 - **Async First** - Fully async/await compatible for high-performance applications
@@ -195,6 +196,11 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 - `command-a-03-2025`, `command-r-plus-08-2024`
 - `command-r-08-2024`, `command-r7b-12-2024`
 
+#### Majordomo (Optimal Routing)
+Canonical open-weight models routed to the optimal backend by the Majordomo gateway (see [Optimal Routing](#optimal-routing-majordomo-gateway)):
+- `deepseek-v4-pro`, `kimi-k2.6`, `kimi-k3`
+- `glm-5.1`, `glm-5.2`, `inkling`
+
 ### Deprecated Model Handling
 
 If you pass a deprecated model to `get_llm_instance()`, it is automatically replaced with the provider-recommended replacement and a warning is logged. The response object includes a `deprecation_warning` field so you can detect this in your application:
@@ -264,6 +270,8 @@ All response objects include usage metrics:
 | `total_cost` | `float` | Total cost (USD) |
 | `response_time` | `float` | Response time in seconds |
 | `deprecation_warning` | `str \| None` | Warning if a deprecated model was auto-replaced |
+| `routed_provider` | `str \| None` | For `majordomo` optimal routing, the backend the gateway selected (`None` otherwise) |
+| `routed_model` | `str \| None` | For `majordomo` optimal routing, the routed backend's native model id (`None` otherwise) |
 
 ## Advanced Usage
 
@@ -286,6 +294,30 @@ response = await cascade.get_response("Hello!")
 ```
 
 All response methods (`get_response`, `get_json_response`, `get_structured_json_response`, `get_response_stream`) support automatic fallback.
+
+### Optimal Routing (Majordomo Gateway)
+
+The `majordomo` provider names a canonical open-weight model and lets the Majordomo gateway select the optimal backend (Fireworks, Together, …) at request time. Unlike `LLMCascade` (client-side failover on error), this is **server-side** provider selection — and the two compose.
+
+It routes through the gateway, so `base_url` is required and `MAJORDOMO_API_KEY` must be set (auto-injected as the `X-Majordomo-Key` header):
+
+```python
+import os
+from majordomo_llm import get_llm_instance
+
+llm = get_llm_instance(
+    "majordomo", "glm-5.2",
+    base_url=os.environ["MAJORDOMO_GATEWAY_URL"],
+)
+
+response = await llm.get_response("Hello!")
+
+print(response.routed_provider)  # e.g. "fireworks" — the backend the gateway chose
+print(response.routed_model)     # e.g. "accounts/fireworks/models/glm-5p2"
+print(response.total_cost)       # priced from the routed backend's rates
+```
+
+Because the backend is known only after the call, cost is resolved from the gateway's `X-Majordomo-Routed-Provider` / `X-Majordomo-Routed-Model` response headers against that pair's rates in `llm_config.yaml`, rather than a fixed rate. An unconfigured routed pair degrades to `0.0` cost with a warning (token counts still stand). Text, JSON, structured, and streaming calls are all supported.
 
 ### Direct Provider Access
 

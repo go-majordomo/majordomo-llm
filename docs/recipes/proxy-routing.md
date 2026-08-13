@@ -20,6 +20,36 @@ response = await llm.get_response("Hello!")
 
 The request goes to `gateway.example.com` instead of `api.anthropic.com`, with the `X-Majordomo-Key` header attached.
 
+## Optimal Routing (Let the Gateway Pick the Backend)
+
+The `majordomo` provider is a step beyond pointing a concrete provider at a gateway. Instead of naming a backend, you name a **canonical open-weight model** and let Majordomo Steward select the optimal backend (Fireworks, Together, …) for that model at request time.
+
+```python
+import os
+from majordomo_llm import get_llm_instance
+
+llm = get_llm_instance(
+    "majordomo", "glm-5.2",
+    base_url=os.environ["MAJORDOMO_GATEWAY_URL"],
+)
+
+response = await llm.get_response("Hello!")
+
+response.routed_provider   # e.g. "fireworks" — the backend the gateway chose
+response.routed_model      # e.g. "accounts/fireworks/models/glm-5p2"
+response.total_cost        # priced from the routed backend's published rates
+```
+
+Canonical models: `deepseek-v4-pro`, `kimi-k2.6`, `kimi-k3`, `glm-5.1`, `glm-5.2`, `inkling` (see `get_supported_models("majordomo")`).
+
+How it differs from the sections below:
+
+- **`base_url` is required** — this provider only operates behind the gateway.
+- **`MAJORDOMO_API_KEY` is required** and auto-injected as the `X-Majordomo-Key` header; the gateway injects the backend provider's own key. The canonical model is also sent as the `x-majordomo-model` header so the gateway can route on it.
+- **Cost is resolved after the call**, not from a fixed config entry. The gateway returns `X-Majordomo-Routed-Provider` / `X-Majordomo-Routed-Model` response headers, and the usage is priced against that pair's rates in `llm_config.yaml` (e.g. GLM-5.2's cached read is 0.14 on Fireworks vs 0.26 on Together). An unconfigured routed pair degrades to `0.0` cost with a warning — usage counts still stand.
+
+This is **server-side** provider selection, distinct from [`LLMCascade`](cascade.md) (client-side failover on error). The two compose: a cascade entry can itself be `("majordomo", "glm-5.2")`.
+
 ## Per-Request Headers
 
 Add headers to individual calls with `extra_headers`. These are merged with `default_headers`, with per-request values winning on conflict:

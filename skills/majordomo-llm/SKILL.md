@@ -153,6 +153,39 @@ cascade = LLMCascade([
 response = await cascade.get_response("Hello!")  # same interface as LLM
 ```
 
+## Optimal Routing (Majordomo Gateway)
+
+The `majordomo` provider does not name a backend. You name a canonical open-weight
+model and Majordomo Steward selects the optimal backend (Fireworks, Together, …) at
+request time. This is **server-side** selection — distinct from `LLMCascade`, which is
+client-side failover on error. They compose.
+
+Requires routing through the gateway (`base_url`) and `MAJORDOMO_API_KEY` (required;
+auto-injected as the `X-Majordomo-Key` header):
+
+```python
+import os
+from majordomo_llm import get_llm_instance
+
+llm = get_llm_instance(
+    "majordomo", "glm-5.2",
+    base_url=os.environ["MAJORDOMO_GATEWAY_URL"],
+)
+
+response = await llm.get_response("Hello!")   # text, JSON, structured, streaming all work
+response.routed_provider   # "fireworks" — the backend the gateway actually chose
+response.routed_model      # "accounts/fireworks/models/glm-5p2" — its native model id
+response.total_cost        # priced from the routed backend's rates in llm_config.yaml
+```
+
+Canonical models (`get_supported_models("majordomo")`): `deepseek-v4-pro`, `kimi-k2.6`,
+`kimi-k3`, `glm-5.1`, `glm-5.2`, `inkling`.
+
+Because the backend is only known after the call, cost is resolved from the gateway's
+`X-Majordomo-Routed-Provider` / `X-Majordomo-Routed-Model` response headers, not a fixed
+rate. If the routed pair isn't configured in `llm_config.yaml`, `routed_provider` /
+`routed_model` still populate but cost degrades to `0.0` with a warning.
+
 ## Named Aliases
 
 Aliases are pre-configured in `llm_config.yaml` and can also be registered at runtime:
