@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
@@ -361,6 +362,8 @@ def ensure_no_unexpected_kwargs(kwargs: dict[str, Any]) -> None:
 T = TypeVar("T", bound=BaseModel)
 
 #: Number of tokens per million (used for cost calculations).
+logger = logging.getLogger(__name__)
+
 TOKENS_PER_MILLION = 1_000_000
 
 
@@ -520,6 +523,11 @@ class _StreamState:
     #: cached_tokens, cache_creation_tokens) -> (input_cost, output_cost,
     #: total_cost)``. ``None`` uses ``LLM._calculate_costs`` (default behaviour).
     price_override: Callable[[int, int, int, int], tuple[float, float, float]] | None = None
+    #: Concrete backend a gateway routed this call to, learned mid-stream from
+    #: response headers. Mirrors LLMResponse.routed_provider/routed_model so the
+    #: streaming path reports the same identity as the non-streaming one.
+    routed_provider: str | None = None
+    routed_model: str | None = None
 
 
 class LLMStreamResponse:
@@ -603,6 +611,16 @@ class LLMStreamResponse:
         """Usage metrics, available after the stream is fully consumed."""
         return self._usage
 
+    @property
+    def routed_provider(self) -> str | None:
+        """Backend a gateway routed to, or None on a direct provider call."""
+        return self._state.routed_provider
+
+    @property
+    def routed_model(self) -> str | None:
+        """Routed backend's native model id, or None on a direct provider call."""
+        return self._state.routed_model
+
     async def collect(self) -> LLMResponse:
         """Consume the entire stream and return an :class:`LLMResponse`."""
         chunks: list[str] = []
@@ -620,6 +638,8 @@ class LLMStreamResponse:
             total_cost=self._usage.total_cost,
             response_time=self._usage.response_time,
             deprecation_warning=self._llm.deprecation_warning,
+            routed_provider=self._state.routed_provider,
+            routed_model=self._state.routed_model,
         )
 
 
@@ -733,6 +753,59 @@ class LLM(ABC):
         """
         return f"{self.provider}:{self.model}"
 
+    def _sampling_params(
+        self, temperature: float | None, top_p: float | None
+    ) -> dict[str, Any]:
+        """Resolve which sampling parameters to send on a request.
+
+        The library does not impose a sampling policy: a parameter is sent only
+        when the caller asked for it. Omitting them lets each provider apply its
+        own documented default rather than a value this library invented.
+
+        A model whose deployment rejects these parameters
+        (``supports_temperature_top_p`` is False) never receives them. That
+        covers every current OpenAI and Anthropic flagship, plus deployments
+        that pin their sampling values — Moonshot's Kimi SKUs require
+        ``temperature=1`` / ``top_p=0.95``, and sending anything else is a 400.
+        When a caller explicitly passed a value in that case it is dropped, with
+        a warning, rather than failing the call: an LLMCascade or alias chain can
+        legitimately mix members that do and do not accept sampling parameters.
+
+        Args:
+            temperature: Caller-supplied temperature, or None if unset.
+            top_p: Caller-supplied nucleus sampling value, or None if unset.
+
+        Returns:
+            A kwargs dict holding only the parameters that should be sent,
+            empty when nothing should be. Typed ``dict[str, Any]`` rather than
+            ``dict[str, float]`` because ``**`` unpacking is checked against
+            every parameter of the target signature, not just the keys present,
+            so a narrower value type fails against non-float parameters.
+        """
+        if not self.supports_temperature_top_p:
+            ignored = {
+                name: value
+                for name, value in (("temperature", temperature), ("top_p", top_p))
+                if value is not None
+            }
+            if ignored:
+                logger.warning(
+                    "%s/%s does not accept sampling parameters; ignoring %s. "
+                    "Remove them, or use a model whose config sets "
+                    "supports_temperature_top_p: true.",
+                    self.provider,
+                    self.model,
+                    ", ".join(f"{k}={v}" for k, v in ignored.items()),
+                )
+            return {}
+
+        params: dict[str, Any] = {}
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        return params
+
     def _calculate_costs(
         self,
         input_tokens: int,
@@ -780,8 +853,8 @@ class LLM(ABC):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Provider-specific implementation of ``get_response``.
@@ -796,8 +869,8 @@ class LLM(ABC):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Provider-specific implementation of ``get_response_stream``."""
@@ -807,8 +880,8 @@ class LLM(ABC):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
         *,
         caller_metadata: dict[str, Any] | None = None,
@@ -847,8 +920,8 @@ class LLM(ABC):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
         *,
         caller_metadata: dict[str, Any] | None = None,
@@ -907,8 +980,8 @@ class LLM(ABC):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
         *,
         caller_metadata: dict[str, Any] | None = None,
@@ -966,8 +1039,8 @@ class LLM(ABC):
         response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
         *,
         caller_metadata: dict[str, Any] | None = None,
@@ -1037,8 +1110,8 @@ class LLM(ABC):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
         *,
         caller_metadata: dict[str, Any] | None = None,
@@ -1094,8 +1167,8 @@ class LLM(ABC):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Retry-wrapped delegate to the provider override.
@@ -1120,8 +1193,8 @@ class LLM(ABC):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Provider-specific implementation for raw JSON-schema structured responses."""
@@ -1132,8 +1205,8 @@ class LLM(ABC):
         response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Provider-specific implementation for structured responses.

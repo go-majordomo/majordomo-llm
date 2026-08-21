@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-20
+
+### Added
+
+- **Five OpenAI-compatible inference providers** — `baseten`, `nebius`, `deepinfra`, `moonshot`, and `novita` — broadening the backend set for the canonical open-weight models beyond Fireworks and Together. All five speak the OpenAI chat-completions wire protocol, so no new dependency is required; each supports text, streaming, and JSON-schema structured output, and injects `x-majordomo-provider` when given a `base_url` so a gateway can disambiguate them from vanilla OpenAI traffic
+  - **Baseten** (`https://inference.baseten.co/v1`, `BASETEN_API_KEY`) — `deepseek-ai/DeepSeek-V4-Pro` ($1.74/$0.145/$3.48), `moonshotai/Kimi-K2.6` ($0.95/$0.16/$4.00), `moonshotai/Kimi-K3` ($3.00/$0.30/$15.00), `zai-org/GLM-5.2` ($1.40/$0.14/$4.40), `thinkingmachines/inkling` ($1.00/$0.17/$4.05). GLM-5.1 is deliberately absent: its model-library page still advertises Model API pricing, but a live call returns HTTP 410 (deprecated). Note the lowercase Inkling slug, which differs from Together's `thinkingmachines/Inkling`. Dedicated per-deployment endpoints are reached via `base_url`
+  - **Nebius Token Factory** (`https://api.tokenfactory.nebius.com/v1`, `NEBIUS_API_KEY`) — `deepseek-ai/DeepSeek-V4-Pro` ($1.75/$3.50), `moonshotai/Kimi-K2.6` ($0.95/$4.00), `moonshotai/Kimi-K3` ($3.00/$15.00), `zai-org/GLM-5.1` ($1.40/$4.40), `zai-org/GLM-5.2` ($1.40/$4.40). Rates and IDs taken from `GET /v1/models?verbose=true`; that response publishes no cached-token rate, so `cached_input_cost` is unset and cached reads bill at `input_cost`. Keys provisioned against the legacy AI Studio host reach it via `base_url`
+  - **DeepInfra** (`https://api.deepinfra.com/v1/openai`, `DEEPINFRA_API_KEY`) — `deepseek-ai/DeepSeek-V4-Pro` ($1.30/$0.10/$2.60), `moonshotai/Kimi-K2.6` ($0.75/$0.15/$3.50), `moonshotai/Kimi-K3` ($2.85/$0.285/$14.25), `zai-org/GLM-5.1` ($1.05/$0.205/$3.50), `zai-org/GLM-5.2` ($0.75/$0.14/$2.40), `thinkingmachines/Inkling` ($0.95/$0.16/$4.05). DeepInfra undercuts both Fireworks and Together on every model registered here. Note its OpenAI-compatible routes are nested under `/v1/openai`, not `/v1`. All rates are DeepInfra's **Standard** tier — its Priority (1.5x) and Flex (0.8x) tiers are not modelled, so requests routed to either will be mispriced by that multiplier
+  - **Moonshot** (`https://api.moonshot.ai/v1`, `MOONSHOT_API_KEY`) — first-party Kimi: `kimi-k2.6` ($0.95/$0.16/$4.00) and `kimi-k3` ($3.00/$0.30/$15.00). Rates are the USD international platform; mainland-China accounts bill separately in RMB via `api.moonshot.cn`
+  - **Novita** (`https://api.novita.ai/openai/v1`, `NOVITA_API_KEY`) — `deepseek/deepseek-v4-pro` ($1.60/$0.135/$3.20), `moonshotai/kimi-k2.6` ($0.80/$0.16/$3.40), `moonshotai/kimi-k3` ($3.00/$0.30/$15.00), `zai-org/glm-5.1` ($1.38/$0.26/$4.40), `zai-org/glm-5.2` ($1.40/$0.26/$4.40). Rates and IDs come from Novita's unauthenticated `/openai/v1/models`, which returns pricing inline. Note the org prefix differs from the HF-style platforms (`deepseek/deepseek-v4-pro`, not `deepseek-ai/DeepSeek-V4-Pro`); Novita also serves the same routes under `/openai` and `/v3/openai`
+- **`providers/_openai_compatible.py` with `OpenAICompatibleLLM`** — a shared base holding the chat-completions request/response, streaming, and JSON-schema machinery for providers speaking the OpenAI wire protocol. Subclasses set four class attributes (`PROVIDER_NAME`, `DISPLAY_NAME`, `DEFAULT_BASE_URL`, `API_KEY_ENV`) and override nothing, so each of the five new providers is ~35 lines. A `_provider_request_kwargs()` hook forwards `reasoning_effort` / `thinking` when a model config sets them and is available for providers needing different collapse rules
+- All four classes are exported from `majordomo_llm` and `majordomo_llm.providers`, and registered in the factory's `_PROVIDER_CLASSES`
+
+- **`supports_structured_outputs` for OpenAI-compatible providers.** The existing config key now applies to `baseten`, `nebius`, `deepinfra`, `moonshot`, and `novita` (defaulting to `true`, so nothing else changes). When `false`, `OpenAICompatibleLLM` raises `StructuredOutputUnsupported` before issuing the request rather than letting a non-conforming response fail downstream in parsing. `Fireworks` and `Together` predate the shared base and do not accept the kwarg, so they are excluded
+- Set `supports_structured_outputs: false` on Nebius `moonshotai/Kimi-K2.6`. Measured against the live API, that deployment accepts a strict `json_schema` response format but is not grammar-constrained: it conformed on only 2 of 5 samples and answered in prose otherwise. Text and streaming on that model are unaffected. Nebius's own `/v1/models` metadata is not a reliable source for this — it also omits `structured_outputs` for GLM-5.2 and Kimi-K3, both of which conform 5/5, and reports empty `supported_sampling_parameters` for both Kimi SKUs even though all five models accept `temperature`/`top_p`
+
+### Fixed
+
+- **Streaming through the `majordomo` gateway now reports the routed backend.** The routing headers arrive mid-stream, so the identity was consumed for pricing and then discarded: a streamed call reported `routed_provider`/`routed_model` as `None` while the same non-streaming call reported them. `_StreamState` now carries both, `LLMStreamResponse` exposes them as properties for callers that iterate, and `collect()` propagates them onto the returned `LLMResponse`
+
+### Changed
+
+- **`temperature` and `top_p` no longer default to `0.3` / `1.0`.** They now default to `None` and are sent only when the caller passes them, so each provider applies its own documented default instead of one this library invented. The parameters are also now independent — passing only `temperature` no longer forces a `top_p` value alongside it
+- **Sampling parameters are dropped, with a warning, for models that reject them.** `LLM._sampling_params()` centralizes the rule: a model whose config sets `supports_temperature_top_p: false` never receives them, and an explicitly-passed value logs a warning naming the provider, model, and ignored values rather than failing the call — an `LLMCascade` or alias chain can legitimately mix members that do and do not accept them. This replaces per-provider `if self.supports_temperature_top_p:` branches that duplicated the entire request call, removing roughly 200 lines of duplication across seven providers
+- **Gemini now honors `supports_temperature_top_p`.** It previously sent `temperature` and `top_p` on every request regardless of the flag
+
+
+- `get_llm_instance()` now forwards `reasoning_effort` / `thinking` from model config for the five new providers alongside `deepseek`, `fireworks`, and `together`
+
+- **Per-model capability flags, measured against the live APIs.** Vendor metadata proved unreliable, so every registered model was called directly. Models that pin their sampling parameters carry `supports_temperature_top_p: false` — Moonshot `kimi-k2.6`/`kimi-k3` (`invalid temperature: only 1 is allowed for this model`, `invalid top_p: only 0.95 is allowed`) and Baseten `moonshotai/Kimi-K3` (`Cannot override enforced sampling params`); omitting both parameters succeeds. Models that cannot honor a strict `json_schema` carry `supports_structured_outputs: false` — DeepInfra `thinkingmachines/Inkling` (HTTP 405), Novita `deepseek/deepseek-v4-pro` and `zai-org/glm-5.1` (HTTP 400, `json_object` only), Nebius `moonshotai/Kimi-K2.6` (accepts it but conformed on only 10 of 18 samples), and Baseten `deepseek-ai/DeepSeek-V4-Pro` (accepts it and returned prose on 5 of 5 samples)
+
+### Notes
+
+- **No alias changes.** The cross-vendor cascades (`deepseek-v4-pro`, `kimi-k2.6`, `kimi-k3`, `glm-5.1`, `glm-5.2`, `inkling`) remain Fireworks→Together; wiring the new providers into them is a separate change
+- **No reasoning-profile entries** (`deepseek-v4-pro-reasoning` / `-hard`) are registered for the new providers. Whether they honour `reasoning_effort` / `thinking` on their DeepSeek deployments is unverified, and a silently-ignored reasoning flag is worse than an absent one
+- `Fireworks` and `Together` were left on their own implementations rather than migrated onto `OpenAICompatibleLLM`
+
 ## [0.20.1] - 2026-08-11
 
 ### Fixed

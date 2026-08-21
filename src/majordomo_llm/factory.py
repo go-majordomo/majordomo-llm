@@ -12,13 +12,18 @@ import yaml
 from majordomo_llm.base import LLM
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers.anthropic import Anthropic
+from majordomo_llm.providers.baseten import Baseten
 from majordomo_llm.providers.bedrock import Bedrock
 from majordomo_llm.providers.bedrock_mantle import BedrockMantle
 from majordomo_llm.providers.cohere import Cohere
+from majordomo_llm.providers.deepinfra import DeepInfra
 from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.majordomo import Majordomo
+from majordomo_llm.providers.moonshot import Moonshot
+from majordomo_llm.providers.nebius import Nebius
+from majordomo_llm.providers.novita import Novita
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.together import Together
 
@@ -40,6 +45,11 @@ _PROVIDER_CLASSES: dict[str, type[LLM]] = {
     "bedrock_mantle": BedrockMantle,
     "fireworks": Fireworks,
     "together": Together,
+    "baseten": Baseten,
+    "nebius": Nebius,
+    "deepinfra": DeepInfra,
+    "moonshot": Moonshot,
+    "novita": Novita,
     "majordomo": Majordomo,
 }
 
@@ -236,7 +246,7 @@ def get_llm_instance(
             Validated against the model's ``supports_web_search`` flag in
             ``llm_config.yaml``. Silently ignored for providers that do not
             implement web search (cohere, deepseek, fireworks, together,
-            bedrock_mantle).
+            baseten, nebius, deepinfra, moonshot, novita, bedrock_mantle).
         use_prompt_caching: Override the model's ``use_prompt_caching`` config
             default for providers with an explicit cache breakpoint (Anthropic,
             Bedrock Mantle). ``None`` (default) keeps the config value (which
@@ -300,7 +310,16 @@ def get_llm_instance(
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")
 
     provider_kwargs: dict[str, Any] = {}
-    if provider in ("deepseek", "fireworks", "together"):
+    if provider in (
+        "deepseek",
+        "fireworks",
+        "together",
+        "baseten",
+        "nebius",
+        "deepinfra",
+        "moonshot",
+        "novita",
+    ):
         provider_kwargs = {
             "reasoning_effort": model_attributes.get("reasoning_effort"),
             "thinking": model_attributes.get("thinking"),
@@ -310,6 +329,15 @@ def get_llm_instance(
 
     if provider in ("openai", "anthropic", "gemini", "bedrock"):
         provider_kwargs["use_web_search"] = use_web_search
+
+    # Providers on the shared OpenAI-compatible base default to supporting strict
+    # json_schema; a model opts out in config when its deployment accepts the
+    # parameter without enforcing it. Fireworks and Together predate the base and
+    # do not accept this kwarg, so they are deliberately excluded.
+    if provider in ("baseten", "nebius", "deepinfra", "moonshot", "novita"):
+        provider_kwargs["supports_structured_outputs"] = model_attributes.get(
+            "supports_structured_outputs", True
+        )
 
     if provider in ("anthropic", "bedrock_mantle"):
         provider_kwargs["supports_structured_outputs"] = model_attributes.get(

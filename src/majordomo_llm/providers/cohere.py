@@ -110,13 +110,25 @@ class Cohere(LLM):
             return None
         return RequestOptions(additional_headers=merged)
 
+    def _cohere_sampling(
+        self, temperature: float | None, top_p: float | None
+    ) -> dict[str, Any]:
+        """Translate the shared sampling params to Cohere's names.
+
+        Cohere calls nucleus sampling ``p``, not ``top_p``.
+        """
+        params = self._sampling_params(temperature, top_p)
+        if "top_p" in params:
+            params["p"] = params.pop("top_p")
+        return params
+
     @retry_provider_call
     async def _get_response_impl(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Cohere."""
@@ -128,8 +140,8 @@ class Cohere(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from Cohere."""
@@ -142,20 +154,12 @@ class Cohere(LLM):
 
         start_time = time.time()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.chat(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    p=top_p,
-                    request_options=request_options,
-                )
-            else:
-                response = await self.client.chat(
-                    model=self.model,
-                    messages=messages,
-                    request_options=request_options,
-                )
+            response = await self.client.chat(
+                model=self.model,
+                messages=messages,
+                request_options=request_options,
+                **self._cohere_sampling(temperature, top_p),
+            )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(
                 f"Cohere API error: {e}",
@@ -184,8 +188,8 @@ class Cohere(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Cohere."""
@@ -198,20 +202,12 @@ class Cohere(LLM):
         request_options = self._cohere_request_options(extra_headers)
 
         try:
-            if self.supports_temperature_top_p:
-                response = self.client.chat_stream(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    p=top_p,
-                    request_options=request_options,
-                )
-            else:
-                response = self.client.chat_stream(
-                    model=self.model,
-                    messages=messages,
-                    request_options=request_options,
-                )
+            response = self.client.chat_stream(
+                model=self.model,
+                messages=messages,
+                request_options=request_options,
+                **self._cohere_sampling(temperature, top_p),
+            )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(
                 f"Cohere API error: {e}",
@@ -245,8 +241,8 @@ class Cohere(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Cohere-specific implementation using native JSON schema response format."""
@@ -260,22 +256,13 @@ class Cohere(LLM):
 
         start_time = time.time()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.chat(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    p=top_p,
-                    response_format=JsonObjectResponseFormatV2(json_schema=schema),
-                    request_options=request_options,
-                )
-            else:
-                response = await self.client.chat(
-                    model=self.model,
-                    messages=messages,
-                    response_format=JsonObjectResponseFormatV2(json_schema=schema),
-                    request_options=request_options,
-                )
+            response = await self.client.chat(
+                model=self.model,
+                messages=messages,
+                response_format=JsonObjectResponseFormatV2(json_schema=schema),
+                request_options=request_options,
+                **self._cohere_sampling(temperature, top_p),
+            )
         except cohere.core.api_error.ApiError as e:
             raise ProviderError(
                 f"Cohere API error: {e}",

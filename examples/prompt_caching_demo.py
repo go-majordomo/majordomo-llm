@@ -9,7 +9,8 @@ Two flavors of prompt caching are demonstrated, side by side:
    and ``cached_tokens`` (the read) separately, and the ``use_prompt_caching``
    toggle on ``get_llm_instance`` turns the breakpoint on or off.
 
-2. AUTOMATIC caching (OpenAI, Gemini, DeepSeek) — the provider caches repeated
+2. AUTOMATIC caching (OpenAI, Gemini, DeepSeek, and the open-weight hosts
+   Baseten / DeepInfra / Novita / Nebius / Moonshot) — the provider caches repeated
    prompt prefixes server-side with no breakpoint to set. There is no creation
    step and nothing to toggle; ``cached_tokens`` simply populate on a repeat and
    are billed at the discounted ``cached_input_cost`` rate.
@@ -46,7 +47,7 @@ Gateway routing (--gateway) reads:
 
 import os
 
-from shared import gateway_kwargs, run_demo
+from shared import gateway_kwargs, run_demo, unavailable_provider_message
 
 from majordomo_llm import get_llm_instance
 from majordomo_llm.base import TOKENS_PER_MILLION
@@ -69,6 +70,16 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...], bool]] = [
     ("openai", "gpt-5.6-luna", ("OPENAI_API_KEY",), False),
     ("gemini", "gemini-3.6-flash", ("GEMINI_API_KEY",), False),
     ("deepseek", "deepseek-v4-flash", ("DEEPSEEK_API_KEY",), False),
+    # Open-weight hosts, all automatic/subset caching. These run the SAME model
+    # (GLM-5.2) on purpose: the cache-read rate for identical weights varies by
+    # host — $0.14/M on Baseten and DeepInfra, $0.26/M on Novita — and Nebius
+    # publishes no discounted cache tier at all, so its cached reads bill at the
+    # full input rate. Running them side by side makes that spread visible.
+    ("baseten", "zai-org/GLM-5.2", ("BASETEN_API_KEY",), False),
+    ("deepinfra", "zai-org/GLM-5.2", ("DEEPINFRA_API_KEY",), False),
+    ("novita", "zai-org/glm-5.2", ("NOVITA_API_KEY",), False),
+    ("nebius", "zai-org/GLM-5.2", ("NEBIUS_API_KEY",), False),
+    ("moonshot", "kimi-k2.6", ("MOONSHOT_API_KEY",), False),
 ]
 
 # Two different user turns so each call does real work while the large system
@@ -125,12 +136,22 @@ def _print_savings(llm: object, cached_tokens: int) -> None:
     The per-token saving is the same in both accounting modes: the gap between
     the full input rate and the discounted cache-read rate.
     """
-    if cached_tokens > 0 and llm.cached_input_cost is not None:
-        saved = cached_tokens * (llm.input_cost - llm.cached_input_cost) / TOKENS_PER_MILLION
+    if cached_tokens <= 0:
+        return
+    if llm.cached_input_cost is None:
+        # e.g. Nebius, Fireworks, Together: the provider may still serve the
+        # prefix from cache, but publishes no discounted rate, so those tokens
+        # bill at input_cost and there is nothing to save.
         print(
-            f"      Cache hit: {cached_tokens} tokens read; "
-            f"prompt-side savings vs. uncached ~= ${saved:.6f}"
+            f"      Cache hit: {cached_tokens} tokens read, but no discounted "
+            "cache tier is configured — they bill at the full input rate."
         )
+        return
+    saved = cached_tokens * (llm.input_cost - llm.cached_input_cost) / TOKENS_PER_MILLION
+    print(
+        f"      Cache hit: {cached_tokens} tokens read; "
+        f"prompt-side savings vs. uncached ~= ${saved:.6f}"
+    )
 
 
 async def demo_caching(
@@ -194,8 +215,7 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
     entries = PROVIDERS if provider is None else [e for e in PROVIDERS if e[0] == provider]
     if provider is not None and not entries:
-        known = ", ".join(sorted({p for p, _, _, _ in PROVIDERS}))
-        print(f"Unknown provider '{provider}'. Known providers: {known}")
+        print(unavailable_provider_message(provider, {p for p, _, _, _ in PROVIDERS}))
         return
 
     available = [
@@ -207,6 +227,8 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
         print("No usable credentials found. Set one of:")
         print("  ANTHROPIC_API_KEY | AWS_BEARER_TOKEN_BEDROCK + AWS_REGION")
         print("  OPENAI_API_KEY | GEMINI_API_KEY | DEEPSEEK_API_KEY")
+        print("  BASETEN_API_KEY | DEEPINFRA_API_KEY | NOVITA_API_KEY")
+        print("  NEBIUS_API_KEY | MOONSHOT_API_KEY")
         return
 
     print(f"Available providers: {', '.join(p for p, _, _ in available)}")
@@ -223,4 +245,8 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    run_demo(main, description=__doc__)
+    run_demo(
+        main,
+        description=__doc__,
+        providers={p for p, _, _, _ in PROVIDERS},
+    )

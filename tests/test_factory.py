@@ -6,8 +6,10 @@ import pytest
 
 from majordomo_llm import (
     LLM_CONFIG,
+    get_aliases,
     get_all_llm_instances,
     get_llm_instance,
+    get_supported_providers,
 )
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers.anthropic import Anthropic
@@ -29,6 +31,11 @@ def mock_all_clients():
         "AWS_REGION": "us-east-1",
         "FIREWORKS_API_KEY": "test-key",
         "TOGETHER_API_KEY": "test-key",
+        "BASETEN_API_KEY": "test-key",
+        "NEBIUS_API_KEY": "test-key",
+        "DEEPINFRA_API_KEY": "test-key",
+        "MOONSHOT_API_KEY": "test-key",
+        "NOVITA_API_KEY": "test-key",
     }
     with (
         patch.dict("os.environ", env_vars),
@@ -39,6 +46,9 @@ def mock_all_clients():
         patch("majordomo_llm.providers.cohere.cohere.AsyncClientV2"),
         patch("majordomo_llm.providers.fireworks.openai.AsyncOpenAI"),
         patch("majordomo_llm.providers.together.openai.AsyncOpenAI"),
+        # Baseten, Nebius, DeepInfra, Moonshot and Novita all build their client
+        # in the shared OpenAI-compatible base, so one patch covers them all.
+        patch("majordomo_llm.providers._openai_compatible.openai.AsyncOpenAI"),
     ):
         yield
 
@@ -192,6 +202,11 @@ class TestGetAllLLMInstances:
             "bedrock_mantle",
             "fireworks",
             "together",
+            "baseten",
+            "nebius",
+            "deepinfra",
+            "moonshot",
+            "novita",
         }
 
 
@@ -271,3 +286,61 @@ class TestUsePromptCachingForwarding:
         llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
         assert llm.cached_input_cost == 0.30
         assert llm.cache_write_cost == 3.75
+
+
+class TestStructuredOutputForwarding:
+    """Tests for supports_structured_outputs on OpenAI-compatible providers."""
+
+    def test_defaults_to_true(self, mock_all_clients):
+        llm = get_llm_instance("nebius", "moonshotai/Kimi-K3")
+        assert llm.supports_structured_outputs is True
+
+    def test_config_can_opt_out(self, mock_all_clients):
+        # Nebius serves Kimi-K2.6 without grammar-constrained decoding: it accepts
+        # json_schema but only honors it intermittently.
+        llm = get_llm_instance("nebius", "moonshotai/Kimi-K2.6")
+        assert llm.supports_structured_outputs is False
+
+    def test_other_providers_unaffected(self, mock_all_clients):
+        for provider, model in (
+            ("baseten", "moonshotai/Kimi-K2.6"),
+            ("deepinfra", "moonshotai/Kimi-K2.6"),
+            ("novita", "moonshotai/kimi-k2.6"),
+            ("moonshot", "kimi-k2.6"),
+        ):
+            llm = get_llm_instance(provider, model)
+            assert llm.supports_structured_outputs is True, provider
+
+
+class TestGatewayProviderIsOptIn:
+    """The majordomo provider must never be reached by default.
+
+    It is a routing pseudo-provider: it names a canonical model and lets the
+    gateway pick a backend, so it cannot run without a live Steward instance.
+    Anything that enumerates providers has to skip it, and it must fail loudly
+    rather than silently when reached without a gateway URL.
+
+    This is distinct from routing a CONCRETE provider through the gateway for
+    usage tracking, which is just a base_url plus headers and stays available.
+    """
+
+    def test_excluded_from_sweeps(self, mock_all_clients):
+        providers = {llm.provider for llm in get_all_llm_instances()}
+        assert "majordomo" not in providers
+
+    def test_still_listed_as_supported(self):
+        # Excluded from sweeps, but callable on purpose — it must stay
+        # discoverable so an opt-in caller can find it.
+        assert "majordomo" in get_supported_providers()
+
+    def test_requires_explicit_gateway_url(self, mock_all_clients):
+        with pytest.raises(ConfigurationError, match="requires base_url"):
+            get_llm_instance("majordomo", "glm-5.2")
+
+    def test_no_alias_resolves_to_it(self):
+        for name, target in get_aliases().items():
+            hops = target if isinstance(target, list) else [target]
+            for provider, _ in hops:
+                assert provider != "majordomo", (
+                    f"alias {name!r} would route to the gateway provider by default"
+                )

@@ -88,8 +88,8 @@ class LLMCascade(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Dispatch to the first child provider that succeeds."""
@@ -109,8 +109,8 @@ class LLMCascade(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Dispatch streaming to the first child provider that succeeds."""
@@ -133,8 +133,8 @@ class LLMCascade(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Cascade overrides the retried wrapper to skip outer retries.
@@ -168,8 +168,8 @@ class LLMCascade(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Unused on the cascade — ``_get_json_schema_response_retried`` dispatches directly."""

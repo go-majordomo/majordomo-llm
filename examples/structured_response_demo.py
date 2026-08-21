@@ -35,6 +35,7 @@ from shared import (
     get_available_providers,
     print_summary,
     run_demo,
+    sweep_provider_names,
 )
 
 from majordomo_llm import get_llm_instance
@@ -354,4 +355,4 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    run_demo(main, description=__doc__)
+    run_demo(main, description=__doc__, providers=sweep_provider_names())

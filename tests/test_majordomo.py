@@ -286,3 +286,52 @@ class TestMajordomoStreaming:
         # Fireworks GLM-5.2 rates, no cached tokens.
         expected = (1000 * 1.4 + 200 * 4.4) / TOKENS_PER_MILLION
         assert result.usage.total_cost == pytest.approx(expected)
+
+    async def test_stream_reports_routed_identity(self, majordomo_llm):
+        """Streaming should surface the routed backend, not just price by it.
+
+        The routing headers arrive mid-stream, so before this the identity was
+        consumed for pricing and then discarded — a streamed call reported
+        routed_provider=None while the same non-streaming call reported it.
+        """
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = "Hello"
+        chunk.usage = None
+
+        final_chunk = MagicMock()
+        final_chunk.choices = []
+        final_chunk.usage.prompt_tokens = 10
+        final_chunk.usage.completion_tokens = 5
+        final_chunk.usage.prompt_tokens_details = None
+
+        async def stream():
+            yield chunk
+            yield final_chunk
+
+        raw = MagicMock()
+        raw.headers = {
+            "X-Majordomo-Routed-Provider": FIREWORKS_GLM[0],
+            "X-Majordomo-Routed-Model": FIREWORKS_GLM[1],
+        }
+        raw.parse = MagicMock(return_value=stream())
+        majordomo_llm.client.chat.completions.with_raw_response.create = AsyncMock(
+            return_value=raw
+        )
+
+        result = await majordomo_llm.get_response_stream("Say hello")
+        collected = await result.collect()
+
+        assert result.routed_provider == FIREWORKS_GLM[0]
+        assert result.routed_model == FIREWORKS_GLM[1]
+        assert collected.routed_provider == FIREWORKS_GLM[0]
+        assert collected.routed_model == FIREWORKS_GLM[1]
+        assert collected.content == "Hello"
+
+    async def test_direct_provider_stream_has_no_routed_identity(self):
+        """A non-gateway provider leaves the routed fields unset."""
+        from majordomo_llm.base import _StreamState
+
+        state = _StreamState()
+        assert state.routed_provider is None
+        assert state.routed_model is None

@@ -117,8 +117,8 @@ class OpenAI(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from OpenAI."""
@@ -130,32 +130,22 @@ class OpenAI(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from OpenAI."""
         start_time = time.time()
         web_search_kwargs = self._web_search_kwargs()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.responses.create(
-                    model=self.model,
-                    instructions=system_prompt,
-                    input=user_prompt,
-                    temperature=temperature,
-                    top_p=top_p,
-                    extra_headers=extra_headers,
-                    **web_search_kwargs,
-                )
-            else:
-                response = await self.client.responses.create(
-                    model=self.model,
-                    instructions=system_prompt,
-                    input=user_prompt,
-                    extra_headers=extra_headers,
-                    **web_search_kwargs,
-                )
+            response = await self.client.responses.create(
+                model=self.model,
+                instructions=system_prompt,
+                input=user_prompt,
+                extra_headers=extra_headers,
+                **web_search_kwargs,
+                **self._sampling_params(temperature, top_p),
+            )
         except openai.APIError as e:
             raise ProviderError(
                 f"OpenAI API error: {e}",
@@ -188,8 +178,8 @@ class OpenAI(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from OpenAI."""
@@ -197,26 +187,15 @@ class OpenAI(LLM):
         web_search_kwargs = self._web_search_kwargs()
 
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.responses.create(
-                    model=self.model,
-                    instructions=system_prompt,
-                    input=user_prompt,
-                    temperature=temperature,
-                    top_p=top_p,
-                    stream=True,
-                    extra_headers=extra_headers,
-                    **web_search_kwargs,
-                )
-            else:
-                response = await self.client.responses.create(
-                    model=self.model,
-                    instructions=system_prompt,
-                    input=user_prompt,
-                    stream=True,
-                    extra_headers=extra_headers,
-                    **web_search_kwargs,
-                )
+            response = await self.client.responses.create(
+                model=self.model,
+                instructions=system_prompt,
+                input=user_prompt,
+                stream=True,
+                extra_headers=extra_headers,
+                **web_search_kwargs,
+                **self._sampling_params(temperature, top_p),
+            )
         except openai.APIError as e:
             raise ProviderError(
                 f"OpenAI API error: {e}",
@@ -251,8 +230,8 @@ class OpenAI(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """OpenAI-specific implementation using structured outputs with JSON Schema."""
@@ -270,26 +249,15 @@ class OpenAI(LLM):
         web_search_kwargs = self._web_search_kwargs()
 
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.responses.create(
-                    model=self.model,
-                    instructions=system_prompt,
-                    input=user_prompt,
-                    temperature=temperature,
-                    top_p=top_p,
-                    text=text_config,
-                    extra_headers=extra_headers,
-                    **web_search_kwargs,
-                )
-            else:
-                response = await self.client.responses.create(
-                    model=self.model,
-                    instructions=system_prompt,
-                    input=user_prompt,
-                    text=text_config,
-                    extra_headers=extra_headers,
-                    **web_search_kwargs,
-                )
+            response = await self.client.responses.create(
+                model=self.model,
+                instructions=system_prompt,
+                input=user_prompt,
+                text=text_config,
+                extra_headers=extra_headers,
+                **web_search_kwargs,
+                **self._sampling_params(temperature, top_p),
+            )
         except openai.APIError as e:
             raise ProviderError(
                 f"OpenAI API error: {e}",

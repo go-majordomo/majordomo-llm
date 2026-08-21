@@ -16,6 +16,9 @@
 #   - DeepSeek: cache-hit read = 0.10x input.
 #   - Fireworks / Together: no separate cache tier — cached reads bill at
 #     input_cost, so cached_input_cost is intentionally left unset.
+#   - Baseten / DeepInfra / Moonshot / Novita: every registered SKU publishes a
+#     discounted cache tier, so cached_input_cost is set per model.
+#   - Nebius: no cached-token rate is published, so cached_input_cost is unset.
 
 openai:
   models:
@@ -546,6 +549,197 @@ together:
       input_cost: 1.00
       output_cost: 4.05
       cached_input_cost: 0.17
+
+# Baseten Model APIs (OpenAI-compatible). The shared "Model APIs" catalog only;
+# dedicated per-deployment endpoints are reached by passing their URL as base_url.
+# Model IDs are HF-style and case-sensitive — note Inkling is lowercase here
+# (thinkingmachines/inkling) while Together spells it thinkingmachines/Inkling.
+#
+# Rates confirmed 2026-08-19 from the per-model pages under baseten.co/library/
+# (e.g. /library/glm-52/, /library/kimi-k26/). Prefer those over the aggregate
+# table on baseten.co/pricing/, which misreports Kimi K3's cache-hit rate as
+# equal to its input rate and omits GLM-5.1 entirely.
+#
+# GLM-5.1 is NOT registered here. Its /library/glm-51/ page still advertises Model
+# API pricing and a shared-endpoint code sample, but a live call returns HTTP 410
+# "the model version you are trying to access has been deprecated." The aggregate
+# pricing table and the Model APIs docs list, which both omit it, were right and
+# the library page is stale.
+baseten:
+  models:
+    deepseek-ai/DeepSeek-V4-Pro:
+      input_cost: 1.74
+      output_cost: 3.48
+      cached_input_cost: 0.145
+      # Accepts json_schema and then ignores it — returned prose on 5 of 5 live
+      # samples. Silent non-compliance, so fail fast instead.
+      supports_structured_outputs: false
+    moonshotai/Kimi-K2.6:
+      input_cost: 0.95
+      output_cost: 4.00
+      cached_input_cost: 0.16
+    moonshotai/Kimi-K3:
+      input_cost: 3.00
+      output_cost: 15.00
+      cached_input_cost: 0.30
+      # "Cannot override enforced sampling params: {'top_p': 1.0}. Required
+      # values: {'top_p': 0.95}" — omitting both params succeeds.
+      supports_temperature_top_p: false
+    zai-org/GLM-5.2:
+      input_cost: 1.40
+      output_cost: 4.40
+      cached_input_cost: 0.14
+    thinkingmachines/inkling:
+      input_cost: 1.00
+      output_cost: 4.05
+      cached_input_cost: 0.17
+
+# Nebius Token Factory (OpenAI-compatible). Formerly Nebius AI Studio; keys
+# provisioned against the legacy api.studio.nebius.com host reach it via base_url.
+# Model IDs are HF-style and case-sensitive.
+#
+# Rates and IDs confirmed 2026-08-19 from GET /v1/models?verbose=true, whose
+# per-model ``pricing.prompt`` / ``pricing.completion`` are per-token (x1e6 here).
+# That response carries no cached-token rate, so cached_input_cost is left unset
+# and cached reads bill at input_cost — same as Fireworks and Together.
+#
+# Do NOT derive capability flags from that response; only its pricing fields have
+# proven trustworthy. Measured against the live API on 2026-08-19:
+#   - supported_sampling_parameters is wrong. It reports [] for both Kimi SKUs,
+#     yet all five models accept temperature + top_p.
+#   - supported_features omits structured_outputs for GLM-5.2, Kimi-K2.6 and
+#     Kimi-K3. GLM-5.2 and Kimi-K3 in fact conform 5/5 on a strict json_schema
+#     request, so the flag is wrong for them.
+#   - Kimi-K2.6 is the real exception: it ACCEPTS response_format and the schema
+#     does reach the model, but decoding is not grammar-constrained, so it drops
+#     to prose on roughly 3 of 5 calls. Structured output is unreliable there.
+nebius:
+  models:
+    deepseek-ai/DeepSeek-V4-Pro:
+      input_cost: 1.75
+      output_cost: 3.50
+    moonshotai/Kimi-K2.6:
+      input_cost: 0.95
+      output_cost: 4.00
+      # Accepts json_schema without enforcing it — conformed on only 2 of 5 live
+      # samples, answering in prose otherwise. Fail fast rather than intermittently.
+      supports_structured_outputs: false
+    moonshotai/Kimi-K3:
+      input_cost: 3.00
+      output_cost: 15.00
+    zai-org/GLM-5.1:
+      input_cost: 1.40
+      output_cost: 4.40
+    zai-org/GLM-5.2:
+      input_cost: 1.40
+      output_cost: 4.40
+
+# DeepInfra (OpenAI-compatible). Note the OpenAI-compatible routes are nested
+# under /v1/openai rather than /v1. Model IDs are HF-style and case-sensitive.
+# DeepInfra undercuts Fireworks and Together on every model registered here.
+#
+# Rates below are DeepInfra's STANDARD tier, confirmed 2026-08-19 against the
+# unauthenticated catalog at https://api.deepinfra.com/models/list, which is the
+# authoritative source and lists far more models than the site's featured page.
+# There, pricing.cents_per_input_token is cents per token (x1e4 for USD per
+# million) and pricing.rate_per_input_token_cached is a RATIO of the input rate,
+# not an absolute price. DeepInfra also sells Priority (1.5x) and Flex (0.8x)
+# tiers on the same models; requests routed to either will be mispriced by that
+# multiplier, since the tier is not modeled here.
+deepinfra:
+  models:
+    deepseek-ai/DeepSeek-V4-Pro:
+      input_cost: 1.30
+      output_cost: 2.60
+      cached_input_cost: 0.10
+    moonshotai/Kimi-K2.6:
+      input_cost: 0.75
+      output_cost: 3.50
+      cached_input_cost: 0.15
+    moonshotai/Kimi-K3:
+      input_cost: 2.85
+      output_cost: 14.25
+      cached_input_cost: 0.285
+    zai-org/GLM-5.1:
+      input_cost: 1.05
+      output_cost: 3.50
+      cached_input_cost: 0.205
+    zai-org/GLM-5.2:
+      input_cost: 0.75
+      output_cost: 2.40
+      cached_input_cost: 0.14
+    thinkingmachines/Inkling:
+      input_cost: 0.95
+      output_cost: 4.05
+      cached_input_cost: 0.16
+      # HTTP 405: "json_schema response format is not supported for model:
+      # thinkingmachines/Inkling". json_object works; strict schemas do not.
+      supports_structured_outputs: false
+
+# Moonshot AI (OpenAI-compatible). First-party Kimi models only — Moonshot is the
+# model vendor, not a multi-tenant inference platform. Model IDs are bare slugs.
+# Rates below are the USD international platform (api.moonshot.ai); mainland-China
+# accounts bill separately in RMB via api.moonshot.cn at different rates.
+#
+# Confirmed 2026-08-19 from Moonshot's own per-model pricing docs
+# (platform.kimi.ai/docs/pricing/chat-k3.md, .../chat-k26.md), which label the
+# columns cache-miss / cache-hit / output explicitly. The docs index at
+# platform.kimi.ai/docs/llms.txt lists a pricing page per model.
+moonshot:
+  models:
+    # Both SKUs pin their sampling parameters: "invalid temperature: only 1 is
+    # allowed for this model" / "invalid top_p: only 0.95 is allowed". Sending
+    # either value fails, and omitting both succeeds — so suppress them.
+    kimi-k2.6:
+      input_cost: 0.95
+      output_cost: 4.00
+      cached_input_cost: 0.16
+      supports_temperature_top_p: false
+    kimi-k3:
+      input_cost: 3.00
+      output_cost: 15.00
+      cached_input_cost: 0.30
+      supports_temperature_top_p: false
+
+# Novita AI (OpenAI-compatible). Model IDs are lowercase slash-delimited and
+# case-sensitive; note the org prefix differs from the HF-style platforms —
+# Novita uses deepseek/deepseek-v4-pro where Baseten, Nebius, and DeepInfra use
+# deepseek-ai/DeepSeek-V4-Pro. Novita also serves these routes under /openai and
+# /v3/openai; the provider defaults to the /openai/v1 form its API reference documents.
+#
+# Rates confirmed 2026-08-19 from GET https://api.novita.ai/openai/v1/models,
+# which needs no auth and returns pricing inline: pricing.prompt /
+# pricing.input_cache_read / pricing.completion, each in units of 1e-4 USD per
+# million tokens (14000 -> $1.40). The published pricing page agrees on all five.
+# None of the models below use Novita's tiered billing (is_tiered_billing: false),
+# so a single flat rate per class is correct.
+novita:
+  models:
+    deepseek/deepseek-v4-pro:
+      input_cost: 1.60
+      output_cost: 3.20
+      cached_input_cost: 0.135
+      # HTTP 400: "does not support 'json_schema' response format. Supported
+      # formats: json_object".
+      supports_structured_outputs: false
+    moonshotai/kimi-k2.6:
+      input_cost: 0.80
+      output_cost: 3.40
+      cached_input_cost: 0.16
+    moonshotai/kimi-k3:
+      input_cost: 3.00
+      output_cost: 15.00
+      cached_input_cost: 0.30
+    zai-org/glm-5.1:
+      input_cost: 1.38
+      output_cost: 4.40
+      cached_input_cost: 0.26
+      # HTTP 400: json_schema unsupported, json_object only (as deepseek-v4-pro).
+      supports_structured_outputs: false
+    zai-org/glm-5.2:
+      input_cost: 1.40
+      output_cost: 4.40
+      cached_input_cost: 0.26
 
 # Majordomo gateway (optimal routing). Canonical open-weight model names the
 # Majordomo Steward gateway routes to the optimal backend (Fireworks, Together,

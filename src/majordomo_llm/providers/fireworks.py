@@ -157,8 +157,8 @@ class Fireworks(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Fireworks."""
@@ -170,8 +170,8 @@ class Fireworks(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from Fireworks."""
@@ -183,22 +183,13 @@ class Fireworks(LLM):
         start_time = time.time()
         request_kwargs = self._fireworks_request_kwargs()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    extra_headers=extra_headers,
-                    **request_kwargs,
-                )
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    extra_headers=extra_headers,
-                    **request_kwargs,
-                )
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                extra_headers=extra_headers,
+                **request_kwargs,
+                **self._sampling_params(temperature, top_p),
+            )
         except openai.APIError as e:
             raise ProviderError(
                 f"Fireworks API error: {e}",
@@ -238,8 +229,8 @@ class Fireworks(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Fireworks."""
@@ -252,26 +243,15 @@ class Fireworks(LLM):
         request_kwargs = self._fireworks_request_kwargs()
 
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    extra_headers=extra_headers,
-                    **request_kwargs,
-                )
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    extra_headers=extra_headers,
-                    **request_kwargs,
-                )
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_headers=extra_headers,
+                **request_kwargs,
+                **self._sampling_params(temperature, top_p),
+            )
         except openai.APIError as e:
             raise ProviderError(
                 f"Fireworks API error: {e}",
@@ -311,8 +291,8 @@ class Fireworks(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Fireworks-specific implementation using OpenAI-compatible JSON Schema."""
@@ -337,24 +317,14 @@ class Fireworks(LLM):
         start_time = time.time()
         request_kwargs = self._fireworks_request_kwargs()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    response_format=response_format,
-                    extra_headers=extra_headers,
-                    **request_kwargs,
-                )
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_format=response_format,
-                    extra_headers=extra_headers,
-                    **request_kwargs,
-                )
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                response_format=response_format,
+                extra_headers=extra_headers,
+                **request_kwargs,
+                **self._sampling_params(temperature, top_p),
+            )
         except openai.APIError as e:
             raise ProviderError(
                 f"Fireworks API error: {e}",

@@ -26,7 +26,14 @@ import json
 import os
 import traceback
 
-from shared import EXAMPLES_DIR, clear_database, gateway_kwargs, print_summary, run_demo
+from shared import (
+    EXAMPLES_DIR,
+    clear_database,
+    gateway_kwargs,
+    print_summary,
+    run_demo,
+    unavailable_provider_message,
+)
 
 from majordomo_llm import get_llm_instance
 from majordomo_llm.logging import FileStorageAdapter, LoggingLLM, SqliteAdapter
@@ -92,8 +99,7 @@ def get_available_flagships(provider: str | None = None) -> list[tuple[str, str]
     if provider is not None:
         entries = [e for e in FLAGSHIPS if e[0] == provider]
         if not entries:
-            known = ", ".join(sorted({p for p, _, _ in FLAGSHIPS}))
-            print(f"Unknown provider '{provider}'. Known providers: {known}\n")
+            print(unavailable_provider_message(provider, {p for p, _, _ in FLAGSHIPS}) + "\n")
             return []
 
     available = []
@@ -245,4 +251,4 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    run_demo(main, description=__doc__)
+    run_demo(main, description=__doc__, providers={p for p, _, _ in FLAGSHIPS})

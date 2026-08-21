@@ -177,12 +177,16 @@ class Bedrock(LLM):
         return self._session.create_client("bedrock-runtime", **kwargs)
 
     def _inference_config(
-        self, temperature: float, top_p: float, max_tokens: int
+        self, temperature: float | None, top_p: float | None, max_tokens: int
     ) -> dict[str, Any]:
         cfg: dict[str, Any] = {"maxTokens": max_tokens}
-        if self.supports_temperature_top_p:
-            cfg["temperature"] = temperature
-            cfg["topP"] = top_p
+        # Converse spells nucleus sampling "topP"; _sampling_params returns the
+        # OpenAI-style names, so translate rather than re-implementing the rule.
+        params = self._sampling_params(temperature, top_p)
+        if "temperature" in params:
+            cfg["temperature"] = params["temperature"]
+        if "top_p" in params:
+            cfg["topP"] = params["top_p"]
         return cfg
 
     @retry_provider_call
@@ -190,8 +194,8 @@ class Bedrock(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Bedrock via Converse."""
@@ -240,8 +244,8 @@ class Bedrock(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Bedrock via Converse Stream."""
@@ -293,8 +297,8 @@ class Bedrock(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Bedrock structured output via Converse tool calling.
@@ -367,8 +371,8 @@ class Bedrock(LLM):
         response_model: type[T],
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMJSONResponse:
         """Bedrock structured output via Converse forced tool use.

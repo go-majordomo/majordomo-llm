@@ -186,8 +186,8 @@ class Majordomo(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response routed through the Majordomo gateway."""
@@ -199,8 +199,8 @@ class Majordomo(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a routed response from the gateway."""
@@ -252,8 +252,8 @@ class Majordomo(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response routed through the Majordomo gateway."""
@@ -280,6 +280,8 @@ class Majordomo(LLM):
         # against the routed backend rather than this provider's (empty) rates.
         routed_provider = raw.headers.get(self.ROUTED_PROVIDER_HEADER)
         routed_model = raw.headers.get(self.ROUTED_MODEL_HEADER)
+        state.routed_provider = routed_provider
+        state.routed_model = routed_model
         state.price_override = (
             lambda i, o, c, w: self._price_routed(routed_provider, routed_model, i, o, c, w)
         )
@@ -310,8 +312,8 @@ class Majordomo(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Gateway-routed structured output via OpenAI-compatible JSON Schema."""
@@ -378,8 +380,8 @@ class Majordomo(LLM):
     def _request_kwargs(
         self,
         messages: list[Any],
-        temperature: float,
-        top_p: float,
+        temperature: float | None,
+        top_p: float | None,
         extra_headers: dict[str, str] | None,
     ) -> dict[str, Any]:
         """Assemble the shared chat-completion request keyword arguments."""
@@ -388,9 +390,7 @@ class Majordomo(LLM):
             "messages": messages,
             "extra_headers": extra_headers,
         }
-        if self.supports_temperature_top_p:
-            kwargs["temperature"] = temperature
-            kwargs["top_p"] = top_p
+        kwargs.update(self._sampling_params(temperature, top_p))
         return kwargs
 
 

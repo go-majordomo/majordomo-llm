@@ -140,8 +140,8 @@ class Gemini(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Gemini."""
@@ -153,16 +153,15 @@ class Gemini(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Internal method to get a response from Gemini."""
         start_time = time.time()
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
-            "temperature": temperature,
-            "top_p": top_p,
+            **self._sampling_params(temperature, top_p),
         }
         if extra_headers:
             config_kwargs["http_options"] = types.HttpOptions(headers=extra_headers)
@@ -205,16 +204,15 @@ class Gemini(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Gemini."""
         state = _StreamState()
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
-            "temperature": temperature,
-            "top_p": top_p,
+            **self._sampling_params(temperature, top_p),
         }
         if extra_headers:
             config_kwargs["http_options"] = types.HttpOptions(headers=extra_headers)
@@ -260,8 +258,8 @@ class Gemini(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Gemini-specific implementation using response schema for structured outputs."""
@@ -274,8 +272,7 @@ class Gemini(LLM):
             )
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
-            "temperature": temperature,
-            "top_p": top_p,
+            **self._sampling_params(temperature, top_p),
             "response_schema": _gemini_schema(response_schema),
             "response_mime_type": "application/json",
         }

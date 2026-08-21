@@ -29,7 +29,7 @@ uv run ruff check --fix src/majordomo_llm
 
 ## Architecture
 
-Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Cohere, Amazon Bedrock, Amazon Bedrock Mantle, Fireworks, Together) with cost tracking and structured output support.
+Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, Cohere, Amazon Bedrock, Amazon Bedrock Mantle, Fireworks, Together, Baseten, Nebius, DeepInfra, Moonshot, Novita) with cost tracking and structured output support.
 
 ### Core Components
 
@@ -45,6 +45,8 @@ Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, 
   - Uses its native async client (e.g., `anthropic.AsyncAnthropic`)
   - Implements `get_response()` with automatic retries via tenacity
   - Overrides `_get_structured_response()` for provider-specific structured output (Anthropic uses tool calling, others use response schemas)
+
+- **`providers/_openai_compatible.py`**: `OpenAICompatibleLLM` base class holding the shared chat-completions machinery (text, streaming, JSON schema) for providers that speak the OpenAI wire protocol. Subclasses (`Baseten`, `Nebius`, `DeepInfra`, `Moonshot`, `Novita`) set four class attributes — `PROVIDER_NAME`, `DISPLAY_NAME`, `DEFAULT_BASE_URL`, `API_KEY_ENV` — and override nothing. A model may set `supports_structured_outputs: false` in `llm_config.yaml` when its deployment accepts `json_schema` without enforcing it; the base then raises `StructuredOutputUnsupported` instead of returning prose intermittently. `Fireworks` and `Together` predate it and still carry their own copies.
 
 - **`logging/`**: Optional request logging subsystem (requires `[logging]` extra):
   - `LoggingLLM`: Wrapper that logs requests fire-and-forget (non-blocking)
@@ -76,3 +78,8 @@ Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, DeepSeek, 
 - `AWS_REGION` (or `AWS_DEFAULT_REGION`) - AWS region for Bedrock requests (e.g., `us-east-1`)
 - `FIREWORKS_API_KEY` - Fireworks AI API key
 - `TOGETHER_API_KEY` - Together AI API key
+- `BASETEN_API_KEY` - Baseten Model APIs key
+- `NEBIUS_API_KEY` - Nebius Token Factory API key
+- `DEEPINFRA_API_KEY` - DeepInfra API key
+- `MOONSHOT_API_KEY` - Moonshot AI (Kimi) API key
+- `NOVITA_API_KEY` - Novita AI API key

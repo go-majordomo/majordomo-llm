@@ -203,8 +203,8 @@ class Anthropic(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Get a plain text response from Anthropic."""
@@ -222,30 +222,17 @@ class Anthropic(LLM):
             )
 
         try:
-            if self.supports_temperature_top_p:
-                response_message = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=1024,
-                    system=system_message,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    tools=tools,
-                    tool_choice=ToolChoiceAutoParam(type="auto"),
-                    **self._config_create_kwargs(),
-                    extra_headers=extra_headers,
-                )
-            else:
-                response_message = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=1024,
-                    system=system_message,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice=ToolChoiceAutoParam(type="auto"),
-                    **self._config_create_kwargs(),
-                    extra_headers=extra_headers,
-                )
+            response_message = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                system=system_message,
+                messages=messages,
+                tools=tools,
+                tool_choice=ToolChoiceAutoParam(type="auto"),
+                **self._config_create_kwargs(),
+                extra_headers=extra_headers,
+                **self._sampling_params(temperature, top_p),
+            )
         except anthropic.APIError as e:
             raise ProviderError(
                 f"Anthropic API error: {e}",
@@ -284,8 +271,8 @@ class Anthropic(LLM):
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMStreamResponse:
         """Get a streaming text response from Anthropic."""
@@ -297,28 +284,16 @@ class Anthropic(LLM):
         system_message = _anthropic_system_prompt(system_prompt, self.use_prompt_caching)
 
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=1024,
-                    system=system_message,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    stream=True,
-                    **self._config_create_kwargs(),
-                    extra_headers=extra_headers,
-                )
-            else:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=1024,
-                    system=system_message,
-                    messages=messages,
-                    stream=True,
-                    **self._config_create_kwargs(),
-                    extra_headers=extra_headers,
-                )
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                system=system_message,
+                messages=messages,
+                stream=True,
+                **self._config_create_kwargs(),
+                extra_headers=extra_headers,
+                **self._sampling_params(temperature, top_p),
+            )
         except anthropic.APIError as e:
             raise ProviderError(
                 f"Anthropic API error: {e}",
@@ -355,8 +330,8 @@ class Anthropic(LLM):
         system_prompt: str | None = None,
         schema_name: str = "Response",
         schema_description: str | None = None,
-        temperature: float = 0.3,
-        top_p: float = 1.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Anthropic structured JSON output.
@@ -410,8 +385,8 @@ class Anthropic(LLM):
         user_prompt: str,
         response_schema: dict[str, Any],
         system_prompt: str | None,
-        temperature: float,
-        top_p: float,
+        temperature: float | None,
+        top_p: float | None,
         extra_headers: dict[str, str] | None,
     ) -> LLMResponse:
         """Native structured outputs via ``output_config.format`` (constrained decoding).
@@ -436,26 +411,15 @@ class Anthropic(LLM):
 
         start_time = time.time()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    system=system_message,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    **output_config,
-                    extra_headers=extra_headers,
-                )
-            else:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=8192,
-                    system=system_message,
-                    messages=messages,
-                    **output_config,
-                    extra_headers=extra_headers,
-                )
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=8192,
+                system=system_message,
+                messages=messages,
+                **output_config,
+                extra_headers=extra_headers,
+                **self._sampling_params(temperature, top_p),
+            )
         except anthropic.APIError as e:
             raise ProviderError(
                 f"Anthropic API error: {e}",
@@ -481,8 +445,8 @@ class Anthropic(LLM):
         system_prompt: str | None,
         schema_name: str,
         schema_description: str | None,
-        temperature: float,
-        top_p: float,
+        temperature: float | None,
+        top_p: float | None,
         extra_headers: dict[str, str] | None,
     ) -> LLMResponse:
         """Forced-tool fallback for models without native structured outputs.
@@ -513,30 +477,17 @@ class Anthropic(LLM):
 
         start_time = time.time()
         try:
-            if self.supports_temperature_top_p:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    system=system_message,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    tools=tools,
-                    tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
-                    **self._config_create_kwargs(),
-                    extra_headers=extra_headers,
-                )
-            else:
-                response = await self.client.messages.create(
-                    model=self.model,
-                    max_tokens=8192,
-                    system=system_message,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
-                    **self._config_create_kwargs(),
-                    extra_headers=extra_headers,
-                )
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=8192,
+                system=system_message,
+                messages=messages,
+                tools=tools,
+                tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                **self._config_create_kwargs(),
+                extra_headers=extra_headers,
+                **self._sampling_params(temperature, top_p),
+            )
         except anthropic.APIError as e:
             raise ProviderError(
                 f"Anthropic API error: {e}",

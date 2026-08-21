@@ -54,7 +54,9 @@ API keys come from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 ```python
 from majordomo_llm import get_supported_providers, get_supported_models
 
-get_supported_providers()          # openai, anthropic, gemini, deepseek, cohere, bedrock, fireworks, together, ...
+get_supported_providers()          # openai, anthropic, gemini, deepseek, cohere, bedrock,
+                                   # fireworks, together, baseten, nebius, deepinfra,
+                                   # moonshot, novita, ...
 get_supported_models("anthropic")  # ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6", ...]
 get_supported_models("openai")     # ["gpt-5", "gpt-5-mini", "gpt-4.1", "o3", "o4-mini", ...]
 ```

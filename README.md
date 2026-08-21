@@ -9,7 +9,7 @@ A unified Python interface for multiple LLM providers with automatic cost tracki
 
 ## Features
 
-- **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, and Cohere
+- **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, Cohere, Amazon Bedrock, and the open-weight inference platforms (Fireworks, Together, Baseten, Nebius, DeepInfra, Moonshot, Novita)
 - **Streaming** - Real-time token-by-token output via `get_response_stream()` with async iteration
 - **Cost Tracking** - Automatic calculation of input/output token costs per request
 - **Structured Outputs** - Native support for Pydantic models and raw JSON Schema dicts
@@ -166,6 +166,15 @@ export DEEPSEEK_API_KEY="sk-..."
 
 # Cohere
 export CO_API_KEY="..."
+
+# Open-weight inference platforms
+export FIREWORKS_API_KEY="..."
+export TOGETHER_API_KEY="..."
+export BASETEN_API_KEY="..."
+export NEBIUS_API_KEY="..."
+export DEEPINFRA_API_KEY="..."
+export MOONSHOT_API_KEY="..."
+export NOVITA_API_KEY="..."
 ```
 
 For local development, copy `.env.example` to `.env` and fill in your keys. Never commit `.env`.
@@ -195,6 +204,38 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 #### Cohere
 - `command-a-03-2025`, `command-r-plus-08-2024`
 - `command-r-08-2024`, `command-r7b-12-2024`
+
+#### Open-Weight Inference Platforms
+
+The same open-weight models are served by several platforms at different prices; pick a
+provider directly, or stack them behind an `LLMCascade` for failover.
+
+| Provider | Endpoint | Models |
+| --- | --- | --- |
+| `baseten` | `https://inference.baseten.co/v1` | `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.2`, `thinkingmachines/inkling` |
+| `nebius` | `https://api.tokenfactory.nebius.com/v1` | `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.1`, `zai-org/GLM-5.2` |
+| `deepinfra` | `https://api.deepinfra.com/v1/openai` | `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.1`, `zai-org/GLM-5.2`, `thinkingmachines/Inkling` |
+| `moonshot` | `https://api.moonshot.ai/v1` | `kimi-k2.6`, `kimi-k3` |
+| `novita` | `https://api.novita.ai/openai/v1` | `deepseek/deepseek-v4-pro`, `moonshotai/kimi-k2.6`, `moonshotai/kimi-k3`, `zai-org/glm-5.1`, `zai-org/glm-5.2` |
+
+Notes:
+
+- Model IDs are case-sensitive and passed through verbatim, and the spelling varies by
+  platform. Baseten writes Inkling lowercase (`thinkingmachines/inkling`) where Together
+  and DeepInfra use `thinkingmachines/Inkling`; Novita uses `deepseek/deepseek-v4-pro` where the
+  HF-style platforms use `deepseek-ai/DeepSeek-V4-Pro`.
+- Capability flags are per host, not per model, and were measured against the live
+  APIs rather than taken from vendor metadata. Some deployments pin their sampling
+  parameters (Moonshot's Kimi SKUs require `temperature=1`/`top_p=0.95`; Baseten's
+  Kimi-K3 requires `top_p=0.95`) and some reject or ignore strict `json_schema`.
+  Those models carry `supports_temperature_top_p: false` or
+  `supports_structured_outputs: false` in `llm_config.yaml`.
+- Nebius publishes no cached-token rate, so cached reads bill at `input_cost` there
+  (as with Fireworks and Together). Its rates come from `GET /v1/models?verbose=true`,
+  which is also the quickest way to re-check them.
+- Moonshot is the first-party Kimi vendor. The configured rates are the USD
+  international platform; mainland-China accounts bill separately in RMB via
+  `https://api.moonshot.cn/v1` (reachable by passing it as `base_url`).
 
 #### Majordomo (Optimal Routing)
 Canonical open-weight models routed to the optimal backend by the Majordomo gateway (see [Optimal Routing](#optimal-routing-majordomo-gateway)):
@@ -254,6 +295,23 @@ Get a response validated against a Pydantic model.
 #### `get_json_schema_response(user_prompt, response_schema, system_prompt=None, schema_name="Response", schema_description=None, temperature=0.3, top_p=1.0) -> LLMResponse`
 
 Get a response validated against a raw JSON Schema dict. `response.content` is canonical JSON.
+
+### Sampling Parameters
+
+`temperature` and `top_p` are optional and unset by default. They are sent only when
+you pass them, so each provider applies its own documented default:
+
+```python
+await llm.get_response("Hello")                    # neither parameter is sent
+await llm.get_response("Hello", temperature=0.2)   # only temperature is sent
+```
+
+Models whose deployment rejects these parameters never receive them — that covers
+every current OpenAI and Anthropic flagship, plus deployments that pin their values
+(Moonshot's Kimi SKUs require `temperature=1` / `top_p=0.95`). Those models set
+`supports_temperature_top_p: false` in `llm_config.yaml`. Passing a value to one of
+them logs a warning and the call proceeds without it, rather than failing — a cascade
+can legitimately mix models that do and do not accept sampling parameters.
 
 ### Response Objects
 

@@ -26,7 +26,7 @@ Gateway routing (--gateway) reads:
 
 import os
 
-from shared import gateway_kwargs, run_demo
+from shared import gateway_kwargs, run_demo, unavailable_provider_message
 
 from majordomo_llm import get_llm_instance
 
@@ -92,8 +92,7 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
     entries = PROVIDERS if provider is None else [e for e in PROVIDERS if e[0] == provider]
     if provider is not None and not entries:
-        known = ", ".join(sorted({p for p, _, _ in PROVIDERS}))
-        print(f"Unknown provider '{provider}'. Known providers: {known}")
+        print(unavailable_provider_message(provider, {p for p, _, _ in PROVIDERS}))
         return
 
     available = [(p, m) for p, m, env in entries if os.environ.get(env)]
@@ -117,4 +116,4 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    run_demo(main, description=__doc__)
+    run_demo(main, description=__doc__, providers={p for p, _, _ in PROVIDERS})
