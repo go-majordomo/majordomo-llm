@@ -17,7 +17,7 @@ Usage:
     >>> response = await logged_llm.get_response("Hello!")
 
 Note:
-    Requires optional dependencies: pip install majordomo-llm[logging]
+    Requires optional dependencies: pip install 'majordomo-llm[logging]'
 """
 
 from majordomo_llm.logging.adapters import (
