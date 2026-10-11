@@ -25,7 +25,6 @@ def mock_all_clients():
         "ANTHROPIC_API_KEY": "test-key",
         "OPENAI_API_KEY": "test-key",
         "GEMINI_API_KEY": "test-key",
-        "DEEPSEEK_API_KEY": "test-key",
         "CO_API_KEY": "test-key",
     }
     with (
@@ -33,7 +32,6 @@ def mock_all_clients():
         patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"),
         patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"),
         patch("majordomo_llm.providers.gemini.genai.Client"),
-        patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"),
         patch("majordomo_llm.providers.cohere.cohere.AsyncClientV2"),
     ):
         yield
@@ -47,7 +45,7 @@ class TestLLMCascadeInit:
         cascade = LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ]
         )
 
@@ -70,13 +68,13 @@ class TestLLMCascadeInit:
         cascade = LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ]
         )
 
         assert cascade.model == "claude-sonnet-5"
-        assert cascade.input_cost == 3.00
-        assert cascade.output_cost == 15.00
+        assert cascade.input_cost == 2.00
+        assert cascade.output_cost == 10.00
 
     def test_raises_error_for_empty_providers(self):
         """Should raise ValueError for empty providers list."""
@@ -95,8 +93,8 @@ class TestLLMCascadeGetResponse:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
-                ("gemini", "gemini-2.5-flash"),
+                ("openai", "gpt-6.1-sol"),
+                ("gemini", "gemini-3.8-flash"),
             ]
         )
 
@@ -221,7 +219,7 @@ class TestLLMCascadeGetJSONResponse:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ]
         )
 
@@ -302,7 +300,7 @@ class TestLLMCascadeStructuredResponse:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ]
         )
 
@@ -382,7 +380,7 @@ class TestLLMCascadeJSONSchemaResponse:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ]
         )
 
@@ -451,8 +449,8 @@ class TestLLMCascadeGetResponseStream:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
-                ("gemini", "gemini-2.5-flash"),
+                ("openai", "gpt-6.1-sol"),
+                ("gemini", "gemini-3.8-flash"),
             ]
         )
 
@@ -522,7 +520,7 @@ class TestLLMCascadeHooks:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ],
             hook_pipeline=pipeline,
         )
@@ -568,7 +566,7 @@ class TestLLMCascadeHooks:
         cascade = LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ],
             hook_pipeline=HookPipeline([Blocker()]),
         )
@@ -590,7 +588,7 @@ class TestLLMCascadeTruncation:
         return LLMCascade(
             [
                 ("anthropic", "claude-sonnet-5"),
-                ("openai", "gpt-4.1"),
+                ("openai", "gpt-6.1-sol"),
             ]
         )
 

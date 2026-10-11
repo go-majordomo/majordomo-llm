@@ -8,7 +8,9 @@ Two passes:
 
   Pass 2 — per-model smoke: additional representative models per provider,
            exercises text + stream only. Catches "is this model name routable
-           through Steward" bugs (the Opus 4.7 class of breakage).
+           through Steward" bugs (the Opus 4.7 class of breakage). With
+           --all-models it covers every model in llm_config.yaml instead, which
+           is how to find entries a vendor has stopped serving.
 
 Each cell is run twice: once direct, once through Steward. A diff between the two
 isolates Steward bugs from provider/library bugs.
@@ -19,9 +21,13 @@ Environment:
   OPENAI_API_KEY           Required if openai is in scope
   ANTHROPIC_API_KEY        Required if anthropic is in scope
   GEMINI_API_KEY           Required if gemini is in scope
-  DEEPSEEK_API_KEY         Required if deepseek is in scope
   CO_API_KEY               Required if cohere is in scope
-  AWS_BEARER_TOKEN_BEDROCK Bedrock auto-skips if unset
+  AWS_BEARER_TOKEN_BEDROCK Required if bedrock or bedrock_mantle is in scope
+  FIREWORKS_API_KEY, TOGETHER_API_KEY, BASETEN_API_KEY
+                           Required if that provider is in scope
+
+Without --provider, every provider whose key is set runs and the rest are
+skipped with one line each. A provider named with --provider must have its key.
 
 Usage:
   uv run python scripts/smoke_test_providers.py
@@ -29,6 +35,7 @@ Usage:
   uv run python scripts/smoke_test_providers.py --capability stream
   uv run python scripts/smoke_test_providers.py --capability image --skip-steward
   uv run python scripts/smoke_test_providers.py --skip-direct
+  uv run python scripts/smoke_test_providers.py --all-models --skip-steward
 """
 
 from __future__ import annotations
@@ -58,13 +65,18 @@ PROVIDER_API_KEY_ENV: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
     "cohere": "CO_API_KEY",
     "bedrock": "AWS_BEARER_TOKEN_BEDROCK",
     "bedrock_mantle": "AWS_BEARER_TOKEN_BEDROCK",
     "fireworks": "FIREWORKS_API_KEY",
     "together": "TOGETHER_API_KEY",
+    "baseten": "BASETEN_API_KEY",
 }
+
+# Gateway-routed pseudo-providers (mirrors factory._GATEWAY_PROVIDERS). They name
+# a canonical model and let Steward pick the backend, so there is no direct leg
+# and no vendor key to check; examples/routing_demo.py exercises them.
+GATEWAY_ROUTED_PROVIDERS: frozenset[str] = frozenset({"majordomo"})
 
 # Providers currently routable through Steward. Others run direct-only — their
 # steward-leg rows are suppressed so they don't pollute the matrix with known
@@ -83,12 +95,14 @@ STEWARD_SUPPORTED_PROVIDERS: set[str] = {
 # Per-provider additional models for Pass 2 (text + stream only).
 # Pass 1's canonical model is auto-picked as the first entry in llm_config.yaml.
 EXTRA_MODELS: dict[str, list[str]] = {
-    "openai": ["gpt-5.4", "gpt-5.4-mini"],
-    "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
-    "gemini": ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
-    # Reasoning profile aliases exercise the YAML ``model:`` override + the
-    # reasoning_effort/thinking plumbing introduced in v0.10.0.
-    "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro-reasoning", "deepseek-v4-pro-hard"],
+    "openai": ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra"],
+    "anthropic": [
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "claude-fable-5-1",
+        "claude-opus-4-8",
+    ],
+    "gemini": ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"],
     "cohere": ["command-r-plus-08-2024"],
     # Bedrock catalog is diverse — cover the model families that exercise each
     # distinct code path (forced toolChoice vs toolChoice-omitted Llama 4) so
@@ -107,15 +121,14 @@ EXTRA_MODELS: dict[str, list[str]] = {
         "anthropic.claude-haiku-4-5",
     ],
     "fireworks": [
-        "accounts/fireworks/models/deepseek-v4-pro",
-        "deepseek-v4-pro-reasoning",
-        "deepseek-v4-pro-hard",
-        "accounts/fireworks/models/kimi-k2p6",
+        "accounts/fireworks/models/kimi-k3",
+        "accounts/fireworks/models/inkling",
     ],
     "together": [
-        "deepseek-ai/DeepSeek-V4-Pro",
-        "deepseek-v4-pro-reasoning",
-        "deepseek-v4-pro-hard",
+        "deepseek-ai/DeepSeek-V4.1-Flash",
+        "zai-org/GLM-5.3",
+        "zai-org/GLM-5.3-Flash",
+        "moonshotai/Kimi-K3",
     ],
 }
 
@@ -233,6 +246,14 @@ CAPABILITIES: dict[str, CapabilityFn] = {
 def _canonical_model(provider: str) -> str:
     """First model in llm_config.yaml for the provider (= latest by convention)."""
     return cast(str, next(iter(LLM_CONFIG[provider]["models"])))
+
+
+def _pass2_models(provider: str, all_models: bool) -> list[str]:
+    """Models Pass 2 covers: the curated extras, or everything but the canonical."""
+    if not all_models:
+        return EXTRA_MODELS.get(provider, [])
+    canonical = _canonical_model(provider)
+    return [m for m in LLM_CONFIG[provider]["models"] if m != canonical]
 
 
 def _steward_default_headers(gateway_key: str, run_id: str) -> dict[str, str]:
@@ -366,6 +387,7 @@ async def _run_all(
     gateway_url: str,
     gateway_key: str | None,
     run_id: str,
+    all_models: bool = False,
 ) -> int:
     all_rows: list[Row] = []
 
@@ -398,14 +420,15 @@ async def _run_all(
     pass2_name = "per-model-smoke"
     print()
     print("=" * 90)
-    print(f"Pass 2 ({pass2_name}) — extra models × text + stream")
+    scope = "every configured model" if all_models else "extra models"
+    print(f"Pass 2 ({pass2_name}) — {scope} × text + stream")
     print("=" * 90)
     if not pass2_caps:
         print("  (skipped — neither text nor stream in --capability filter)")
     else:
         any_pass2 = False
         for provider in providers:
-            for model in EXTRA_MODELS.get(provider, []):
+            for model in _pass2_models(provider, all_models):
                 any_pass2 = True
                 for route_name, via_steward in routes_for(provider):
                     row = Row(provider=provider, model=model, route=route_name)
@@ -475,8 +498,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--provider", action="append", default=None,
-        choices=get_supported_providers(),
+        choices=[p for p in get_supported_providers() if p not in GATEWAY_ROUTED_PROVIDERS],
         help="Restrict to one provider (repeatable).",
+    )
+    parser.add_argument(
+        "--all-models", action="store_true",
+        help="Pass 2 covers every model in llm_config.yaml, not just the curated extras.",
     )
     parser.add_argument(
         "--capability", action="append", default=None,
@@ -507,7 +534,9 @@ def main() -> int:
         )
         return 2
 
-    requested_providers = args.provider or get_supported_providers()
+    requested_providers = args.provider or [
+        p for p in get_supported_providers() if p not in GATEWAY_ROUTED_PROVIDERS
+    ]
     capabilities = args.capability or list(CAPABILITIES.keys())
 
     runnable_providers: list[str] = []
@@ -516,15 +545,13 @@ def main() -> int:
         if os.environ.get(env_var):
             runnable_providers.append(provider)
             continue
-        if provider == "bedrock":
-            print(f"[skip] bedrock: {env_var} not set", file=sys.stderr)
-            continue
-        print(
-            f"ERROR: {env_var} not set (required for provider {provider!r}). "
-            f"Set the env var or pass --provider to exclude it.",
-            file=sys.stderr,
-        )
-        return 2
+        if args.provider:
+            print(
+                f"ERROR: {env_var} not set (required for provider {provider!r}).",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"[skip] {provider}: {env_var} not set", file=sys.stderr)
 
     if not runnable_providers:
         print("ERROR: no runnable providers.", file=sys.stderr)
@@ -554,6 +581,7 @@ def main() -> int:
 
     fail_count = asyncio.run(_run_all(
         runnable_providers, capabilities, routes, gateway_url, gateway_key, run_id,
+        all_models=args.all_models,
     ))
     return 1 if fail_count else 0
 

@@ -7,8 +7,8 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-5"),  # Primary
-    ("openai", "gpt-4.1"),                        # Fallback
-    ("gemini", "gemini-2.5-flash"),              # Last resort
+    ("openai", "gpt-6.1-sol"),                        # Fallback
+    ("gemini", "gemini-3.8-flash"),              # Last resort
 ])
 
 resp = await cascade.get_response("Hello!")
@@ -29,8 +29,8 @@ Route all cascade providers through a gateway:
 cascade = LLMCascade(
     [
         ("anthropic", "claude-sonnet-5"),
-        ("openai", "gpt-4.1"),
-        ("gemini", "gemini-2.5-flash"),
+        ("openai", "gpt-6.1-sol"),
+        ("gemini", "gemini-3.8-flash"),
     ],
     base_url="https://gateway.example.com",
     default_headers={"X-Majordomo-Key": "mdm_key_here"},

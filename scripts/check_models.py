@@ -34,7 +34,6 @@ PROVIDER_MAP: dict[str, str] = {
     "openai": "openai",
     "anthropic": "anthropic",
     "gemini": "gemini",
-    "deepseek": "deepseek",
     "cohere_chat": "cohere",
     "cohere": "cohere",
 }

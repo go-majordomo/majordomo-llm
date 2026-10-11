@@ -17,6 +17,7 @@ from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.factory import _ALIAS_REGISTRY
 from majordomo_llm.providers.anthropic import Anthropic
 from majordomo_llm.providers.gemini import Gemini
+from majordomo_llm.providers.openai import OpenAI
 
 
 @pytest.fixture
@@ -26,7 +27,6 @@ def mock_all_clients():
         "ANTHROPIC_API_KEY": "test-key",
         "OPENAI_API_KEY": "test-key",
         "GEMINI_API_KEY": "test-key",
-        "DEEPSEEK_API_KEY": "test-key",
         "CO_API_KEY": "test-key",
     }
     with (
@@ -34,7 +34,6 @@ def mock_all_clients():
         patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"),
         patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"),
         patch("majordomo_llm.providers.gemini.genai.Client"),
-        patch("majordomo_llm.providers.deepseek.openai.AsyncOpenAI"),
         patch("majordomo_llm.providers.cohere.cohere.AsyncClientV2"),
     ):
         yield
@@ -57,7 +56,7 @@ class TestGetLlmByAlias:
         llm = get_llm_by_alias("fast")
 
         assert isinstance(llm, Anthropic)
-        assert llm.model == "claude-haiku-4-5-20251001"
+        assert llm.model == "claude-haiku-5-5"
 
     def test_returns_cascade_for_cascade_alias(self, mock_all_clients):
         """Should return LLMCascade for a cascade alias."""
@@ -78,7 +77,7 @@ class TestGetLlmByAlias:
         """Should forward base_url to the created instance."""
         llm = get_llm_by_alias("cheap", base_url="https://proxy.example.com")
 
-        assert isinstance(llm, Gemini)
+        assert isinstance(llm, OpenAI)
         assert llm.base_url == "https://proxy.example.com"
 
     def test_passes_default_headers_to_single_provider(self, mock_all_clients):
@@ -91,11 +90,11 @@ class TestGetLlmByAlias:
 
     def test_resolves_programmatic_alias(self, mock_all_clients):
         """Should resolve aliases registered via register_alias."""
-        register_alias("custom", ("gemini", "gemini-2.5-flash"))
+        register_alias("custom", ("gemini", "gemini-3.8-flash"))
         llm = get_llm_by_alias("custom")
 
         assert isinstance(llm, Gemini)
-        assert llm.model == "gemini-2.5-flash"
+        assert llm.model == "gemini-3.8-flash"
 
     def test_available_aliases_listed_on_error(self):
         """Error message should list available aliases."""
@@ -130,7 +129,7 @@ class TestRegisterAlias:
         """Should register a cascade alias."""
         register_alias("myfallback", [
             ("anthropic", "claude-sonnet-5"),
-            ("openai", "gpt-4.1"),
+            ("openai", "gpt-6.1-sol"),
         ])
 
         llm = get_llm_by_alias("myfallback")
@@ -139,11 +138,11 @@ class TestRegisterAlias:
 
     def test_overrides_existing_alias(self, mock_all_clients):
         """Should replace an existing alias when re-registered."""
-        register_alias("fast", ("gemini", "gemini-2.5-flash"))
+        register_alias("fast", ("gemini", "gemini-3.8-flash"))
 
         llm = get_llm_by_alias("fast")
         assert isinstance(llm, Gemini)
-        assert llm.model == "gemini-2.5-flash"
+        assert llm.model == "gemini-3.8-flash"
 
     def test_raises_for_unknown_provider(self):
         """Should raise ConfigurationError for unknown provider."""
@@ -230,7 +229,7 @@ class TestGetAliases:
     def test_returns_copy_not_reference(self):
         """Modifying the returned dict should not affect the registry."""
         aliases = get_aliases()
-        aliases["injected"] = ("openai", "gpt-4.1")
+        aliases["injected"] = ("openai", "gpt-6.1-sol")
 
         assert "injected" not in get_aliases()
 
@@ -251,13 +250,19 @@ class TestAliasYamlLoading:
         assert "openai" in LLM_CONFIG
         assert "anthropic" in LLM_CONFIG
         assert "gemini" in LLM_CONFIG
-        assert "deepseek" in LLM_CONFIG
         assert "cohere" in LLM_CONFIG
+
+    def test_glm_5_3_cascades_across_the_three_open_weight_hosts(self):
+        assert get_aliases()["glm-5.3"] == [
+            ("baseten", "zai-org/GLM-5.3"),
+            ("fireworks", "accounts/fireworks/models/glm-5p3"),
+            ("together", "zai-org/GLM-5.3"),
+        ]
 
     def test_single_alias_target_is_tuple(self):
         """Single-provider aliases should be stored as tuples."""
         aliases = get_aliases()
-        assert aliases["fast"] == ("anthropic", "claude-haiku-4-5-20251001")
+        assert aliases["fast"] == ("anthropic", "claude-haiku-5-5")
 
     def test_cascade_alias_target_is_list_of_tuples(self):
         """Cascade aliases should be stored as lists of tuples."""
@@ -265,7 +270,7 @@ class TestAliasYamlLoading:
         target = aliases["resilient-sonnet"]
         assert isinstance(target, list)
         assert target == [
-            ("anthropic", "claude-sonnet-5"),
-            ("openai", "gpt-5.6-terra"),
-            ("gemini", "gemini-2.5-pro"),
+            ("anthropic", "claude-sonnet-5-5"),
+            ("openai", "gpt-6.1-sol"),
+            ("gemini", "gemini-3.8-flash"),
         ]

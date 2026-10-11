@@ -13,7 +13,6 @@ Prerequisites:
        - OPENAI_API_KEY
        - ANTHROPIC_API_KEY
        - GEMINI_API_KEY
-       - DEEPSEEK_API_KEY
        - CO_API_KEY
 
 Usage:
@@ -266,7 +265,7 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     if not available_providers:
         print("No API keys found. Please set at least one of:")
         print("  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,")
-        print("  DEEPSEEK_API_KEY, or CO_API_KEY")
+        print("  CO_API_KEY")
         return
 
     print(f"\nAvailable providers: {', '.join(p[0] for p in available_providers)}")

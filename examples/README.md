@@ -9,9 +9,9 @@ This directory contains example applications demonstrating majordomo-llm feature
 | `structured_response_demo.py` | `get_structured_json_response()` with Pydantic schemas | All in `shared.PROVIDERS` |
 | `open_weight_demo.py` | One model, every host that serves it — rate, cost, latency | Open-weight hosts |
 | `cascade_demo.py` | `LLMCascade` failover and the alias registry | Open-weight hosts |
-| `flagship_demo.py` | Frontier closed models vs open-weight alternatives | Anthropic, OpenAI, Gemini, DeepSeek, Bedrock, Fireworks, Together |
-| `prompt_caching_demo.py` | Explicit vs automatic prompt caching, cache-aware costs | Anthropic, Bedrock Mantle, OpenAI, Gemini, DeepSeek, open-weight hosts |
-| `web_search_demo.py` | Server-side web search and `tool_use_cost` | Anthropic, OpenAI, Gemini |
+| `flagship_demo.py` | Frontier closed models vs open-weight alternatives | Anthropic, OpenAI, Gemini, Bedrock Mantle, Fireworks, Together |
+| `prompt_caching_demo.py` | Explicit vs automatic prompt caching, cache-aware costs | Anthropic, Bedrock Mantle, OpenAI, Gemini, open-weight hosts |
+| `web_search_demo.py` | Server-side web search, as text and as structured output, and `tool_use_cost` | Anthropic, OpenAI, Gemini |
 | `image_demo.py` | Image understanding plus image generation | Anthropic/OpenAI/Gemini understanding; OpenAI/Gemini generation |
 | `routing_demo.py` | `majordomo` gateway provider — server-side optimal routing | Requires Majordomo Steward |
 
@@ -54,11 +54,6 @@ routes anything.
 and `structured_response_demo.py`. Add a `(provider, model, (env_var, ...))` entry
 there and all three demos pick it up.
 
-Note the Nebius entry deliberately runs `zai-org/GLM-5.2` rather than its cheaper
-`moonshotai/Kimi-K2.6`: that deployment is configured `supports_structured_outputs:
-false` (it accepts `json_schema` without enforcing it), so the structured demo would
-correctly raise `StructuredOutputUnsupported` and look like a failure.
-
 ## Open-Weight Cross-Host Comparison
 
 The `open_weight_demo.py` script is model-major rather than provider-major: it fixes
@@ -79,7 +74,7 @@ It prints three separate rankings, and the distinction matters:
 
 ```bash
 uv run python examples/open_weight_demo.py
-uv run python examples/open_weight_demo.py --provider deepinfra
+uv run python examples/open_weight_demo.py --provider baseten
 ```
 
 ## Cascade & Alias Demo
@@ -87,7 +82,7 @@ uv run python examples/open_weight_demo.py --provider deepinfra
 The `cascade_demo.py` script covers `LLMCascade` and the alias registry:
 
 - Listing every alias, single-model and cascade alike
-- Running a cascade alias (`glm-5.2`) end to end
+- Running a cascade alias (`glm-5.3`) end to end
 - Forced failover — the primary is given an invalid key, proving the fallback serves
 - `register_alias()` for a chain assembled at runtime
 
@@ -126,10 +121,9 @@ uv run python examples/routing_demo.py --gateway-url http://steward.internal:768
 
 ## Flagship Comparison
 
-The `flagship_demo.py` script runs frontier closed models (Claude Opus, GPT-5.6,
+The `flagship_demo.py` script runs frontier closed models (Claude Opus, GPT-6,
 Gemini, DeepSeek reasoner, Claude via Bedrock Mantle) alongside open-weight
-alternatives on Fireworks and Together, including the three DeepSeek-V4-Pro
-reasoning-effort profiles. Logs to its own SQLite database so it does not clobber
+alternatives on Fireworks and Together. Logs to its own SQLite database so it does not clobber
 `demo.py`'s.
 
 ### Run
@@ -142,7 +136,9 @@ uv run python examples/flagship_demo.py
 
 The `web_search_demo.py` script demonstrates `use_web_search=True` and per-provider
 tool wiring, plus `tool_use_cost` accounting for Anthropic and Gemini (OpenAI bills
-web search through output tokens).
+web search through output tokens). It asks the same grounded question twice: once
+for a text answer, and once through `get_structured_json_response()` for a validated
+Pydantic model, which is the combination each provider implements differently.
 
 Only Anthropic, OpenAI, Gemini, and Bedrock implement server-side web search. For
 every other provider — including all the open-weight hosts — `use_web_search=True`
@@ -197,14 +193,14 @@ uv run python examples/streaming_demo.py
 ```
 Demo 1: Streaming with real-time output
 
-  [anthropic/claude-3-5-haiku-latest]
+  [anthropic/claude-haiku-5-5]
   The sky appears blue because of Rayleigh scattering...
   Time to first chunk: 0.34s | Total: 1.12s
   Tokens: 28 in / 45 out | Cost: $0.000159
 
 Demo 2: Collect stream into LLMResponse
 
-  [anthropic/claude-3-5-haiku-latest]
+  [anthropic/claude-haiku-5-5]
   Content: The three primary colors are red, blue, and yellow.
   Tokens: 22 in / 15 out | Cost: $0.000041
 ```
@@ -214,23 +210,21 @@ Demo 2: Collect stream into LLMResponse
 The `prompt_caching_demo.py` script showcases both prompt caching flavors side
 by side, using a large reused system prompt as the cacheable prefix:
 
-- **Explicit caching** (Anthropic `claude-sonnet-5` / `claude-opus-4-8-fast`,
+- **Explicit caching** (Anthropic `claude-sonnet-5-5` / `claude-opus-5-5`,
   Bedrock Mantle) — this library controls the `cache_control` breakpoint, so it
   demonstrates cache **creation** (`cache_creation_tokens` > 0 on the cold
   call), cache **read** (`cached_tokens` > 0 on the warm call), and the
   `use_prompt_caching=False` toggle on `get_llm_instance` that suppresses the
   breakpoint entirely.
-- **Automatic caching** (OpenAI `gpt-5.6-luna`, Gemini `gemini-3.6-flash`,
-  DeepSeek `deepseek-v4-flash`, plus the open-weight hosts) — the provider caches
+- **Automatic caching** (OpenAI `gpt-6-luna`, Gemini `gemini-3.8-flash`, plus
+  the open-weight hosts) — the provider caches
   repeated prefixes server-side; there is no creation step or toggle, but
   `cached_tokens` populate on the warm call and bill at the discounted
   `cached_input_cost` rate.
 
-  The open-weight entries all run the **same** model (GLM-5.2) on purpose, because
-  the cache-read rate for identical weights varies by host: $0.14/M on Baseten and
-  DeepInfra, $0.26/M on Novita, and Nebius publishes no discounted cache tier at
-  all — its cached reads bill at the full input rate, which the demo calls out
-  explicitly rather than silently printing no savings.
+  The open-weight entries all run the **same** model (GLM-5.3) on purpose, because
+  the cache-read rate for identical weights varies by host: $0.14/M on Baseten,
+  $0.26/M on Fireworks and Together.
 
 Cache-aware cost accounting is shown for both: `input_cost` folds in cache
 read/write tokens (additive for the explicit providers, subset re-pricing for
@@ -246,23 +240,23 @@ uv run python examples/prompt_caching_demo.py --provider anthropic
 ### Example Output
 
 ```
-  [anthropic/claude-sonnet-5]  (explicit cache-control), system prompt ~24200 chars
+  [anthropic/claude-sonnet-5-5]  (explicit cache-control), system prompt ~24200 chars
 
     Flow A — reuse the same system prompt across two calls:
     Call 1 (cold — expect cache WRITE > 0):
       Tokens: 24 in / 18 out | cache write 3050 / cache read 0
-      Cost: $0.011... (input $0.011... + output $0.000...)
+      Cost: $0.007... (input $0.007... + output $0.000...)
     Call 2 (warm — expect cache READ > 0):
       Tokens: 26 in / 41 out | cache write 0 / cache read 3050
       Cost: $0.001... (input $0.000... + output $0.000...)
-      Cache hit: 3050 tokens read; prompt-side savings vs. uncached ~= $0.008235
+      Cache hit: 3050 tokens read; prompt-side savings vs. uncached ~= $0.005490
 
     Flow B — caching OFF (use_prompt_caching=False):
     Call (expect cache write/read == 0):
       Tokens: 3074 in / 18 out | cache write 0 / cache read 0
-      Cost: $0.009... (input $0.009... + output $0.000...)
+      Cost: $0.006... (input $0.006... + output $0.000...)
 
-  [openai/gpt-5.6-luna]  (automatic caching), system prompt ~24200 chars
+  [openai/gpt-6-luna]  (automatic caching), system prompt ~24200 chars
 
     Flow A — reuse the same system prompt across two calls:
     Call 1 (cold — expect cache read 0):
@@ -279,7 +273,7 @@ uv run python examples/prompt_caching_demo.py --provider anthropic
 The `demo.py` script showcases:
 
 - Running the same prompts across every provider in `shared.PROVIDERS` (OpenAI, Anthropic,
-  Gemini, DeepSeek, Cohere, Bedrock, and the open-weight hosts)
+  Gemini, Cohere, Bedrock, and the open-weight hosts)
 - Automatic request logging to SQLite with API key hash tracking
 - Local file storage for request/response bodies
 - Cost and performance comparison across providers
@@ -298,17 +292,12 @@ uv sync --all-extras
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GEMINI_API_KEY=...
-DEEPSEEK_API_KEY=sk-...
 CO_API_KEY=...
 
 # Open-weight inference hosts
 FIREWORKS_API_KEY=...
 TOGETHER_API_KEY=...
 BASETEN_API_KEY=...
-NEBIUS_API_KEY=...
-DEEPINFRA_API_KEY=...
-MOONSHOT_API_KEY=...
-NOVITA_API_KEY=...
 ```
 
 Or export them in your shell. You don't need all keys - the demo will skip providers without keys.

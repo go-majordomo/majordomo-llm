@@ -39,7 +39,7 @@ Use `.collect()` when you want streaming's lower latency but need the full respo
 
 ```python
 async def main():
-    llm = get_llm_instance("openai", "gpt-4.1")
+    llm = get_llm_instance("openai", "gpt-6.1-sol")
 
     stream = await llm.get_response_stream(
         user_prompt="What are the three primary colors?",
@@ -62,8 +62,8 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-5"),
-    ("openai", "gpt-4.1"),
-    ("gemini", "gemini-2.5-flash"),
+    ("openai", "gpt-6.1-sol"),
+    ("gemini", "gemini-3.8-flash"),
 ])
 
 stream = await cascade.get_response_stream("Hello!")
@@ -79,7 +79,7 @@ async for chunk in stream:
 from majordomo_llm import get_llm_instance
 from majordomo_llm.logging import LoggingLLM, SqliteAdapter, FileStorageAdapter
 
-llm = get_llm_instance("openai", "gpt-4.1")
+llm = get_llm_instance("openai", "gpt-6.1-sol")
 
 db = await SqliteAdapter.create("llm_logs.db")
 storage = await FileStorageAdapter.create("./request_logs")
@@ -94,5 +94,5 @@ async for chunk in stream:
 ## Notes
 
 - Streaming methods do **not** retry automatically. Handle retries at the application level if needed.
-- All providers are supported: OpenAI, Anthropic, Gemini, DeepSeek, and Cohere.
+- All providers are supported.
 - See the [Streaming concept guide](../concepts/streaming.md) for design details.

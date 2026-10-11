@@ -27,8 +27,8 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-5"),  # Primary: preferred provider
-    ("openai", "gpt-4.1"),                        # Secondary: reliable fallback
-    ("gemini", "gemini-2.5-flash"),              # Tertiary: cost-effective backup
+    ("openai", "gpt-6.1-sol"),                        # Secondary: reliable fallback
+    ("gemini", "gemini-3.8-flash"),              # Tertiary: cost-effective backup
 ])
 
 # Automatically tries providers in order until one succeeds

@@ -92,13 +92,12 @@ GATEWAY_ROUTED_PROVIDERS = frozenset({"majordomo"})
 # Each entry is (provider, model, (env_var, ...)) — all listed env vars must
 # be set for the entry to be selected.
 PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
-    # Native provider SDKs — the latest fast/small model from each, plus a
-    # low-effort Opus 4.8 profile so a frontier model appears in the sweep.
-    ("openai", "gpt-5.6-luna", ("OPENAI_API_KEY",)),
-    ("anthropic", "claude-haiku-4-5-20251001", ("ANTHROPIC_API_KEY",)),
-    ("anthropic", "claude-opus-4-8-fast", ("ANTHROPIC_API_KEY",)),
-    ("gemini", "gemini-3.6-flash", ("GEMINI_API_KEY",)),
-    ("deepseek", "deepseek-v4-flash", ("DEEPSEEK_API_KEY",)),
+    # Native provider SDKs — the latest fast/small model from each, plus
+    # Opus 5.5 so a frontier model appears in the sweep.
+    ("openai", "gpt-6-luna", ("OPENAI_API_KEY",)),
+    ("anthropic", "claude-haiku-5-5", ("ANTHROPIC_API_KEY",)),
+    ("anthropic", "claude-opus-5-5", ("ANTHROPIC_API_KEY",)),
+    ("gemini", "gemini-3.8-flash", ("GEMINI_API_KEY",)),
     ("cohere", "command-a-03-2025", ("CO_API_KEY",)),
     # Amazon Bedrock Mantle — Claude via AWS-native Anthropic Messages API.
     (
@@ -114,18 +113,10 @@ PROVIDERS: list[tuple[str, str, tuple[str, ...]]] = [
         ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"),
     ),
     ("bedrock", "deepseek.v3.2", ("AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION")),
-    # OpenAI-compatible serverless hosts — using the cheapest small model from each.
-    ("fireworks", "accounts/fireworks/models/kimi-k2p6", ("FIREWORKS_API_KEY",)),
-    ("together", "deepseek-ai/DeepSeek-V4-Pro", ("TOGETHER_API_KEY",)),
-    ("baseten", "moonshotai/Kimi-K2.6", ("BASETEN_API_KEY",)),
-    ("deepinfra", "zai-org/GLM-5.2", ("DEEPINFRA_API_KEY",)),
-    ("novita", "moonshotai/kimi-k2.6", ("NOVITA_API_KEY",)),
-    ("moonshot", "kimi-k2.6", ("MOONSHOT_API_KEY",)),
-    # Nebius deliberately runs GLM-5.2 rather than its cheaper Kimi-K2.6: that
-    # deployment is configured supports_structured_outputs: false (it accepts
-    # json_schema without enforcing it), so structured_response_demo would
-    # correctly raise StructuredOutputUnsupported and read as a broken demo.
-    ("nebius", "zai-org/GLM-5.2", ("NEBIUS_API_KEY",)),
+    # Open-weight serverless hosts.
+    ("fireworks", "accounts/fireworks/models/glm-5p3", ("FIREWORKS_API_KEY",)),
+    ("together", "deepseek-ai/DeepSeek-V4-Pro-0813", ("TOGETHER_API_KEY",)),
+    ("baseten", "zai-org/GLM-5.3", ("BASETEN_API_KEY",)),
 ]
 
 # Base directory for examples

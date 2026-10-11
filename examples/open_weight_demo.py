@@ -6,9 +6,9 @@ model-major. It fixes the *weights* and fans out across hosts, which is the
 question this library exists to answer — for identical output quality, what does
 each host charge and how fast is it?
 
-The spread is real. GLM-5.2 input runs $0.75/M on DeepInfra and $1.40/M on four
-other hosts; cached reads run $0.14/M on Baseten and $0.26/M on Novita, while
-Nebius publishes no cache tier at all. Same weights, ~2x price range.
+The spread is real. GLM-5.3 input is $1.40/M on all three hosts, but cached reads
+run $0.14/M on Baseten against $0.26/M on Fireworks and Together; Kimi K3 is
+$2.70/$13.50 on Together and $3/$15 on the other two.
 
 This script demonstrates:
 
@@ -20,8 +20,7 @@ This script demonstrates:
 Prerequisites:
     1. Install dependencies: uv sync --all-extras
     2. Set one or more of:
-       - FIREWORKS_API_KEY, TOGETHER_API_KEY, BASETEN_API_KEY,
-         DEEPINFRA_API_KEY, NOVITA_API_KEY, NEBIUS_API_KEY, MOONSHOT_API_KEY
+       - FIREWORKS_API_KEY, TOGETHER_API_KEY, BASETEN_API_KEY
 
     Hosts without a key are skipped, so a single key still produces useful output.
 
@@ -47,19 +46,16 @@ REFERENCE_INPUT_TOKENS = 10_000
 REFERENCE_OUTPUT_TOKENS = 1_000
 
 # Canonical model -> the hosts that serve it, with each host's own model ID.
-# Model IDs are NOT interchangeable across hosts: casing and org prefixes differ
-# (Novita uses deepseek/deepseek-v4-pro where the HF-style hosts use
-# deepseek-ai/DeepSeek-V4-Pro, and Baseten lowercases thinkingmachines/inkling).
+# Model IDs are NOT interchangeable across hosts: Fireworks uses its own
+# accounts/fireworks/models/<slug> form (glm-5p3) where Together and Baseten use
+# the HF-style zai-org/GLM-5.3.
 MODEL_FAMILIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] = [
     (
-        "GLM-5.2",
+        "GLM-5.3",
         [
-            ("fireworks", "accounts/fireworks/models/glm-5p2", ("FIREWORKS_API_KEY",)),
-            ("together", "zai-org/GLM-5.2", ("TOGETHER_API_KEY",)),
-            ("baseten", "zai-org/GLM-5.2", ("BASETEN_API_KEY",)),
-            ("deepinfra", "zai-org/GLM-5.2", ("DEEPINFRA_API_KEY",)),
-            ("novita", "zai-org/glm-5.2", ("NOVITA_API_KEY",)),
-            ("nebius", "zai-org/GLM-5.2", ("NEBIUS_API_KEY",)),
+            ("fireworks", "accounts/fireworks/models/glm-5p3", ("FIREWORKS_API_KEY",)),
+            ("together", "zai-org/GLM-5.3", ("TOGETHER_API_KEY",)),
+            ("baseten", "zai-org/GLM-5.3", ("BASETEN_API_KEY",)),
         ],
     ),
     (
@@ -68,12 +64,6 @@ MODEL_FAMILIES: list[tuple[str, list[tuple[str, str, tuple[str, ...]]]]] = [
             ("fireworks", "accounts/fireworks/models/kimi-k3", ("FIREWORKS_API_KEY",)),
             ("together", "moonshotai/Kimi-K3", ("TOGETHER_API_KEY",)),
             ("baseten", "moonshotai/Kimi-K3", ("BASETEN_API_KEY",)),
-            ("deepinfra", "moonshotai/Kimi-K3", ("DEEPINFRA_API_KEY",)),
-            ("novita", "moonshotai/kimi-k3", ("NOVITA_API_KEY",)),
-            ("nebius", "moonshotai/Kimi-K3", ("NEBIUS_API_KEY",)),
-            # Moonshot is the first-party vendor for Kimi, so it belongs in this
-            # comparison as the reference rate the resellers price against.
-            ("moonshot", "kimi-k3", ("MOONSHOT_API_KEY",)),
         ],
     ),
 ]
@@ -225,7 +215,6 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     if not ran_anything:
         print("\nNo usable credentials found. Set one or more of:")
         print("  FIREWORKS_API_KEY | TOGETHER_API_KEY | BASETEN_API_KEY")
-        print("  DEEPINFRA_API_KEY | NOVITA_API_KEY | NEBIUS_API_KEY | MOONSHOT_API_KEY")
         return
 
     print("\n" + "=" * 100)

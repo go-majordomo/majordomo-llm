@@ -65,6 +65,7 @@ class BedrockMantle(Anthropic):
         supports_structured_outputs: bool = False,
         use_prompt_caching: bool = True,
         *,
+        supports_forced_tool_choice: bool = True,
         cached_input_cost: float | None = None,
         cache_write_cost: float | None = None,
         api_key: str | None = None,
@@ -85,6 +86,8 @@ class BedrockMantle(Anthropic):
             use_web_search: Forwarded to the Anthropic provider.
             use_prompt_caching: Forwarded to the Anthropic provider; controls the
                 ephemeral ``cache_control`` breakpoint on the system prompt.
+            supports_forced_tool_choice: Forwarded to the Anthropic provider;
+                ``False`` for models that reject a forced ``tool_choice``.
             cached_input_cost: Cost per million cache-read tokens in USD.
             cache_write_cost: Cost per million cache-creation tokens in USD.
             api_key: Optional Bedrock bearer token. Defaults to
@@ -151,6 +154,7 @@ class BedrockMantle(Anthropic):
             supports_temperature_top_p=supports_temperature_top_p,
             use_web_search=use_web_search,
             supports_structured_outputs=supports_structured_outputs,
+            supports_forced_tool_choice=supports_forced_tool_choice,
             api_key=resolved_api_key,
             api_key_alias=api_key_alias,
             base_url=resolved_base_url,

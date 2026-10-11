@@ -40,7 +40,7 @@ response.routed_model      # e.g. "accounts/fireworks/models/glm-5p2"
 response.total_cost        # priced from the routed backend's published rates
 ```
 
-Canonical models: `deepseek-v4-pro`, `kimi-k2.6`, `kimi-k3`, `glm-5.1`, `glm-5.2`, `inkling` (see `get_supported_models("majordomo")`).
+Canonical models: `glm-5.3`, `glm-5.2`, `kimi-k3`, `kimi-k2.6`, `glm-5.1`, `inkling` (see `get_supported_models("majordomo")`).
 
 How it differs from the sections below:
 
@@ -56,7 +56,7 @@ Add headers to individual calls with `extra_headers`. These are merged with `def
 
 ```python
 llm = get_llm_instance(
-    "openai", "gpt-4.1",
+    "openai", "gpt-6.1-sol",
     base_url="https://gateway.example.com",
     default_headers={
         "X-Majordomo-Key": "mdm_key_here",
@@ -102,8 +102,8 @@ from majordomo_llm import LLMCascade
 cascade = LLMCascade(
     [
         ("anthropic", "claude-sonnet-5"),
-        ("openai", "gpt-4.1"),
-        ("gemini", "gemini-2.5-flash"),
+        ("openai", "gpt-6.1-sol"),
+        ("gemini", "gemini-3.8-flash"),
     ],
     base_url="https://gateway.example.com",
     default_headers={"X-Majordomo-Key": "mdm_key_here"},
@@ -176,5 +176,4 @@ response = await llm.get_structured_json_response(
 
 - `base_url` and `default_headers` are optional on both `get_llm_instance()` and `LLMCascade`. When omitted, requests go directly to the provider.
 - `extra_headers` is optional on every API method (`get_response`, `get_response_stream`, `get_json_response`, `get_structured_json_response`, `get_json_schema_response`). When omitted, only `default_headers` are sent.
-- For DeepSeek, a custom `base_url` overrides the default `https://api.deepseek.com` endpoint.
 - All providers are supported. The header merging logic is handled internally per SDK.

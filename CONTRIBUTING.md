@@ -13,7 +13,7 @@ Thank you for your interest in contributing to majordomo-llm! This document prov
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/superset-studio/majordomo-llm.git
+   git clone https://github.com/go-majordomo/majordomo-llm.git
    cd majordomo-llm
    ```
 

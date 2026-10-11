@@ -2,8 +2,8 @@
 """Demo script comparing two flagship models side-by-side with logging.
 
 This script demonstrates:
-- Running the same prompts through Anthropic's claude-opus-4-8 (medium-effort
-  profile) and OpenAI's gpt-5.6-sol
+- Running the same prompts through Anthropic's claude-opus-5-5 (which runs at
+  medium effort by default) and OpenAI's gpt-6-astra
 - Logging all requests to SQLite with local file storage
 - Comparing responses, costs, and performance between the two flagships
 
@@ -44,31 +44,20 @@ from majordomo_llm.logging import FileStorageAdapter, LoggingLLM, SqliteAdapter
 # against the same prompts.
 FLAGSHIPS: list[tuple[str, str, str]] = [
     # Closed-source frontier flagships, one per major vendor.
-    ("anthropic", "claude-opus-4-8-medium", "ANTHROPIC_API_KEY"),
-    ("openai", "gpt-5.6-sol", "OPENAI_API_KEY"),
-    ("gemini", "gemini-3.6-flash", "GEMINI_API_KEY"),
-    # Native DeepSeek flagship (the reasoning model from api.deepseek.com).
-    ("deepseek", "deepseek-reasoner", "DEEPSEEK_API_KEY"),
-    # Anthropic Claude via Bedrock Mantle — Opus 4.8 over AWS-native transport,
-    # a transport-level comparison against the direct anthropic entry above.
+    ("anthropic", "claude-opus-5-5", "ANTHROPIC_API_KEY"),
+    ("openai", "gpt-6-astra", "OPENAI_API_KEY"),
+    ("gemini", "gemini-3.8-flash", "GEMINI_API_KEY"),
+    # Anthropic Claude via Bedrock Mantle — Opus 4.8 over AWS-native transport.
+    # Opus 5.5 is not registered under bedrock_mantle yet; see
+    # scripts/check_bedrock_mantle_models.py.
     ("bedrock_mantle", "anthropic.claude-opus-4-8", "AWS_BEARER_TOKEN_BEDROCK"),
-    # Open-weight alternatives via Fireworks. Same upstream model, three
-    # reasoning profiles — see llm_config.yaml for the effort settings.
-    (
-        "fireworks",
-        "accounts/fireworks/models/deepseek-v4-pro",
-        "FIREWORKS_API_KEY",
-    ),
-    ("fireworks", "deepseek-v4-pro-reasoning", "FIREWORKS_API_KEY"),
-    ("fireworks", "deepseek-v4-pro-hard", "FIREWORKS_API_KEY"),
-    ("fireworks", "accounts/fireworks/models/glm-5p2", "FIREWORKS_API_KEY"),
+    # Open-weight alternatives via Fireworks.
+    ("fireworks", "accounts/fireworks/models/glm-5p3", "FIREWORKS_API_KEY"),
     ("fireworks", "accounts/fireworks/models/kimi-k3", "FIREWORKS_API_KEY"),
     ("fireworks", "accounts/fireworks/models/inkling", "FIREWORKS_API_KEY"),
-    # Same model, same three profiles, hosted by Together — lets you compare
-    # vendor-level price/latency/quality variation for an identical model.
-    ("together", "deepseek-ai/DeepSeek-V4-Pro", "TOGETHER_API_KEY"),
-    ("together", "deepseek-v4-pro-reasoning", "TOGETHER_API_KEY"),
-    ("together", "deepseek-v4-pro-hard", "TOGETHER_API_KEY"),
+    # Open-weight alternatives via Together.
+    ("together", "deepseek-ai/DeepSeek-V4-Pro-0813", "TOGETHER_API_KEY"),
+    ("together", "zai-org/GLM-5.3", "TOGETHER_API_KEY"),
     ("together", "zai-org/GLM-5.2", "TOGETHER_API_KEY"),
     ("together", "moonshotai/Kimi-K3", "TOGETHER_API_KEY"),
     ("together", "thinkingmachines/Inkling", "TOGETHER_API_KEY"),
@@ -164,7 +153,7 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
         provider: When set, run only this provider's entries.
     """
     print("=" * 80)
-    print("majordomo-llm Demo: Flagship Comparison (claude-opus-4-8 vs gpt-5.6-sol)")
+    print("majordomo-llm Demo: Flagship Comparison (claude-opus-5-5 vs gpt-6-astra)")
     print("=" * 80)
     print()
 

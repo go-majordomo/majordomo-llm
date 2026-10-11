@@ -52,7 +52,7 @@ Each provider SDK handles headers differently. majordomo-llm maps `base_url`, `d
 |----------|-----------------|-------------------|
 | OpenAI | `default_headers=` on `AsyncOpenAI` constructor | `extra_headers=` on API calls |
 | Anthropic | `default_headers=` on `AsyncAnthropic` constructor | `extra_headers=` on API calls |
-| DeepSeek | `default_headers=` on `AsyncOpenAI` constructor | `extra_headers=` on API calls |
+| Fireworks / Together / Baseten | `default_headers=` on `AsyncOpenAI` constructor | `extra_headers=` on API calls |
 | Gemini | `HttpOptions(headers=)` on `genai.Client` | `HttpOptions(headers=)` in `GenerateContentConfig` |
 | Cohere | Merged into `request_options` per call | `request_options` with `additional_headers` |
 

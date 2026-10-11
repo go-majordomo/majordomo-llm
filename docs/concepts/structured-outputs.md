@@ -38,8 +38,8 @@ class ExtractedData(BaseModel):
 
 # Same code works with any provider
 llm = get_llm_instance("anthropic", "claude-sonnet-5")
-# llm = get_llm_instance("openai", "gpt-4.1")
-# llm = get_llm_instance("gemini", "gemini-2.5-flash")
+# llm = get_llm_instance("openai", "gpt-6.1-sol")
+# llm = get_llm_instance("gemini", "gemini-3.8-flash")
 
 response = await llm.get_structured_json_response(
     response_model=ExtractedData,
@@ -81,7 +81,7 @@ data = json.loads(response.content)
 ## Under the Hood
 
 1. Pydantic models are converted to JSON schema via `model_json_schema()` when needed
-2. Raw schemas are translated to provider-specific format (tool definition for Anthropic, response format for OpenAI/Cohere/DeepSeek, response schema for Gemini)
+2. Raw schemas are translated to provider-specific format (tool definition for Anthropic, response format for OpenAI/Cohere and the open-weight hosts, response schema for Gemini)
 3. Provider responses are parsed, lightly repaired when possible, and validated against the JSON schema
 4. Raw-schema responses are serialized canonically; Pydantic responses are validated into typed objects
 

@@ -235,33 +235,6 @@ def mock_gemini_stream_chunks():
 
 
 @pytest.fixture
-def mock_deepseek_stream_chunks():
-    """Mock DeepSeek streaming chunks."""
-    chunk1 = MagicMock()
-    chunk1.choices = [MagicMock()]
-    chunk1.choices[0].delta.content = "Hello"
-    chunk1.usage = None
-
-    chunk2 = MagicMock()
-    chunk2.choices = [MagicMock()]
-    chunk2.choices[0].delta.content = " world"
-    chunk2.usage = None
-
-    final_chunk = MagicMock()
-    final_chunk.choices = []
-    final_chunk.usage.prompt_tokens = 20
-    final_chunk.usage.completion_tokens = 8
-    final_chunk.usage.prompt_tokens_details = None
-
-    async def stream():
-        yield chunk1
-        yield chunk2
-        yield final_chunk
-
-    return stream()
-
-
-@pytest.fixture
 def mock_fireworks_stream_chunks():
     """Mock Fireworks streaming chunks."""
     chunk1 = MagicMock()

@@ -35,7 +35,7 @@ class Gemini(LLM):
 
     Example:
         >>> llm = Gemini(
-        ...     model="gemini-2.5-flash",
+        ...     model="gemini-3.8-flash",
         ...     input_cost=0.30,
         ...     output_cost=2.50,
         ... )
@@ -61,7 +61,7 @@ class Gemini(LLM):
         """Initialize the Gemini provider.
 
         Args:
-            model: The Gemini model identifier (e.g., "gemini-2.5-flash").
+            model: The Gemini model identifier (e.g., "gemini-3.8-flash").
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether the model supports temperature/top_p.

@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-11
+
+A registry refresh. Every model left in `llm_config.yaml` was called live on 2026-10-10 or 2026-10-11, and everything that no longer answered, or that belonged to an older generation, is gone.
+
+### Breaking changes
+
+- **Five providers removed: `deepseek`, `moonshot`, `nebius`, `deepinfra` and `novita`.** Their classes (`DeepSeek`, `Moonshot`, `Nebius`, `DeepInfra`, `Novita`), config blocks and environment variables are gone. `get_llm_instance()` raises `ConfigurationError` for these provider names and the classes are no longer importable. The open-weight hosts are now Fireworks, Together and Baseten; Bedrock and Cohere are unchanged
+- **Old generations removed, although their vendors still serve them:** GPT-5.4 (`gpt-5.4`, `-mini`, `-nano`, `-pro`), GPT-4.1 (`gpt-4.1`, `-mini`, `-nano`), the o-series (`o3`, `o4-mini`), and Claude 4.5–4.7 (`claude-opus-4-5-20251101`, `claude-haiku-4-5-20251001`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-7`). Requesting one raises `ConfigurationError`
+- **`deprecated_models` pruned to four entries.** It now holds only models a vendor has withdrawn and named a successor for: `claude-sonnet-4-5-20250929` -> `claude-sonnet-5-5`, and `gemini-2.5-pro` / `-flash` / `-flash-lite` -> `gemini-3.1-pro-preview` / `gemini-3.8-flash` / `gemini-3.5-flash-lite`. Every other mapping is gone (`gpt-4o`, `gpt-4o-mini`, `gpt-5-pro`, `o1`, `o3-mini`, the Claude 3 and Claude 4 names, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-3-pro-preview`, `gemini-3.1-flash-lite-preview`); those names now raise `ConfigurationError` instead of resolving to a replacement
+- **Open-weight models that their hosts stopped serving are removed.** Each returned an error on a live call:
+  - Fireworks (HTTP 404): `deepseek-v4-pro` and its `-reasoning` / `-hard` profiles, `kimi-k2p6`, `glm-5p1`, `glm-5p2`
+  - Together (HTTP 400, no longer serverless): `deepseek-ai/DeepSeek-V4-Pro` and its two profiles, `moonshotai/Kimi-K2.6`, `Qwen/Qwen3-235B-A22B-fp8-tput`, `zai-org/GLM-5.1`, `zai-org/GLM-5`
+  - Baseten (HTTP 410): `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `thinkingmachines/inkling`
+- **Aliases removed:** `deepseek-v4-pro`, `deepseek-v4-pro-reasoning`, `deepseek-v4-pro-hard`, `kimi-k2.6` and `glm-5.1`. None has two live hosts left to cascade between
+- **Aliases repointed to the current generation.** `fast` -> `claude-haiku-5-5`, `thinking` -> `claude-sonnet-5-5`, `smart` -> `claude-opus-5-5`, `openai-smart` -> `gpt-6-astra`, `openai-balanced` -> `gpt-6.1-sol`, `openai-fast` -> `gpt-6-luna`. `resilient-sonnet` is now `claude-sonnet-5-5` -> `gpt-6.1-sol` -> `gemini-3.8-flash`, and `glm-5.2` is Baseten -> Together
+  - `cheap` changes provider, from `gemini-2.5-flash-lite` to OpenAI `gpt-6-luna`. Callers of `cheap` need `OPENAI_API_KEY` instead of `GEMINI_API_KEY`
+  - `openai-smart` rises from $4/$20 to $10/$50 per million tokens
+- **Open-weight models now send `reasoning_effort: low` by default** where that was measured to lower reasoning (see Changed). Output for those models is shorter and cheaper than in 0.23.0; pass `reasoning_effort="default"` to `get_llm_instance()` for the previous behaviour
+- **Claude responses made of several text blocks are concatenated, not joined with a newline** (see Fixed)
+- **`deepseek-v4-pro` removed from the `majordomo` gateway provider.** Steward no longer routes it and answers HTTP 400
+
+### Added
+
+- **Current-generation models.** Anthropic: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1`. OpenAI: `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`. Gemini: `gemini-3.8-flash`, `gemini-3.7-flash`. Rates are from each vendor's pricing page
+  - `claude-opus-5-5` defaults to `medium` effort where `claude-opus-5` defaults to `high`. The library sends no effort for Anthropic models unless a config entry sets one, so the vendor default applies
+  - `claude-haiku-5-5` is left without `supports_web_search` until that is confirmed live
+- **Open-weight models.** Fireworks: `glm-5p3`, `qwen3p8-2p4t-a95b`, `qwen3p8-max`. Together: `DeepSeek-V4-Pro-0813`, `DeepSeek-V4.1-Flash`, `GLM-5.3`, `GLM-5.3-Flash`, `Qwen3.8-2.4T-A95B`, `Qwen3.7-Max`, `Qwen3.7-Plus`, `Qwen3.8-Flash`. Baseten: `GLM-5.3`, `GLM-5.3-Flash`, `DeepSeek-V4-Pro-0813`, `DeepSeek-V4.1-Flash`
+  - Together's `Qwen3.7-Max`, `Qwen3.7-Plus` and `Qwen3.8-Flash` are streaming-only, like the existing `Qwen3.6-Plus`: `get_response()` and the JSON paths return HTTP 400, and only `get_response_stream()` works
+  - Baseten's `DeepSeek-V4-Pro-0813` inherits `supports_structured_outputs: false` from its predecessor on that host
+- **`glm-5.3` alias,** a cascade across the three open-weight hosts (Baseten -> Fireworks -> Together), and `glm-5.3` as a gateway-routed model on the `majordomo` provider
+- **`reasoning_effort` and `thinking` overrides on `get_llm_instance()`,** for `anthropic`, `fireworks`, `together` and `baseten`. Passing either replaces both of the model's configured values, so a configured effort is never sent alongside a caller's thinking mode. `reasoning_effort="default"` sends no reasoning option and leaves the host's default in force. Other providers raise `ConfigurationError`. The effort values the open-weight providers accept widen to include `none`, `xhigh` and `max`; values are passed to the host unchanged
+- **`supports_forced_tool_choice` for Anthropic and Bedrock Mantle.** Opus 5.5, Sonnet 5.5 and Fable 5.1 return a 400 for `tool_choice` of type `tool` or `any`. Their config entries set the flag to `false`; it defaults to `true`. With web search enabled, the structured-output path previously forced the schema tool on its final turn whenever the model stopped searching without calling it. On a model with the flag off, that turn now sends `tool_choice: auto` with an explicit instruction to call the tool, and a prose reply raises `ResponseParsingError`. A model that sets the flag to `false` must also set `supports_structured_outputs: true`; the constructor raises `ValueError` otherwise. This path is covered by mocked tests only
+- **`docs/concepts/reasoning.md`,** a concept page covering why reasoning needs a decision, the per-model defaults, the override, and a measured table of what each value does on each host
+- **Three scripts:**
+  - `scripts/check_reasoning.py` sends one prompt to every registered Fireworks, Together and Baseten model under seven reasoning settings and prints output tokens, reasoning tokens and latency, marking the row `llm_config.yaml` currently sends
+  - `scripts/smoke_test_providers.py --all-models` runs the text and streaming pass against every model in `llm_config.yaml`, which is how to find entries a vendor has stopped serving
+  - `scripts/check_bedrock_mantle_models.py` asks Bedrock Mantle which Claude models it serves that `llm_config.yaml` lacks, and probes each for forced `tool_choice`
+
+### Changed
+
+- **Open-weight models send `reasoning_effort: low` wherever it was measured to lower reasoning.** These hosts run most models at their top reasoning tier when no option is sent and bill the reasoning as output: a one-word classification cost 114 output tokens on Together's GLM 5.3 with nothing set, and 4 with `low`. Pinned: on Fireworks, `glm-5p3`, `kimi-k3`, `qwen3p8-2p4t-a95b`, `qwen3p8-max`; on Together, `GLM-5.3`, `GLM-5.3-Flash`, `Kimi-K3`, `Qwen3.8-2.4T-A95B`; on Baseten, `GLM-5.3`, `GLM-5.3-Flash`, `Kimi-K3`. The rest send nothing, because effort has no reliable effect on them or, on Baseten's `GLM-5.2` where reasoning is opt-in, would switch it on. The measurements are recorded on each host's config block
+- The demos under `examples/` use the current generation and the three remaining open-weight hosts. `web_search_demo.py` gains a second step that combines web search with structured output
+
+### Fixed
+
+- **Claude answers with web search had line breaks in the middle of sentences.** With web search or citations on, Anthropic returns an answer as many small text blocks split at citation boundaries, and the provider joined them with a newline. They are now concatenated, on the text, image, JSON and structured paths. Line breaks the model wrote inside a block are unchanged
+- **Stale rates.** `claude-sonnet-5` $3/$15 -> $2/$10 (Anthropic made the introductory price permanent). `gpt-5.6-sol` $5/$30 -> $4/$20, `gpt-5.6-terra` $2.50/$15 -> $2/$12, `gpt-5.6-luna` $1/$6 -> $0.20/$1.20. `gemini-3.6-flash` $1.50/$7.50 -> $0.75/$3.75, a promotional rate that ends 2026-12-31. Together `Kimi-K3` $3/$15 -> $2.70/$13.50 and `Qwen3.5-9B` $0.10/$0.15 -> $0.17/$0.25
+- **Gemini cache reads were priced at 0.25x input; Google charges 0.10x.** Corrected on every Gemini text model
+- **Repository and docs-site URLs** point at `go-majordomo/majordomo-llm`, where the project now lives
+- **`scripts/smoke_test_providers.py` crashed with `KeyError`** on the providers added in 0.21.0, which were missing from its key table. Without `--provider`, a provider whose key is unset is now skipped rather than aborting the run, and the `majordomo` gateway provider is excluded
+
+### Known limitations
+
+- Prompt-length price tiers are not modelled. `claude-haiku-5-5` bills 5x on prompts over 100K tokens, the GPT-6 and GPT-5.6 families bill 2x input and 1.5x output over 272K, and the lower tier is what is registered. The GPT-6 and GPT-5.6 families also bill cache writes at 1.25x input, which is not tracked for OpenAI
+- Reasoning tokens are counted in `output_tokens` and `output_cost` and are not reported separately
+- Web search combined with structured output under-reports cost on Anthropic and Gemini. A live run on 2026-10-11 reported a tool fee of $0.00 for both, where the same question as plain text reported $0.02 and $0.035. On Anthropic the structured path can make several requests and prices only the last one, so an earlier turn's search fee and tokens are not counted; on Gemini the grounded-query fee is not detected on a structured response. Plain-text web search is unaffected
+- A gateway-routed call that Steward sends to a provider or model this library no longer registers is reported with cost 0.0, since there is no rate to price it against
+
 ## [0.23.0] - 2026-09-01
 
 ### Added
@@ -432,15 +490,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/superset-studio/majordomo-llm/compare/v0.23.0...HEAD
-[0.23.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.22.1...v0.23.0
-[0.4.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/superset-studio/majordomo-llm/compare/v0.2.0...v0.3.1
-[0.2.0]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.6...v0.2.0
-[0.1.6]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.5...v0.1.6
-[0.1.5]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.4...v0.1.5
-[0.1.4]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/superset-studio/majordomo-llm/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/superset-studio/majordomo-llm/releases/tag/v0.1.0
+[Unreleased]: https://github.com/go-majordomo/majordomo-llm/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.23.0...v0.24.0
+[0.23.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.22.1...v0.23.0
+[0.4.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/go-majordomo/majordomo-llm/compare/v0.2.0...v0.3.1
+[0.2.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.6...v0.2.0
+[0.1.6]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/go-majordomo/majordomo-llm/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/go-majordomo/majordomo-llm/releases/tag/v0.1.0

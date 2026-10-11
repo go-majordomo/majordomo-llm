@@ -9,7 +9,7 @@ import asyncio
 from majordomo_llm import get_llm_instance
 
 async def main():
-    llm = get_llm_instance("openai", "gpt-4.1")
+    llm = get_llm_instance("openai", "gpt-6.1-sol")
     resp = await llm.get_response(
         user_prompt="What is the capital of France?",
         system_prompt="Answer concisely.",
@@ -28,16 +28,13 @@ Use the same interface across all supported providers:
 
 ```python
 # OpenAI
-llm = get_llm_instance("openai", "gpt-4.1")
+llm = get_llm_instance("openai", "gpt-6.1-sol")
 
 # Anthropic
 llm = get_llm_instance("anthropic", "claude-sonnet-5")
 
 # Google Gemini
-llm = get_llm_instance("gemini", "gemini-2.5-flash")
-
-# DeepSeek
-llm = get_llm_instance("deepseek", "deepseek-chat")
+llm = get_llm_instance("gemini", "gemini-3.8-flash")
 
 # Cohere
 llm = get_llm_instance("cohere", "command-r-plus")
@@ -97,7 +94,7 @@ print(resp.content)  # dict: {"countries": [...]}
 Pass an API key directly instead of using environment variables:
 
 ```python
-llm = get_llm_instance("openai", "gpt-4.1", api_key="sk-...")
+llm = get_llm_instance("openai", "gpt-6.1-sol", api_key="sk-...")
 ```
 
 If `api_key` is not provided, the provider falls back to its respective environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.).
@@ -145,7 +142,7 @@ await storage.close()
 
 Notes
 
-- Set API keys via environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `CO_API_KEY`) or pass `api_key` directly to `get_llm_instance()`.
+- Set API keys via environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `CO_API_KEY`) or pass `api_key` directly to `get_llm_instance()`.
 - Model costs are loaded from `llm_config.yaml`; add new models there.
 - All methods are async; use `asyncio.run()` or an async context.
 - See the [Cascade recipe](cascade.md) for automatic provider failover.

@@ -26,7 +26,7 @@ class Summary(BaseModel):
     word_count: int
 
 async def main():
-    # Works with any provider: openai, anthropic, gemini, deepseek, cohere
+    # Works with any provider: openai, anthropic, gemini, cohere, ...
     llm = get_llm_instance("anthropic", "claude-sonnet-5")
 
     response = await llm.get_structured_json_response(
@@ -45,12 +45,12 @@ asyncio.run(main())
 
 ### Unified Provider Interface
 
-Write once, run on any provider. Switch between OpenAI, Anthropic, Gemini, DeepSeek, and Cohere with a single line change.
+Write once, run on any provider. Switch between OpenAI, Anthropic, Gemini, Cohere, and the open-weight hosts (Fireworks, Together, Baseten) with a single line change.
 
 ```python
-llm = get_llm_instance("openai", "gpt-4.1")
+llm = get_llm_instance("openai", "gpt-6.1-sol")
 llm = get_llm_instance("anthropic", "claude-sonnet-5")
-llm = get_llm_instance("gemini", "gemini-2.5-flash")
+llm = get_llm_instance("gemini", "gemini-3.8-flash")
 ```
 
 ### Streaming Responses
@@ -94,8 +94,8 @@ from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-5"),
-    ("openai", "gpt-4.1"),
-    ("gemini", "gemini-2.5-flash"),
+    ("openai", "gpt-6.1-sol"),
+    ("gemini", "gemini-3.8-flash"),
 ])
 response = await cascade.get_response("Hello!")  # Tries each until one succeeds
 ```
@@ -130,10 +130,9 @@ logged_llm = LoggingLLM(llm, db, storage)
 
 | Provider | Recent Models |
 |----------|---------------|
-| OpenAI | gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5, gpt-4.1, o3, o4-mini |
-| Anthropic | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, claude-sonnet-4 |
-| Google Gemini | gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-2.5-flash |
-| DeepSeek | deepseek-v4-flash, deepseek-v4-pro, deepseek-chat, deepseek-reasoner |
+| OpenAI | gpt-6-astra, gpt-6.1-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.5, gpt-5 |
+| Anthropic | claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-fable-5-1 |
+| Google Gemini | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.1-pro-preview |
 | Cohere | command-a, command-r-plus, command-r |
 
 All providers support structured outputs and streaming. Additional models are available—see `llm_config.yaml` for the complete list with pricing.

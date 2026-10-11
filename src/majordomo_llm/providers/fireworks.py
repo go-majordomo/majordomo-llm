@@ -34,15 +34,16 @@ class Fireworks(LLM):
 
     Example:
         >>> llm = Fireworks(
-        ...     model="accounts/fireworks/models/deepseek-v4-pro",
-        ...     input_cost=1.74,
-        ...     output_cost=3.48,
+        ...     model="accounts/fireworks/models/glm-5p3",
+        ...     input_cost=1.40,
+        ...     output_cost=4.40,
         ... )
         >>> response = await llm.get_response("Hello, Fireworks!")
     """
 
     FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
-    REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
+    #: Passed to the host as-is; which of these a given model accepts varies.
+    REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
     THINKING_MODES = frozenset({"enabled", "disabled"})
 
     def __init__(
@@ -65,7 +66,7 @@ class Fireworks(LLM):
 
         Args:
             model: The fully qualified Fireworks model ID
-                (e.g., "accounts/fireworks/models/deepseek-v4-pro").
+                (e.g., "accounts/fireworks/models/glm-5p3").
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.

@@ -26,7 +26,7 @@ class Together(LLM):
 
     The API key is read from the ``TOGETHER_API_KEY`` environment variable.
 
-    Model IDs are slash-delimited HF-style (``deepseek-ai/DeepSeek-V4-Pro``) and
+    Model IDs are slash-delimited HF-style (``deepseek-ai/DeepSeek-V4-Pro-0813``) and
     are passed through verbatim to the API.
 
     Attributes:
@@ -34,7 +34,7 @@ class Together(LLM):
 
     Example:
         >>> llm = Together(
-        ...     model="deepseek-ai/DeepSeek-V4-Pro",
+        ...     model="deepseek-ai/DeepSeek-V4-Pro-0813",
         ...     input_cost=2.10,
         ...     output_cost=4.40,
         ... )
@@ -42,7 +42,8 @@ class Together(LLM):
     """
 
     TOGETHER_BASE_URL = "https://api.together.xyz/v1"
-    REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
+    #: Passed to the host as-is; which of these a given model accepts varies.
+    REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
     THINKING_MODES = frozenset({"enabled", "disabled"})
 
     def __init__(
@@ -64,7 +65,7 @@ class Together(LLM):
         """Initialize the Together provider.
 
         Args:
-            model: The Together model ID (e.g., "deepseek-ai/DeepSeek-V4-Pro").
+            model: The Together model ID (e.g., "deepseek-ai/DeepSeek-V4-Pro-0813").
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.

@@ -40,7 +40,7 @@ class OpenAI(LLM):
 
     Example:
         >>> llm = OpenAI(
-        ...     model="gpt-4o",
+        ...     model="gpt-6.1-sol",
         ...     input_cost=2.5,
         ...     output_cost=10.0,
         ... )
@@ -66,7 +66,7 @@ class OpenAI(LLM):
         """Initialize the OpenAI provider.
 
         Args:
-            model: The GPT model identifier (e.g., "gpt-4o", "gpt-5").
+            model: The GPT model identifier (e.g., "gpt-6.1-sol", "gpt-5").
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.

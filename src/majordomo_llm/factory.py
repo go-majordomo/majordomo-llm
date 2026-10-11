@@ -18,15 +18,10 @@ from majordomo_llm.providers.baseten import Baseten
 from majordomo_llm.providers.bedrock import Bedrock
 from majordomo_llm.providers.bedrock_mantle import BedrockMantle
 from majordomo_llm.providers.cohere import Cohere
-from majordomo_llm.providers.deepinfra import DeepInfra
-from majordomo_llm.providers.deepseek import DeepSeek
 from majordomo_llm.providers.fireworks import Fireworks
 from majordomo_llm.providers.gemini import Gemini
 from majordomo_llm.providers.gemini_image import GeminiImage
 from majordomo_llm.providers.majordomo import Majordomo
-from majordomo_llm.providers.moonshot import Moonshot
-from majordomo_llm.providers.nebius import Nebius
-from majordomo_llm.providers.novita import Novita
 from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.openai_image import OpenAIImage
 from majordomo_llm.providers.together import Together
@@ -36,6 +31,16 @@ logger = logging.getLogger(__name__)
 #: Type for alias targets: single (provider, model) or cascade list.
 AliasTarget = tuple[str, str] | list[tuple[str, str]]
 
+#: Providers whose classes accept ``reasoning_effort`` / ``thinking``. Only these
+#: read the two keys from ``llm_config.yaml`` or honor the ``get_llm_instance``
+#: overrides.
+_REASONING_PROVIDERS = frozenset({"anthropic", "fireworks", "together", "baseten"})
+
+#: ``get_llm_instance(reasoning_effort=...)`` value meaning "send no reasoning
+#: option at all", which leaves the choice to the host. It is resolved here and
+#: never reaches a provider.
+REASONING_VENDOR_DEFAULT = "default"
+
 #: Mapping of provider name to its implementing class. Module-level so pricing
 #: lookups (:func:`get_model_pricing`) can read a provider's cache-accounting
 #: mode without instantiating a client.
@@ -43,17 +48,12 @@ _PROVIDER_CLASSES: dict[str, type[LLM]] = {
     "openai": OpenAI,
     "anthropic": Anthropic,
     "gemini": Gemini,
-    "deepseek": DeepSeek,
     "cohere": Cohere,
     "bedrock": Bedrock,
     "bedrock_mantle": BedrockMantle,
     "fireworks": Fireworks,
     "together": Together,
     "baseten": Baseten,
-    "nebius": Nebius,
-    "deepinfra": DeepInfra,
-    "moonshot": Moonshot,
-    "novita": Novita,
     "majordomo": Majordomo,
 }
 
@@ -313,6 +313,8 @@ def get_llm_instance(
     region: str | None = None,
     use_web_search: bool = False,
     use_prompt_caching: bool | None = None,
+    reasoning_effort: str | None = None,
+    thinking: str | None = None,
 ) -> LLM:
     """Create an LLM instance for the specified provider and model.
 
@@ -320,9 +322,9 @@ def get_llm_instance(
     provider-specific initialization and configuration lookup.
 
     Args:
-        provider: The LLM provider name. One of: "openai", "anthropic", "gemini",
-            "deepseek", "cohere".
-        model: The model identifier (e.g., "gpt-4o", "claude-sonnet-5").
+        provider: The LLM provider name, as returned by
+            :func:`get_supported_providers` (e.g., "openai", "anthropic", "gemini").
+        model: The model identifier (e.g., "gpt-6.1-sol", "claude-sonnet-5").
         api_key: Optional API key. If not provided, the provider will fall back
             to its respective environment variable.
         base_url: Optional custom base URL for routing through a proxy.
@@ -333,13 +335,26 @@ def get_llm_instance(
         use_web_search: Enable the provider's server-side web search tool.
             Validated against the model's ``supports_web_search`` flag in
             ``llm_config.yaml``. Silently ignored for providers that do not
-            implement web search (cohere, deepseek, fireworks, together,
-            baseten, nebius, deepinfra, moonshot, novita, bedrock_mantle).
+            implement web search (cohere, fireworks, together, baseten,
+            bedrock_mantle).
         use_prompt_caching: Override the model's ``use_prompt_caching`` config
             default for providers with an explicit cache breakpoint (Anthropic,
             Bedrock Mantle). ``None`` (default) keeps the config value (which
             itself defaults to ``True``); ``True``/``False`` force caching on or
             off. Ignored by providers without explicit cache control.
+        reasoning_effort: Override the model's reasoning settings in
+            ``llm_config.yaml``. The value is passed to the host as-is, and what a
+            host accepts varies by model (e.g. ``"low"``, ``"high"``, ``"none"``).
+            Pass ``"default"`` to send no reasoning option, leaving the host's own
+            default in force. Supported by anthropic, fireworks, together and
+            baseten.
+        thinking: Override the model's thinking mode (``"enabled"`` /
+            ``"disabled"`` on the open-weight hosts, ``"adaptive"`` /
+            ``"disabled"`` on Anthropic). Same providers as ``reasoning_effort``.
+
+            The two arguments are one override: passing either replaces BOTH
+            configured values for the model, so only what the caller supplied is
+            sent. ``None`` for both (default) keeps the config values.
 
     Returns:
         An LLM instance configured for the specified provider and model.
@@ -347,7 +362,10 @@ def get_llm_instance(
     Raises:
         ConfigurationError: If the provider or model is not recognized, or if
             ``use_web_search`` is set on a model whose config does not declare
-            ``supports_web_search: true``.
+            ``supports_web_search: true``, or if ``reasoning_effort`` /
+            ``thinking`` is passed for a provider that does not support them.
+        ValueError: If ``reasoning_effort`` or ``thinking`` is not a value the
+            provider recognizes.
 
     Example:
         >>> llm = get_llm_instance("anthropic", "claude-sonnet-5")
@@ -397,23 +415,29 @@ def get_llm_instance(
     if cls is None:
         raise ConfigurationError(f"Unknown LLM provider '{provider}'")
 
+    reasoning_overridden = reasoning_effort is not None or thinking is not None
+    if reasoning_overridden and provider not in _REASONING_PROVIDERS:
+        supported = ", ".join(sorted(_REASONING_PROVIDERS))
+        raise ConfigurationError(
+            f"Provider '{provider}' does not accept reasoning_effort or thinking. "
+            f"Supported providers: {supported}."
+        )
+
     provider_kwargs: dict[str, Any] = {}
-    if provider in (
-        "deepseek",
-        "fireworks",
-        "together",
-        "baseten",
-        "nebius",
-        "deepinfra",
-        "moonshot",
-        "novita",
-    ):
-        provider_kwargs = {
-            "reasoning_effort": model_attributes.get("reasoning_effort"),
-            "thinking": model_attributes.get("thinking"),
-        }
-    elif provider in ("bedrock", "bedrock_mantle"):
-        provider_kwargs = {"region": region}
+    if provider in _REASONING_PROVIDERS:
+        if reasoning_overridden:
+            # One override, not two: the caller's values replace both configured
+            # ones, so a config ``reasoning_effort`` is never sent alongside a
+            # caller's ``thinking`` (hosts reject or mis-handle the combination).
+            provider_kwargs["reasoning_effort"] = (
+                None if reasoning_effort == REASONING_VENDOR_DEFAULT else reasoning_effort
+            )
+            provider_kwargs["thinking"] = thinking
+        else:
+            provider_kwargs["reasoning_effort"] = model_attributes.get("reasoning_effort")
+            provider_kwargs["thinking"] = model_attributes.get("thinking")
+    if provider in ("bedrock", "bedrock_mantle"):
+        provider_kwargs["region"] = region
 
     if provider in ("openai", "anthropic", "gemini", "bedrock"):
         provider_kwargs["use_web_search"] = use_web_search
@@ -423,11 +447,11 @@ def get_llm_instance(
             "supports_image_input", False
         )
 
-    # Providers on the shared OpenAI-compatible base default to supporting strict
-    # json_schema; a model opts out in config when its deployment accepts the
-    # parameter without enforcing it. Fireworks and Together predate the base and
-    # do not accept this kwarg, so they are deliberately excluded.
-    if provider in ("baseten", "nebius", "deepinfra", "moonshot", "novita"):
+    # Baseten sits on the shared OpenAI-compatible base, which defaults to
+    # supporting strict json_schema; a model opts out in config when its deployment
+    # accepts the parameter without enforcing it. Fireworks and Together predate
+    # the base and do not accept this kwarg, so they are deliberately excluded.
+    if provider == "baseten":
         provider_kwargs["supports_structured_outputs"] = model_attributes.get(
             "supports_structured_outputs", True
         )
@@ -436,15 +460,14 @@ def get_llm_instance(
         provider_kwargs["supports_structured_outputs"] = model_attributes.get(
             "supports_structured_outputs", False
         )
+        provider_kwargs["supports_forced_tool_choice"] = model_attributes.get(
+            "supports_forced_tool_choice", True
+        )
         provider_kwargs["use_prompt_caching"] = (
             use_prompt_caching
             if use_prompt_caching is not None
             else model_attributes.get("use_prompt_caching", True)
         )
-
-    if provider == "anthropic":
-        provider_kwargs["reasoning_effort"] = model_attributes.get("reasoning_effort")
-        provider_kwargs["thinking"] = model_attributes.get("thinking")
 
     # Only providers whose API requires an output cap on every request read this.
     # Everywhere else the model's own default applies and the key is meaningless,
@@ -575,7 +598,7 @@ def register_alias(name: str, target: AliasTarget) -> None:
         >>> register_alias("fast", ("anthropic", "claude-3-5-haiku-20241022"))
         >>> register_alias("resilient", [
         ...     ("anthropic", "claude-sonnet-5"),
-        ...     ("openai", "gpt-4o"),
+        ...     ("openai", "gpt-6.1-sol"),
         ... ])
     """
     if isinstance(target, list):

@@ -8,6 +8,8 @@ This section explains the key capabilities of majordomo-llm and the problems the
 
 - **[Cost Tracking & Logging](cost-tracking.md)**: Every response includes token counts and calculated costs, with optional async logging for full request/response persistence. Track spending by API key, feature, or user with pluggable adapters for SQLite, Postgres, S3, and local storage.
 
+- **[Reasoning & Thinking](reasoning.md)**: Most current models reason before answering and bill it as output, and the open-weight hosts default to the top tier. The library sets `reasoning_effort: low` per model where that measurably lowers it, and `get_llm_instance()` takes `reasoning_effort` and `thinking` to override. The values are not portable across hosts, so this page records what each one actually does.
+
 - **[Cascade Failover](cascade-failover.md)**: Wrap multiple providers in priority order for automatic failover when one goes down. If your primary provider hits rate limits or experiences an outage, requests seamlessly fall back to the next provider in the chain.
 
 - **[Custom Endpoints & Headers](custom-endpoints.md)**: Route requests through a proxy or gateway by setting a custom `base_url` and attaching HTTP headers at instance level (`default_headers`) or per request (`extra_headers`). Works across all providers and composes with cascade, logging, and streaming.
@@ -23,7 +25,7 @@ from majordomo_llm.logging import LoggingLLM, SqliteAdapter, FileStorageAdapter
 # Set up cascade
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-5"),
-    ("openai", "gpt-4.1"),
+    ("openai", "gpt-6.1-sol"),
 ])
 
 # Add logging

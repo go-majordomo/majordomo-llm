@@ -13,7 +13,7 @@ from pathlib import Path
 
 from majordomo_llm import ImageInput, get_llm_instance
 
-llm = get_llm_instance("gemini", "gemini-2.5-flash")
+llm = get_llm_instance("gemini", "gemini-3.8-flash")
 response = await llm.get_response(
     "What objects are visible?",
     images=(ImageInput(Path("photo.webp").read_bytes(), "image/webp"),),

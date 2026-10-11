@@ -13,9 +13,9 @@ from pathlib import Path
 from majordomo_llm import ImageInput, get_image_instance, get_llm_instance
 
 UNDERSTANDING_MODELS = {
-    "anthropic": "claude-sonnet-5",
-    "openai": "gpt-5.6-terra",
-    "gemini": "gemini-2.5-flash",
+    "anthropic": "claude-sonnet-5-5",
+    "openai": "gpt-6.1-sol",
+    "gemini": "gemini-3.8-flash",
 }
 
 

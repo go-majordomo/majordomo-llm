@@ -31,8 +31,8 @@ class LLMCascade(LLM):
     Example:
         >>> cascade = LLMCascade([
         ...     ("anthropic", "claude-sonnet-5"),  # Primary
-        ...     ("openai", "gpt-4o"),                       # First fallback
-        ...     ("gemini", "gemini-2.5-flash"),             # Last resort
+        ...     ("openai", "gpt-6.1-sol"),                       # First fallback
+        ...     ("gemini", "gemini-3.8-flash"),             # Last resort
         ... ])
         >>> response = await cascade.get_response("Hello!")
     """

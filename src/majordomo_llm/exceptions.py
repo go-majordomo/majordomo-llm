@@ -24,7 +24,7 @@ class ConfigurationError(MajordomoError):
 
     Example:
         >>> # Missing API key
-        >>> llm = get_llm_instance("openai", "gpt-4o")
+        >>> llm = get_llm_instance("openai", "gpt-6.1-sol")
         ConfigurationError: Missing OPENAI_API_KEY environment variable.
     """
 

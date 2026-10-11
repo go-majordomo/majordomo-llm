@@ -7,7 +7,19 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 
-from scripts.smoke_test_providers import FAIL, OK, SKIP, _run_cell, _run_image
+from majordomo_llm.factory import LLM_CONFIG, get_supported_providers
+from scripts.smoke_test_providers import (
+    EXTRA_MODELS,
+    FAIL,
+    GATEWAY_ROUTED_PROVIDERS,
+    OK,
+    PROVIDER_API_KEY_ENV,
+    SKIP,
+    _canonical_model,
+    _pass2_models,
+    _run_cell,
+    _run_image,
+)
 
 
 def _vision_model(content: str) -> SimpleNamespace:
@@ -69,3 +81,23 @@ async def test_run_cell_skips_models_without_image_support(
 
     assert result.status == SKIP
     llm.get_response.assert_not_awaited()
+
+
+def test_every_direct_provider_has_an_api_key_env() -> None:
+    """A provider added to the factory but not here crashed the sweep with KeyError."""
+    direct = set(get_supported_providers()) - GATEWAY_ROUTED_PROVIDERS
+    assert direct - set(PROVIDER_API_KEY_ENV) == set()
+
+
+def test_extra_models_are_all_registered() -> None:
+    for provider, models in EXTRA_MODELS.items():
+        registered = LLM_CONFIG[provider]["models"]
+        assert [m for m in models if m not in registered] == [], provider
+
+
+def test_pass2_all_models_covers_everything_but_the_canonical() -> None:
+    models = _pass2_models("anthropic", all_models=True)
+
+    assert _canonical_model("anthropic") not in models
+    assert len(models) == len(LLM_CONFIG["anthropic"]["models"]) - 1
+    assert _pass2_models("anthropic", all_models=False) == EXTRA_MODELS["anthropic"]

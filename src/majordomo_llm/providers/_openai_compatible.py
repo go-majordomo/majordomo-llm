@@ -1,11 +1,10 @@
 """Shared implementation for OpenAI-compatible LLM providers.
 
-Several inference platforms (Baseten, Nebius Token Factory, DeepInfra, Moonshot)
-expose the OpenAI chat-completions wire protocol verbatim and differ only in the
-endpoint, the API key environment variable, and the model-ID namespace. This
-module holds the request/response, streaming, and JSON-schema machinery once;
-each provider subclasses :class:`OpenAICompatibleLLM` and sets four class
-attributes.
+Inference platforms such as Baseten expose the OpenAI chat-completions wire
+protocol verbatim and differ only in the endpoint, the API key environment
+variable, and the model-ID namespace. This module holds the request/response,
+streaming, and JSON-schema machinery once; each provider subclasses
+:class:`OpenAICompatibleLLM` and sets four class attributes.
 
 Example:
     >>> class Example(OpenAICompatibleLLM):
@@ -69,7 +68,10 @@ class OpenAICompatibleLLM(LLM):
     #: Environment variable consulted when the caller does not pass ``api_key``.
     API_KEY_ENV: ClassVar[str]
 
-    REASONING_EFFORTS: ClassVar[frozenset[str]] = frozenset({"minimal", "low", "medium", "high"})
+    #: Passed to the host as-is; which of these a given model accepts varies.
+    REASONING_EFFORTS: ClassVar[frozenset[str]] = frozenset(
+        {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+    )
     THINKING_MODES: ClassVar[frozenset[str]] = frozenset({"enabled", "disabled"})
 
     def __init__(

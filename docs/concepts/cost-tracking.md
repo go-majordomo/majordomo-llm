@@ -39,9 +39,9 @@ print(f"Response time: {response.response_time:.2f}s")
 Costs are calculated using per-model rates from `llm_config.yaml`:
 
 ```yaml
-gpt-4.1:
+gpt-6.1-sol:
   input_cost: 2.0
-  output_cost: 8.0
+  output_cost: 10.0
 ```
 
 ## Full Request Logging
@@ -57,7 +57,7 @@ db = await SqliteAdapter.create("llm_logs.db")
 storage = await FileStorageAdapter.create("./request_logs")
 
 # Wrap any LLM instance
-llm = get_llm_instance("openai", "gpt-4.1", api_key_alias="prod-key-1")
+llm = get_llm_instance("openai", "gpt-6.1-sol", api_key_alias="prod-key-1")
 logged_llm = LoggingLLM(llm, db, storage)
 
 # Use normally - logging happens async in background

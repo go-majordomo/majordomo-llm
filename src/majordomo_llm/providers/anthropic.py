@@ -3,7 +3,7 @@
 import base64
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 import anthropic
@@ -90,6 +90,7 @@ class Anthropic(LLM):
         cached_input_cost: float | None = None,
         cache_write_cost: float | None = None,
         use_prompt_caching: bool = True,
+        supports_forced_tool_choice: bool = True,
         api_key: str | None = None,
         api_key_alias: str | None = None,
         base_url: str | None = None,
@@ -103,7 +104,8 @@ class Anthropic(LLM):
             input_cost: Cost per million input tokens in USD.
             output_cost: Cost per million output tokens in USD.
             supports_temperature_top_p: Whether temperature/top_p are supported.
-            use_web_search: Enable web search (requires claude-sonnet-4-5-20250929).
+            use_web_search: Enable web search. The factory only allows it on
+                models with ``supports_web_search: true`` in ``llm_config.yaml``.
             supports_structured_outputs: Whether the model supports native
                 structured outputs (constrained decoding via
                 ``output_config.format``). When False, structured JSON requests
@@ -136,6 +138,13 @@ class Anthropic(LLM):
                 with an ephemeral ``cache_control`` breakpoint so Anthropic caches
                 it. Set ``False`` to disable prompt caching (e.g. for short,
                 non-reused system prompts where the cache-write premium is wasted).
+            supports_forced_tool_choice: Whether the model accepts a forced
+                ``tool_choice`` (``type: "tool"`` / ``"any"``). Opus 5.5,
+                Sonnet 5.5 and Fable 5.1 reject it with a 400. When ``False``,
+                the web-search structured path finishes with ``tool_choice:
+                auto`` plus an explicit instruction instead of forcing the
+                schema tool, and ``supports_structured_outputs`` must be
+                ``True`` because the forced-tool fallback is unavailable.
             api_key: Optional API key. Defaults to ``ANTHROPIC_API_KEY`` env var.
             api_key_alias: Optional human-readable name for the API key.
             base_url: Optional custom base URL for routing through a proxy.
@@ -145,7 +154,9 @@ class Anthropic(LLM):
 
         Raises:
             ConfigurationError: If no API key is provided and env var is not set.
-            ValueError: If ``reasoning_effort`` or ``thinking`` is invalid.
+            ValueError: If ``reasoning_effort`` or ``thinking`` is invalid, or if
+                the model supports neither native structured outputs nor a
+                forced ``tool_choice``.
         """
         if reasoning_effort is not None and reasoning_effort not in _EFFORT_LEVELS:
             valid = ", ".join(sorted(_EFFORT_LEVELS))
@@ -155,8 +166,14 @@ class Anthropic(LLM):
         if thinking is not None and thinking not in _THINKING_MODES:
             valid = ", ".join(sorted(_THINKING_MODES))
             raise ValueError(f"Invalid Anthropic thinking mode '{thinking}'. Valid: {valid}")
+        if not supports_forced_tool_choice and not supports_structured_outputs:
+            raise ValueError(
+                f"Anthropic model '{model}' rejects a forced tool_choice, so it must set "
+                f"supports_structured_outputs=True; there is no other structured-output path."
+            )
         resolved_api_key = resolve_api_key(api_key, "ANTHROPIC_API_KEY", "Anthropic")
         self.supports_structured_outputs = supports_structured_outputs
+        self.supports_forced_tool_choice = supports_forced_tool_choice
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
         super().__init__(
@@ -291,7 +308,7 @@ class Anthropic(LLM):
             response_message.stop_reason,
             resolved_max_tokens,
             output_tokens,
-            "\n".join(final_response),
+            _join_text_blocks(final_response),
         )
         cached_tokens = response_message.usage.cache_read_input_tokens or 0
         cache_creation_tokens = response_message.usage.cache_creation_input_tokens or 0
@@ -302,7 +319,7 @@ class Anthropic(LLM):
         total_cost += tool_use_cost
 
         return LLMResponse(
-            content="\n".join(final_response),
+            content=_join_text_blocks(final_response),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -351,7 +368,7 @@ class Anthropic(LLM):
                 f"Anthropic API error: {e}", provider="anthropic", original_error=e
             ) from e
 
-        content = "\n".join(
+        content = _join_text_blocks(
             block.text for block in response_message.content if block.type == "text"
         )
         input_tokens = response_message.usage.input_tokens
@@ -568,8 +585,10 @@ class Anthropic(LLM):
         ``output_config.format``) on models that support it — the model
         physically cannot emit malformed or missing-key output. Falls back to
         forced tool calling on models without native support, and always uses
-        the forced-tool path when web search is enabled (structured outputs and
-        the ``web_search`` tool cannot be combined). Every path validates
+        the schema-tool path when web search is enabled (structured outputs and
+        the ``web_search`` tool cannot be combined). That path forces the tool on
+        its final turn only where the model allows it; see
+        ``supports_forced_tool_choice``. Every path validates
         against the caller's original schema and rejects an empty/all-null
         result via :func:`canonicalize_json_schema_output`.
         """
@@ -852,13 +871,31 @@ class Anthropic(LLM):
                         continue
                 break
 
+            # The model stopped searching without calling the schema tool. Ask
+            # for the answer with only that tool on offer. Models that reject a
+            # forced tool_choice get ``auto`` and an explicit instruction instead.
+            final_tool_choice: ToolChoiceToolParam | ToolChoiceAutoParam
+            if self.supports_forced_tool_choice:
+                final_tool_choice = ToolChoiceToolParam(type="tool", name=schema_name)
+            else:
+                final_tool_choice = ToolChoiceAutoParam(type="auto")
+                current_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Call the {schema_name} tool now with your final answer. "
+                            "Do not reply in plain text."
+                        ),
+                    }
+                )
+
             final_response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 system=_anthropic_system_prompt(system_prompt, self.use_prompt_caching),
                 messages=current_messages,
                 tools=[structured_response_tool],
-                tool_choice=ToolChoiceToolParam(type="tool", name=schema_name),
+                tool_choice=final_tool_choice,
                 **self._config_create_kwargs(),
                 extra_headers=extra_headers,
             )
@@ -871,6 +908,18 @@ class Anthropic(LLM):
 
         execution_time = time.time() - start_time
         return final_response, execution_time
+
+
+def _join_text_blocks(texts: Iterable[str]) -> str:
+    """Join the text blocks of one Anthropic response into the answer.
+
+    The blocks are consecutive pieces of a single text, not separate paragraphs.
+    With web search or citations on, the API splits an answer into many small
+    blocks at citation boundaries, often mid-sentence, so they are concatenated
+    with nothing between them. Any line breaks the model intended are already
+    inside the blocks.
+    """
+    return "".join(texts)
 
 
 def _extract_tool_use_content(content_blocks: list[Any], tool_name: str) -> Any:
@@ -892,7 +941,7 @@ def _extract_structured_text(content_blocks: list[Any]) -> str:
             "No text content in Anthropic structured-output response",
             raw_content=str(content_blocks),
         )
-    return "\n".join(parts)
+    return _join_text_blocks(parts)
 
 
 def _anthropic_system_prompt(

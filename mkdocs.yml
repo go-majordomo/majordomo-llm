@@ -1,6 +1,6 @@
 site_name: majordomo-llm
 site_url: https://majordomo-llm.readthedocs.io/
-repo_url: https://github.com/superset-studio/majordomo-llm
+repo_url: https://github.com/go-majordomo/majordomo-llm
 theme:
   name: material
   features:
@@ -35,6 +35,7 @@ nav:
       - Structured Outputs: concepts/structured-outputs.md
       - Images: concepts/images.md
       - Cost Tracking & Logging: concepts/cost-tracking.md
+      - Reasoning & Thinking: concepts/reasoning.md
       - Cascade Failover: concepts/cascade-failover.md
       - Custom Endpoints & Headers: concepts/custom-endpoints.md
   - Recipes:

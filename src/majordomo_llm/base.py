@@ -706,7 +706,7 @@ class LLM(ABC):
 
     Attributes:
         provider: The LLM provider name (e.g., "openai", "anthropic", "gemini").
-        model: The specific model identifier (e.g., "gpt-4o", "claude-sonnet-5").
+        model: The specific model identifier (e.g., "gpt-6.1-sol", "claude-sonnet-5").
         input_cost: Cost per million input tokens in USD.
         output_cost: Cost per million output tokens in USD.
         supports_temperature_top_p: Whether the model supports temperature/top_p params.
@@ -727,7 +727,7 @@ class LLM(ABC):
     #: cache cost formula in :meth:`_calculate_costs`:
     #:
     #: - ``"subset"`` (default): ``cached_tokens`` are already counted in
-    #:   ``input_tokens`` (OpenAI, Gemini, DeepSeek, Fireworks, Together). Cost
+    #:   ``input_tokens`` (OpenAI, Gemini, Fireworks, Together, Baseten). Cost
     #:   re-prices those tokens down from ``input_cost`` to ``cached_input_cost``.
     #: - ``"additive"``: ``cached_tokens`` / ``cache_creation_tokens`` are
     #:   reported separately and excluded from ``input_tokens`` (Anthropic,
@@ -906,8 +906,8 @@ class LLM(ABC):
         A model whose deployment rejects these parameters
         (``supports_temperature_top_p`` is False) never receives them. That
         covers every current OpenAI and Anthropic flagship, plus deployments
-        that pin their sampling values — Moonshot's Kimi SKUs require
-        ``temperature=1`` / ``top_p=0.95``, and sending anything else is a 400.
+        that pin their sampling values — Baseten's Kimi-K3 requires
+        ``top_p=0.95``, and sending anything else is a 400.
         Caller-supplied values are silently dropped in that case rather than
         failing the call: an LLMCascade or alias chain can legitimately mix
         members that do and do not accept sampling parameters.

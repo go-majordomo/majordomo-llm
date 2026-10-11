@@ -3,13 +3,13 @@
 [![PyPI version](https://badge.fury.io/py/majordomo-llm.svg)](https://badge.fury.io/py/majordomo-llm)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/docs-website-blue.svg)](https://superset-studio.github.io/majordomo-llm/)
+[![Docs](https://img.shields.io/badge/docs-website-blue.svg)](https://go-majordomo.github.io/majordomo-llm/)
 
 A unified Python interface for multiple LLM providers with automatic cost tracking, retry logic, and structured output support.
 
 ## Features
 
-- **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, Cohere, Amazon Bedrock, and the open-weight inference platforms (Fireworks, Together, Baseten, Nebius, DeepInfra, Moonshot, Novita)
+- **Unified API** - Same interface for OpenAI, Anthropic (Claude), Google Gemini, Cohere, Amazon Bedrock, and the open-weight inference platforms (Fireworks, Together, Baseten)
 - **Streaming** - Real-time token-by-token output via `get_response_stream()` with async iteration
 - **Cost Tracking** - Automatic calculation of input/output token costs per request
 - **Structured Outputs** - Native support for Pydantic models and raw JSON Schema dicts
@@ -276,9 +276,6 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # Google Gemini
 export GEMINI_API_KEY="..."
 
-# DeepSeek
-export DEEPSEEK_API_KEY="sk-..."
-
 # Cohere
 export CO_API_KEY="..."
 
@@ -286,10 +283,6 @@ export CO_API_KEY="..."
 export FIREWORKS_API_KEY="..."
 export TOGETHER_API_KEY="..."
 export BASETEN_API_KEY="..."
-export NEBIUS_API_KEY="..."
-export DEEPINFRA_API_KEY="..."
-export MOONSHOT_API_KEY="..."
-export NOVITA_API_KEY="..."
 ```
 
 For local development, copy `.env.example` to `.env` and fill in your keys. Never commit `.env`.
@@ -297,30 +290,39 @@ For local development, copy `.env.example` to `.env` and fill in your keys. Neve
 ### Available Models
 
 #### OpenAI
+- `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`
+- `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
 - `gpt-5.5`
-- `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`
 - `gpt-5`, `gpt-5-mini`, `gpt-5-nano`
-- `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`
-- `o3`, `o4-mini`
+
+GPT-5.4, GPT-4.1, GPT-4o and the o-series are no longer registered; requesting one
+raises `ConfigurationError`.
 
 #### Anthropic
+- `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-1`
 - `claude-opus-5`, `claude-fable-5`, `claude-sonnet-5`
 - `claude-opus-4-8` and its effort profiles `claude-opus-4-8-fast`, `claude-opus-4-8-medium`, `claude-opus-4-8-deep`
-- `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`
-- `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
 
-The Claude 4 family (`claude-opus-4-1-20250805`, `claude-opus-4-20250514`,
-`claude-sonnet-4-20250514`) was retired on 2026-08-25 — the Messages API returns
-`404 not_found_error` for all three. They are mapped in `deprecated_models` and
-resolve automatically to `claude-opus-5` / `claude-sonnet-5` with a warning.
+Claude 3, Claude 4 and Claude 4.5–4.7 are no longer registered; requesting one raises
+`ConfigurationError`. The one exception is `claude-sonnet-4-5-20250929`, which
+Anthropic deprecated on 2026-09-30 and retires on 2026-11-30: it resolves to
+`claude-sonnet-5-5`, Anthropic's named replacement, with a warning.
+
+`claude-opus-5-5`, `claude-sonnet-5-5` and `claude-fable-5-1` reject a forced
+`tool_choice`, which is recorded per model as `supports_forced_tool_choice: false`.
+Structured output on those models uses native constrained decoding; with web
+search enabled, the final turn asks for the schema tool instead of forcing it.
+`claude-haiku-5-5` is priced by prompt length, and cost tracking uses the rate
+for prompts up to 100K tokens.
 
 #### Gemini
-- `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`
-- `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`
+- `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`
+- `gemini-3.5-flash`, `gemini-3.5-flash-lite`
+- `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3-flash-preview`
 
-#### DeepSeek
-- `deepseek-v4-flash`, `deepseek-v4-pro`
-- `deepseek-chat`, `deepseek-reasoner`
+Gemini 2.5 is no longer registered: Google refuses it for new users. Its names still
+resolve, through `deprecated_models`, to `gemini-3.1-pro-preview`, `gemini-3.8-flash`
+or `gemini-3.5-flash-lite` with a warning.
 
 #### Cohere
 - `command-a-03-2025`, `command-r-plus-08-2024`
@@ -333,48 +335,43 @@ provider directly, or stack them behind an `LLMCascade` for failover.
 
 | Provider | Endpoint | Models |
 | --- | --- | --- |
-| `baseten` | `https://inference.baseten.co/v1` | `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.2`, `thinkingmachines/inkling` |
-| `nebius` | `https://api.tokenfactory.nebius.com/v1` | `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.1`, `zai-org/GLM-5.2` |
-| `deepinfra` | `https://api.deepinfra.com/v1/openai` | `deepseek-ai/DeepSeek-V4-Pro`, `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.1`, `zai-org/GLM-5.2`, `thinkingmachines/Inkling` |
-| `moonshot` | `https://api.moonshot.ai/v1` | `kimi-k2.6`, `kimi-k3` |
-| `novita` | `https://api.novita.ai/openai/v1` | `deepseek/deepseek-v4-pro`, `moonshotai/kimi-k2.6`, `moonshotai/kimi-k3`, `zai-org/glm-5.1`, `zai-org/glm-5.2` |
+| `fireworks` | `https://api.fireworks.ai/inference/v1` | `accounts/fireworks/models/glm-5p3`, `accounts/fireworks/models/kimi-k3`, `accounts/fireworks/models/qwen3p8-2p4t-a95b`, `accounts/fireworks/models/qwen3p8-max`, `accounts/fireworks/models/inkling` |
+| `together` | `https://api.together.xyz/v1` | `deepseek-ai/DeepSeek-V4-Pro-0813`, `deepseek-ai/DeepSeek-V4.1-Flash`, `zai-org/GLM-5.3`, `zai-org/GLM-5.3-Flash`, `moonshotai/Kimi-K3`, `Qwen/Qwen3.6-Plus`, `Qwen/Qwen3.8-2.4T-A95B`, `Qwen/Qwen3.7-Max`, `Qwen/Qwen3.7-Plus`, `Qwen/Qwen3.8-Flash`, `Qwen/Qwen3.5-9B`, `zai-org/GLM-5.2`, `thinkingmachines/Inkling` |
+| `baseten` | `https://inference.baseten.co/v1` | `zai-org/GLM-5.3`, `zai-org/GLM-5.3-Flash`, `deepseek-ai/DeepSeek-V4-Pro-0813`, `deepseek-ai/DeepSeek-V4.1-Flash`, `moonshotai/Kimi-K3`, `zai-org/GLM-5.2` |
 
 Notes:
 
 - Model IDs are case-sensitive and passed through verbatim, and the spelling varies by
-  platform. Baseten writes Inkling lowercase (`thinkingmachines/inkling`) where Together
-  and DeepInfra use `thinkingmachines/Inkling`; Novita uses `deepseek/deepseek-v4-pro` where the
-  HF-style platforms use `deepseek-ai/DeepSeek-V4-Pro`.
+  platform: Fireworks uses `accounts/fireworks/models/glm-5p3` where Together and
+  Baseten use `zai-org/GLM-5.3`.
 - Capability flags are per host, not per model, and were measured against the live
   APIs rather than taken from vendor metadata. Some deployments pin their sampling
-  parameters (Moonshot's Kimi SKUs require `temperature=1`/`top_p=0.95`; Baseten's
-  Kimi-K3 requires `top_p=0.95`) and some reject or ignore strict `json_schema`.
-  Those models carry `supports_temperature_top_p: false` or
+  parameters (Baseten's Kimi-K3 requires `top_p=0.95`) and some reject or ignore
+  strict `json_schema`. Those models carry `supports_temperature_top_p: false` or
   `supports_structured_outputs: false` in `llm_config.yaml`.
-- Nebius publishes no cached-token rate, so cached reads bill at `input_cost` there
-  (as with Fireworks and Together). Its rates come from `GET /v1/models?verbose=true`,
-  which is also the quickest way to re-check them.
-- Moonshot is the first-party Kimi vendor. The configured rates are the USD
-  international platform; mainland-China accounts bill separately in RMB via
-  `https://api.moonshot.cn/v1` (reachable by passing it as `base_url`).
+- Where a host publishes no cached-token rate for a model, cached reads bill at
+  `input_cost`.
+- These hosts retire models from serverless often and without much notice, and
+  their model pages can lag behind. `scripts/smoke_test_providers.py --all-models`
+  calls every configured model and is the reliable check.
 
 #### Majordomo (Optimal Routing)
 Canonical open-weight models routed to the optimal backend by the Majordomo gateway (see [Optimal Routing](#optimal-routing-majordomo-gateway)):
-- `deepseek-v4-pro`, `kimi-k2.6`, `kimi-k3`
-- `glm-5.1`, `glm-5.2`, `inkling`
+- `glm-5.3`, `glm-5.2`, `kimi-k3`
+- `kimi-k2.6`, `glm-5.1`, `inkling`
 
 ### Deprecated Model Handling
 
 If you pass a deprecated model to `get_llm_instance()`, it is automatically replaced with the provider-recommended replacement and a warning is logged. The response object includes a `deprecation_warning` field so you can detect this in your application:
 
 ```python
-llm = get_llm_instance("openai", "gpt-4o")  # deprecated → auto-replaced with gpt-4.1
+llm = get_llm_instance("gemini", "gemini-2.5-flash")  # deprecated → auto-replaced with gemini-3.8-flash
 
 response = await llm.get_response("Hello!")
 if response.deprecation_warning:
     print(response.deprecation_warning)
-    # "Model 'gpt-4o' for provider 'openai' is deprecated.
-    #  Automatically replaced with 'gpt-4.1'."
+    # "Model 'gemini-2.5-flash' for provider 'gemini' is deprecated.
+    #  Automatically replaced with 'gemini-3.8-flash'."
 ```
 
 See the `deprecated_models` section in `llm_config.yaml` for the full mapping.
@@ -390,7 +387,7 @@ Create an LLM instance for the specified provider and model.
 ```python
 from majordomo_llm import get_llm_instance
 
-llm = get_llm_instance("openai", "gpt-4.1")
+llm = get_llm_instance("openai", "gpt-6.1-sol")
 ```
 
 ### LLM Methods
@@ -429,10 +426,41 @@ await llm.get_response("Hello", temperature=0.2)   # only temperature is sent
 
 Models whose deployment rejects these parameters never receive them — that covers
 every current OpenAI and Anthropic flagship, plus deployments that pin their values
-(Moonshot's Kimi SKUs require `temperature=1` / `top_p=0.95`). Those models set
+(Baseten's Kimi-K3 requires `top_p=0.95`). Those models set
 `supports_temperature_top_p: false` in `llm_config.yaml`. Passing a value to one of
 them is silently ignored and the call proceeds without it, rather than failing — a
 cascade can legitimately mix models that do and do not accept sampling parameters.
+
+### Reasoning (`reasoning_effort`, `thinking`)
+
+Most current models reason before they answer and bill the reasoning as output tokens.
+On the open-weight hosts it is on by default, usually at the top tier: a one-word
+classification cost 114 output tokens on Together's GLM 5.3 with nothing set, and 4
+with `reasoning_effort: low`.
+
+The library therefore sets `reasoning_effort: low` in `llm_config.yaml` on each
+Fireworks, Together and Baseten model where `low` measurably lowers reasoning, and
+sends nothing on the rest. Override it per instance:
+
+```python
+llm = get_llm_instance("together", "moonshotai/Kimi-K3", reasoning_effort="high")
+llm = get_llm_instance("baseten", "deepseek-ai/DeepSeek-V4.1-Flash", thinking="disabled")
+llm = get_llm_instance(                      # send nothing; the host's default applies
+    "fireworks", "accounts/fireworks/models/kimi-k3", reasoning_effort="default"
+)
+```
+
+- Passing either argument replaces **both** configured values for that model.
+- Values are passed to the host as-is and are **not portable**: `low` cuts reasoning on
+  GLM 5.3, does nothing on Together's GLM 5.2, and switches reasoning *on* for
+  Baseten's GLM 5.2, where it is opt-in.
+- Supported on `anthropic`, `fireworks`, `together` and `baseten`; other providers
+  raise `ConfigurationError`.
+- Reasoning tokens are included in `output_tokens` and `output_cost`; they are not
+  reported separately.
+
+See [Reasoning & Thinking](docs/concepts/reasoning.md) for the per-model defaults and
+what each value does on each host.
 
 ### Output Cap (`max_tokens`)
 
@@ -508,8 +536,8 @@ from majordomo_llm import LLMCascade
 # Providers are tried in order - first is primary, rest are fallbacks
 cascade = LLMCascade([
     ("anthropic", "claude-sonnet-5"),  # Primary
-    ("openai", "gpt-4.1"),                        # First fallback
-    ("gemini", "gemini-2.5-flash"),              # Last resort
+    ("openai", "gpt-6.1-sol"),                        # First fallback
+    ("gemini", "gemini-3.8-flash"),              # Last resort
 ])
 
 # If Anthropic fails, automatically tries OpenAI, then Gemini
@@ -564,10 +592,12 @@ Enable web search for supported Claude models:
 from majordomo_llm.providers.anthropic import Anthropic
 
 llm = Anthropic(
-    model="claude-sonnet-4-5-20250929",
-    input_cost=3.0,
-    output_cost=15.0,
+    model="claude-sonnet-5-5",
+    input_cost=2.0,
+    output_cost=10.0,
     use_web_search=True,
+    supports_structured_outputs=True,
+    supports_forced_tool_choice=False,
 )
 ```
 
@@ -698,7 +728,7 @@ CREATE TABLE IF NOT EXISTS llm_requests (
 ### Setup
 
 ```bash
-git clone https://github.com/superset-studio/majordomo-llm.git
+git clone https://github.com/go-majordomo/majordomo-llm.git
 cd majordomo-llm
 uv sync --all-extras
 ```

@@ -59,18 +59,18 @@ def test_image_input_capability_is_explicit_on_supported_models(provider):
 
 
 def test_image_input_capability_defaults_to_false_when_model_flag_is_absent(monkeypatch):
-    model_config = LLM_CONFIG["openai"]["models"]["gpt-4.1"]
+    model_config = LLM_CONFIG["openai"]["models"]["gpt-6.1-sol"]
     monkeypatch.delitem(model_config, "supports_image_input")
 
     with patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"):
-        model = get_llm_instance("openai", "gpt-4.1", api_key="test-key")
+        model = get_llm_instance("openai", "gpt-6.1-sol", api_key="test-key")
 
     assert model.supports_image_input is False
 
 
 def test_factory_forwards_true_model_image_input_capability():
     with patch("majordomo_llm.providers.openai.openai.AsyncOpenAI"):
-        model = get_llm_instance("openai", "gpt-4.1", api_key="test-key")
+        model = get_llm_instance("openai", "gpt-6.1-sol", api_key="test-key")
 
     assert model.supports_image_input is True
 

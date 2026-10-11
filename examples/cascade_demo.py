@@ -7,8 +7,8 @@ failover: the decision lives in your process, and every hop is a real attempt.
 (Contrast with the `majordomo` provider in routing_demo.py, which pushes the
 choice server-side to the gateway.)
 
-Aliases give those chains a name. llm_config.yaml ships several — `glm-5.2`,
-`kimi-k3`, `deepseek-v4-pro` and friends — so `get_llm_by_alias("glm-5.2")`
+Aliases give those chains a name. llm_config.yaml ships several — `glm-5.3`,
+`kimi-k3`, `inkling` and friends — so `get_llm_by_alias("glm-5.3")`
 returns a ready-made cascade rather than a single model.
 
 This script demonstrates:
@@ -21,8 +21,7 @@ This script demonstrates:
 Prerequisites:
     1. Install dependencies: uv sync --all-extras
     2. Set at least two of the open-weight keys so failover has somewhere to go:
-       - FIREWORKS_API_KEY, TOGETHER_API_KEY, BASETEN_API_KEY,
-         DEEPINFRA_API_KEY, NOVITA_API_KEY, NEBIUS_API_KEY, MOONSHOT_API_KEY
+       - FIREWORKS_API_KEY, TOGETHER_API_KEY, BASETEN_API_KEY
 
 Gateway mode (--gateway) routes through Majordomo Steward:
     - MAJORDOMO_GATEWAY_URL (defaults to http://localhost:7680)
@@ -89,15 +88,13 @@ def report_winner(llm: object, recorder: _FailoverRecorder) -> str:
             return label
     return "unknown"
 
-# Candidate hosts for a runtime-assembled cascade, cheapest-first. Whichever
-# have keys are used, in this order.
+# Candidate hosts for a runtime-assembled GLM-5.3 cascade. All three charge the
+# same input and output rate, so Baseten leads on its cheaper cached reads.
+# Whichever have keys are used, in this order.
 GLM_HOSTS: list[tuple[str, str, str]] = [
-    ("deepinfra", "zai-org/GLM-5.2", "DEEPINFRA_API_KEY"),
-    ("novita", "zai-org/glm-5.2", "NOVITA_API_KEY"),
-    ("baseten", "zai-org/GLM-5.2", "BASETEN_API_KEY"),
-    ("nebius", "zai-org/GLM-5.2", "NEBIUS_API_KEY"),
-    ("fireworks", "accounts/fireworks/models/glm-5p2", "FIREWORKS_API_KEY"),
-    ("together", "zai-org/GLM-5.2", "TOGETHER_API_KEY"),
+    ("baseten", "zai-org/GLM-5.3", "BASETEN_API_KEY"),
+    ("fireworks", "accounts/fireworks/models/glm-5p3", "FIREWORKS_API_KEY"),
+    ("together", "zai-org/GLM-5.3", "TOGETHER_API_KEY"),
 ]
 
 
@@ -127,7 +124,7 @@ async def demo_cascade_alias(use_gateway: bool = False) -> bool:
     print("Demo 2: Running a cascade alias")
     print("-" * 90)
 
-    alias = "glm-5.2"
+    alias = "glm-5.3"
     llm = get_llm_by_alias(alias, **gateway_kwargs(use_gateway, feature="cascade-demo"))
     chain = " -> ".join(f"{m.provider}/{m.model}" for m in llm.llms)
     print(f"\n  get_llm_by_alias({alias!r}) -> {chain}")
@@ -238,8 +235,7 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     ]
     if not hosts:
         print("\nNo open-weight credentials found — live demos skipped. Set one of:")
-        print("  DEEPINFRA_API_KEY | NOVITA_API_KEY | BASETEN_API_KEY")
-        print("  NEBIUS_API_KEY | FIREWORKS_API_KEY | TOGETHER_API_KEY")
+        print("  BASETEN_API_KEY | FIREWORKS_API_KEY | TOGETHER_API_KEY")
         return
 
     print(f"\nHosts with credentials: {', '.join(p for p, _ in hosts)}")

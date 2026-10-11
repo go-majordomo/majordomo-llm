@@ -9,7 +9,7 @@ from majordomo_llm.base import TOKENS_PER_MILLION
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.providers import Together
 
-MODEL_ID = "deepseek-ai/DeepSeek-V4-Pro"
+MODEL_ID = "deepseek-ai/DeepSeek-V4-Pro-0813"
 
 
 class CountryInfo(BaseModel):

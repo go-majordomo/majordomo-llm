@@ -634,6 +634,143 @@ class TestAnthropicWebSearch:
         )
 
 
+class TestAnthropicForcedToolChoice:
+    """Tests for supports_forced_tool_choice on the web-search structured path."""
+
+    FRANCE = {"name": "France", "capital": "Paris", "population": 67000000}
+
+    def _llm(self, supports_forced_tool_choice: bool) -> Anthropic:
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model="claude-opus-5-5",
+                input_cost=4.0,
+                output_cost=20.0,
+                use_web_search=True,
+                supports_structured_outputs=True,
+                supports_forced_tool_choice=supports_forced_tool_choice,
+                api_key="test-key",
+            )
+
+    async def _run_fallback(self, llm: Anthropic) -> dict:
+        """Drive the path where the model answers in prose instead of calling
+        the schema tool, and return the kwargs of the final request."""
+        llm.client.messages.create = AsyncMock(
+            side_effect=[
+                _text_response("France is a country."),
+                _tool_use_response("CountryInfo", self.FRANCE),
+            ]
+        )
+
+        response = await llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        assert response.content == '{"capital":"Paris","name":"France","population":67000000}'
+        assert llm.client.messages.create.call_count == 2
+        return llm.client.messages.create.call_args.kwargs
+
+    async def test_final_turn_forces_tool_when_supported(self):
+        call_kwargs = await self._run_fallback(self._llm(supports_forced_tool_choice=True))
+
+        assert call_kwargs["tool_choice"] == {"type": "tool", "name": "CountryInfo"}
+        assert len(call_kwargs["messages"]) == 1
+
+    async def test_final_turn_uses_auto_with_instruction_when_unsupported(self):
+        call_kwargs = await self._run_fallback(self._llm(supports_forced_tool_choice=False))
+
+        assert call_kwargs["tool_choice"] == {"type": "auto"}
+        assert [t["name"] for t in call_kwargs["tools"]] == ["CountryInfo"]
+        final_message = call_kwargs["messages"][-1]
+        assert final_message["role"] == "user"
+        assert "CountryInfo" in final_message["content"]
+
+    async def test_prose_on_final_turn_raises_parsing_error(self):
+        """With ``auto`` the model can still decline the tool; that must surface
+        as a parsing error rather than as an empty result."""
+        llm = self._llm(supports_forced_tool_choice=False)
+        llm.client.messages.create = AsyncMock(return_value=_text_response("France."))
+
+        with pytest.raises((ResponseParsingError, RetryError)):
+            await llm.get_json_schema_response(
+                user_prompt="Tell me about France",
+                response_schema=COUNTRY_SCHEMA,
+                schema_name="CountryInfo",
+            )
+
+    def test_requires_native_structured_outputs_when_unsupported(self):
+        with (
+            patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"),
+            pytest.raises(ValueError, match="supports_structured_outputs"),
+        ):
+            Anthropic(
+                model="claude-opus-5-5",
+                input_cost=4.0,
+                output_cost=20.0,
+                supports_structured_outputs=False,
+                supports_forced_tool_choice=False,
+                api_key="test-key",
+            )
+
+
+class TestAnthropicTextBlockJoining:
+    """A response's text blocks are pieces of one answer, not separate lines."""
+
+    @staticmethod
+    def _multi_block_response(*texts: str) -> MagicMock:
+        blocks = []
+        for text in texts:
+            block = MagicMock()
+            block.type = "text"
+            block.text = text
+            blocks.append(block)
+        response = MagicMock()
+        response.content = blocks
+        response.stop_reason = "end_turn"
+        response.usage = _usage_mock()
+        return response
+
+    async def test_cited_answer_is_joined_without_line_breaks(self):
+        """Web search splits an answer at citation boundaries, mid-sentence."""
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            llm = Anthropic(
+                model="claude-opus-5-5",
+                input_cost=4.0,
+                output_cost=20.0,
+                use_web_search=True,
+                supports_structured_outputs=True,
+                supports_forced_tool_choice=False,
+                api_key="test-key",
+            )
+        llm.client.messages.create = AsyncMock(
+            return_value=self._multi_block_response(
+                "CNBC's headline led with it: ",
+                '"OpenAI DevDay recap"',
+                ". Other coverage agrees.",
+            )
+        )
+
+        response = await llm.get_response("What was announced?")
+
+        assert response.content == (
+            'CNBC\'s headline led with it: "OpenAI DevDay recap". Other coverage agrees.'
+        )
+
+    async def test_line_breaks_inside_a_block_are_preserved(self):
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            llm = Anthropic(
+                model="claude-sonnet-5", input_cost=2.0, output_cost=10.0, api_key="test-key"
+            )
+        llm.client.messages.create = AsyncMock(
+            return_value=self._multi_block_response("First paragraph.\n\n", "Second paragraph.")
+        )
+
+        response = await llm.get_response("Write two paragraphs")
+
+        assert response.content == "First paragraph.\n\nSecond paragraph."
+
+
 class TestAnthropicPromptCaching:
     """Tests for the configurable prompt-cache breakpoint and cache costing."""
 

@@ -1,6 +1,6 @@
 [project]
 name = "majordomo-llm"
-version = "0.23.0"
+version = "0.24.0"
 description = "Unified Python interface for multiple LLM providers with cost tracking"
 readme = "README.md"
 license = {text = "MIT"}
@@ -16,10 +16,6 @@ keywords = [
     "fireworks",
     "together",
     "baseten",
-    "nebius",
-    "deepinfra",
-    "moonshot",
-    "novita",
     "ai",
     "machine-learning",
     "gpt",
@@ -54,11 +50,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/superset-studio/majordomo-llm"
+Homepage = "https://github.com/go-majordomo/majordomo-llm"
 Documentation = "https://majordomo-llm.readthedocs.io/"
-Repository = "https://github.com/superset-studio/majordomo-llm"
-Issues = "https://github.com/superset-studio/majordomo-llm/issues"
-Changelog = "https://github.com/superset-studio/majordomo-llm/blob/main/CHANGELOG.md"
+Repository = "https://github.com/go-majordomo/majordomo-llm"
+Issues = "https://github.com/go-majordomo/majordomo-llm/issues"
+Changelog = "https://github.com/go-majordomo/majordomo-llm/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 logging = [

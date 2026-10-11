@@ -2,7 +2,7 @@
 """Demo script showcasing the `majordomo` provider's server-side optimal routing.
 
 Every other provider names a concrete backend. The `majordomo` provider names a
-canonical open-weight model — `glm-5.2`, `kimi-k3`, `deepseek-v4-pro` and so on —
+canonical open-weight model — `glm-5.3`, `glm-5.2`, `kimi-k3` and so on —
 and lets Majordomo Steward choose which host serves it, per request.
 
 Two things follow from that, and this demo shows both:
@@ -13,7 +13,7 @@ Two things follow from that, and this demo shows both:
 - Cost cannot come from a fixed config entry. The usage is priced against the
   routed pair's rates in llm_config.yaml, so the same token counts cost
   different amounts depending on where the gateway sent them — GLM-5.2's cached
-  read is $0.14/M on Baseten and DeepInfra but $0.26/M on Novita.
+  read is $0.14/M on Baseten but $0.26/M on Together.
 
 Contrast with cascade_demo.py: an LLMCascade is CLIENT-side failover, where your
 process tries hosts in order and every hop is a real attempt. This is
@@ -67,7 +67,7 @@ PROMPT = "In one sentence, what problem does an inference gateway solve?"
 
 # Canonical names the gateway resolves. These are NOT host model IDs — the whole
 # point is that the caller does not pick a host.
-CANONICAL_MODELS = ["glm-5.2", "kimi-k3", "deepseek-v4-pro"]
+CANONICAL_MODELS = ["glm-5.3", "glm-5.2", "kimi-k3"]
 
 
 def explain(exc: Exception) -> str:

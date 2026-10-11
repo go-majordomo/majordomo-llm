@@ -2,8 +2,8 @@
 
 The request/response machinery lives in ``OpenAICompatibleLLM`` and is exercised
 here once through a throwaway subclass. The per-provider test modules
-(test_baseten.py, test_nebius.py, ...) only assert their own wiring rather than
-re-testing this surface four more times.
+(test_baseten.py) only assert their own wiring rather than re-testing this
+surface.
 """
 
 import logging

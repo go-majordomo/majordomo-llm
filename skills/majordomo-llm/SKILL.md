@@ -29,15 +29,15 @@ Use the factory — never instantiate providers directly:
 ```python
 from majordomo_llm import get_llm_instance
 
-llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+llm = get_llm_instance("anthropic", "claude-sonnet-5-5")
 llm = get_llm_instance("openai", "gpt-5-mini")
-llm = get_llm_instance("gemini", "gemini-2.5-flash")
-llm = get_llm_instance("deepseek", "deepseek-v4-pro")
+llm = get_llm_instance("gemini", "gemini-3.8-flash")
+llm = get_llm_instance("fireworks", "accounts/fireworks/models/glm-5p3")
 llm = get_llm_instance("cohere", "command-a-03-2025")
 
 # Custom base URL (e.g. route through a Majordomo gateway)
 llm = get_llm_instance(
-    "anthropic", "claude-sonnet-4-6",
+    "anthropic", "claude-sonnet-5-5",
     base_url="http://localhost:7680",
     default_headers={"X-Majordomo-Key": "mdm_sk_your_key_here"},
 )
@@ -47,18 +47,17 @@ To route through a gateway for centralized cost tracking, metadata attribution, 
 agent-run observability, see the **majordomo-gateway** skill.
 
 API keys come from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `CO_API_KEY`. Pass `api_key=` to override.
+`GEMINI_API_KEY`, `CO_API_KEY`, `FIREWORKS_API_KEY`, `TOGETHER_API_KEY`, `BASETEN_API_KEY`. Pass `api_key=` to override.
 
 ## Supported Providers and Models
 
 ```python
 from majordomo_llm import get_supported_providers, get_supported_models
 
-get_supported_providers()          # openai, anthropic, gemini, deepseek, cohere, bedrock,
-                                   # fireworks, together, baseten, nebius, deepinfra,
-                                   # moonshot, novita, ...
-get_supported_models("anthropic")  # ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6", ...]
-get_supported_models("openai")     # ["gpt-5", "gpt-5-mini", "gpt-4.1", "o3", "o4-mini", ...]
+get_supported_providers()          # openai, anthropic, gemini, cohere, bedrock,
+                                   # bedrock_mantle, fireworks, together, baseten, majordomo
+get_supported_models("anthropic")  # ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5", ...]
+get_supported_models("openai")     # ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", ...]
 ```
 
 ## Text Response
@@ -190,6 +189,26 @@ except ResponseTruncatedError as e:
     print(e.partial_content)   # whatever arrived before the cut
 ```
 
+### Reasoning (`reasoning_effort`, `thinking`)
+
+Open-weight models on Fireworks, Together and Baseten reason by default, usually at the
+top tier, and bill it as output tokens. The library's config sets `reasoning_effort:
+low` on each model where that measurably lowers it. Override per instance:
+
+```python
+llm = get_llm_instance("together", "moonshotai/Kimi-K3", reasoning_effort="high")
+llm = get_llm_instance("baseten", "deepseek-ai/DeepSeek-V4.1-Flash", thinking="disabled")
+llm = get_llm_instance("fireworks", "accounts/fireworks/models/kimi-k3",
+                       reasoning_effort="default")   # send nothing; host default
+```
+
+Passing either argument replaces both configured values. Values go to the host as-is
+and are **not portable**: `low` does nothing on some models and switches reasoning *on*
+for Baseten's `zai-org/GLM-5.2`. Supported on `anthropic`, `fireworks`, `together`,
+`baseten`; other providers raise `ConfigurationError`. Reasoning tokens are counted in
+`output_tokens`, not reported separately. Per-model behaviour:
+`docs/concepts/reasoning.md`.
+
 ## Streaming Response
 
 ```python
@@ -255,9 +274,9 @@ Tries providers in order; catches `ProviderError` and falls back to the next:
 from majordomo_llm import LLMCascade
 
 cascade = LLMCascade([
-    ("anthropic", "claude-sonnet-4-6"),   # primary
+    ("anthropic", "claude-sonnet-5-5"),   # primary
     ("openai", "gpt-5-mini"),             # fallback
-    ("gemini", "gemini-2.5-flash"),       # last resort
+    ("gemini", "gemini-3.8-flash"),       # last resort
 ])
 
 response = await cascade.get_response("Hello!")  # same interface as LLM
@@ -288,8 +307,8 @@ response.routed_model      # "accounts/fireworks/models/glm-5p2" — its native 
 response.total_cost        # priced from the routed backend's rates in llm_config.yaml
 ```
 
-Canonical models (`get_supported_models("majordomo")`): `deepseek-v4-pro`, `kimi-k2.6`,
-`kimi-k3`, `glm-5.1`, `glm-5.2`, `inkling`.
+Canonical models (`get_supported_models("majordomo")`): `glm-5.3`, `glm-5.2`,
+`kimi-k3`, `kimi-k2.6`, `glm-5.1`, `inkling`.
 
 Because the backend is only known after the call, cost is resolved from the gateway's
 `X-Majordomo-Routed-Provider` / `X-Majordomo-Routed-Model` response headers, not a fixed
@@ -307,9 +326,9 @@ llm = get_llm_by_alias("fast")        # single-model alias → LLM instance
 llm = get_llm_by_alias("resilient")   # cascade alias → LLMCascade instance
 
 # Register a runtime alias
-register_alias("my-fast", ("anthropic", "claude-haiku-4-5-20251001"))
+register_alias("my-fast", ("anthropic", "claude-haiku-5-5"))
 register_alias("my-cascade", [
-    ("anthropic", "claude-sonnet-4-6"),
+    ("anthropic", "claude-sonnet-5-5"),
     ("openai", "gpt-5-mini"),
 ])
 ```
@@ -323,7 +342,7 @@ from majordomo_llm import get_llm_instance
 from majordomo_llm.logging import LoggingLLM
 from majordomo_llm.logging.adapters import PostgresAdapter, S3Adapter
 
-llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+llm = get_llm_instance("anthropic", "claude-sonnet-5-5")
 
 db = await PostgresAdapter.create(
     host="localhost", port=5432,
@@ -381,7 +400,7 @@ class SentimentResult(BaseModel):
     reasoning: str
 
 async def analyze(text: str) -> SentimentResult:
-    llm = get_llm_instance("anthropic", "claude-sonnet-4-6")
+    llm = get_llm_instance("anthropic", "claude-sonnet-5-5")
     response = await llm.get_structured_json_response(
         response_model=SentimentResult,
         user_prompt=f"Analyze the sentiment of: {text}",

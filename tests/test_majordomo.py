@@ -14,7 +14,7 @@ GATEWAY_URL = "http://localhost:7680"
 # Routed backends the gateway may select for the canonical "glm-5.2" model.
 # Their cached-read rates differ (0.14 vs 0.26), which is the whole point of
 # resolving cost from the routed pair rather than a fixed config entry.
-FIREWORKS_GLM = ("fireworks", "accounts/fireworks/models/glm-5p2")
+BASETEN_GLM = ("baseten", "zai-org/GLM-5.2")
 TOGETHER_GLM = ("together", "zai-org/GLM-5.2")
 
 
@@ -121,8 +121,8 @@ class TestMajordomoGetResponse:
             content="Routed hello!",
             prompt_tokens=20,
             completion_tokens=8,
-            routed_provider=FIREWORKS_GLM[0],
-            routed_model=FIREWORKS_GLM[1],
+            routed_provider=BASETEN_GLM[0],
+            routed_model=BASETEN_GLM[1],
         )
         majordomo_llm.client.chat.completions.with_raw_response.create = AsyncMock(
             return_value=raw
@@ -133,8 +133,8 @@ class TestMajordomoGetResponse:
         assert response.content == "Routed hello!"
         assert response.input_tokens == 20
         assert response.output_tokens == 8
-        assert response.routed_provider == "fireworks"
-        assert response.routed_model == "accounts/fireworks/models/glm-5p2"
+        assert response.routed_provider == "baseten"
+        assert response.routed_model == "zai-org/GLM-5.2"
 
     async def test_prices_from_routed_pair_with_cache(self, majordomo_llm):
         """Cost should use the routed backend's rates, including its cache tier."""
@@ -143,8 +143,8 @@ class TestMajordomoGetResponse:
             prompt_tokens=1000,
             completion_tokens=200,
             cached_tokens=500,
-            routed_provider=FIREWORKS_GLM[0],
-            routed_model=FIREWORKS_GLM[1],
+            routed_provider=BASETEN_GLM[0],
+            routed_model=BASETEN_GLM[1],
         )
         majordomo_llm.client.chat.completions.with_raw_response.create = AsyncMock(
             return_value=raw
@@ -176,10 +176,10 @@ class TestMajordomoGetResponse:
             )
             return (await majordomo_llm.get_response("x")).total_cost
 
-        fireworks_cost = await price_for(*FIREWORKS_GLM)  # cached-read 0.14
+        baseten_cost = await price_for(*BASETEN_GLM)  # cached-read 0.14
         together_cost = await price_for(*TOGETHER_GLM)  # cached-read 0.26
 
-        assert together_cost > fireworks_cost
+        assert together_cost > baseten_cost
 
     async def test_missing_routing_headers_degrades_to_zero(self, majordomo_llm):
         """Absent routing headers should yield zero cost, not a crash."""
@@ -270,8 +270,8 @@ class TestMajordomoStreaming:
 
         raw = MagicMock()
         raw.headers = {
-            "X-Majordomo-Routed-Provider": FIREWORKS_GLM[0],
-            "X-Majordomo-Routed-Model": FIREWORKS_GLM[1],
+            "X-Majordomo-Routed-Provider": BASETEN_GLM[0],
+            "X-Majordomo-Routed-Model": BASETEN_GLM[1],
         }
         raw.parse = MagicMock(return_value=stream())
         majordomo_llm.client.chat.completions.with_raw_response.create = AsyncMock(
@@ -311,8 +311,8 @@ class TestMajordomoStreaming:
 
         raw = MagicMock()
         raw.headers = {
-            "X-Majordomo-Routed-Provider": FIREWORKS_GLM[0],
-            "X-Majordomo-Routed-Model": FIREWORKS_GLM[1],
+            "X-Majordomo-Routed-Provider": BASETEN_GLM[0],
+            "X-Majordomo-Routed-Model": BASETEN_GLM[1],
         }
         raw.parse = MagicMock(return_value=stream())
         majordomo_llm.client.chat.completions.with_raw_response.create = AsyncMock(
@@ -322,10 +322,10 @@ class TestMajordomoStreaming:
         result = await majordomo_llm.get_response_stream("Say hello")
         collected = await result.collect()
 
-        assert result.routed_provider == FIREWORKS_GLM[0]
-        assert result.routed_model == FIREWORKS_GLM[1]
-        assert collected.routed_provider == FIREWORKS_GLM[0]
-        assert collected.routed_model == FIREWORKS_GLM[1]
+        assert result.routed_provider == BASETEN_GLM[0]
+        assert result.routed_model == BASETEN_GLM[1]
+        assert collected.routed_provider == BASETEN_GLM[0]
+        assert collected.routed_model == BASETEN_GLM[1]
         assert collected.content == "Hello"
 
     async def test_direct_provider_stream_has_no_routed_identity(self):

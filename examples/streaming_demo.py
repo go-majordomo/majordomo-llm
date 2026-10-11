@@ -14,7 +14,6 @@ Prerequisites:
        - OPENAI_API_KEY
        - ANTHROPIC_API_KEY
        - GEMINI_API_KEY
-       - DEEPSEEK_API_KEY
        - CO_API_KEY
 
 Usage:
@@ -55,7 +54,7 @@ async def demo_streaming(
     try:
         # Start the clock BEFORE get_response_stream() so TTFT includes the
         # connection + request round-trip uniformly. Some SDKs perform that
-        # network I/O inside the await (OpenAI/Anthropic/Cohere/DeepSeek/
+        # network I/O inside the await (OpenAI/Anthropic/Cohere/
         # Fireworks/Together), others lazily during iteration (Bedrock);
         # measuring from here keeps TTFT comparable across providers.
         start = time.perf_counter()
@@ -157,7 +156,7 @@ async def main(use_gateway: bool = False, provider: str | None = None) -> None:
     if not available_providers:
         print("No API keys found. Set at least one of:")
         print("  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,")
-        print("  DEEPSEEK_API_KEY, or CO_API_KEY")
+        print("  CO_API_KEY")
         return
 
     print(f"Available providers: {', '.join(p[0] for p in available_providers)}")
