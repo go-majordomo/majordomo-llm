@@ -675,7 +675,50 @@ class TestAnthropicForcedToolChoice:
         call_kwargs = await self._run_fallback(self._llm(supports_forced_tool_choice=True))
 
         assert call_kwargs["tool_choice"] == {"type": "tool", "name": "CountryInfo"}
-        assert len(call_kwargs["messages"]) == 1
+        assert [t["name"] for t in call_kwargs["tools"]] == ["CountryInfo"]
+        final_message = call_kwargs["messages"][-1]
+        assert final_message["role"] == "user"
+        assert "CountryInfo" in final_message["content"]
+
+    @pytest.mark.parametrize("supports_forced_tool_choice", [True, False])
+    async def test_final_turn_carries_the_search_turn_reply(self, supports_forced_tool_choice):
+        """The prose turn holds the search results; dropping it leaves the final
+        turn to answer from memory."""
+        llm = self._llm(supports_forced_tool_choice=supports_forced_tool_choice)
+        search_turn = _text_response("France is a country.")
+        llm.client.messages.create = AsyncMock(
+            side_effect=[search_turn, _tool_use_response("CountryInfo", self.FRANCE)]
+        )
+
+        await llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        messages = llm.client.messages.create.call_args.kwargs["messages"]
+        assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+        assert messages[1]["content"] is search_turn.content
+
+    async def test_final_turn_drops_a_search_turn_that_was_cut_short(self):
+        """A truncated turn may end on a search with no result, so it is not
+        replayed."""
+        llm = self._llm(supports_forced_tool_choice=True)
+        llm.client.messages.create = AsyncMock(
+            side_effect=[
+                _text_response("France is", stop_reason="max_tokens"),
+                _tool_use_response("CountryInfo", self.FRANCE),
+            ]
+        )
+
+        await llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+        )
+
+        messages = llm.client.messages.create.call_args.kwargs["messages"]
+        assert [m["role"] for m in messages] == ["user", "user"]
 
     async def test_final_turn_uses_auto_with_instruction_when_unsupported(self):
         call_kwargs = await self._run_fallback(self._llm(supports_forced_tool_choice=False))
@@ -712,6 +755,88 @@ class TestAnthropicForcedToolChoice:
                 supports_forced_tool_choice=False,
                 api_key="test-key",
             )
+
+
+class TestAnthropicWebSearchStructuredUsage:
+    """The web-search structured path bills every turn it takes, not the last."""
+
+    FRANCE = {"name": "France", "capital": "Paris", "population": 67000000}
+
+    @pytest.fixture
+    def llm(self) -> Anthropic:
+        with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+            return Anthropic(
+                model="claude-sonnet-5",
+                input_cost=2.0,
+                output_cost=10.0,
+                cached_input_cost=0.2,
+                cache_write_cost=2.5,
+                use_web_search=True,
+                supports_structured_outputs=True,
+                api_key="test-key",
+            )
+
+    async def _ask(self, llm: Anthropic, **kwargs):
+        return await llm.get_json_schema_response(
+            user_prompt="Tell me about France",
+            response_schema=COUNTRY_SCHEMA,
+            schema_name="CountryInfo",
+            **kwargs,
+        )
+
+    async def test_usage_is_summed_across_search_turn_and_final_turn(self, llm):
+        search_turn = _text_response("France is a country.")
+        search_turn.usage.input_tokens = 9000
+        search_turn.usage.output_tokens = 400
+        search_turn.usage.cache_read_input_tokens = 100
+        search_turn.usage.cache_creation_input_tokens = 50
+        search_turn.usage.server_tool_use = MagicMock(web_search_requests=3)
+        final_turn = _tool_use_response("CountryInfo", self.FRANCE)
+        final_turn.usage.input_tokens = 9500
+        final_turn.usage.output_tokens = 60
+        final_turn.usage.cache_read_input_tokens = 150
+        llm.client.messages.create = AsyncMock(side_effect=[search_turn, final_turn])
+
+        response = await self._ask(llm)
+
+        assert llm.client.messages.create.call_count == 2
+        assert response.input_tokens == 18500
+        assert response.output_tokens == 460
+        assert response.cached_tokens == 250
+        assert response.cache_creation_tokens == 50
+        assert response.tool_use_cost == pytest.approx(0.03)
+        expected_input_cost = (18500 * 2.0 + 250 * 0.2 + 50 * 2.5) / TOKENS_PER_MILLION
+        expected_output_cost = 460 * 10.0 / TOKENS_PER_MILLION
+        assert response.input_cost == pytest.approx(expected_input_cost)
+        assert response.output_cost == pytest.approx(expected_output_cost)
+        assert response.total_cost == pytest.approx(
+            expected_input_cost + expected_output_cost + 0.03
+        )
+
+    async def test_single_turn_reports_that_turn_alone(self, llm):
+        only_turn = _tool_use_response("CountryInfo", self.FRANCE)
+        only_turn.usage.server_tool_use = MagicMock(web_search_requests=1)
+        llm.client.messages.create = AsyncMock(return_value=only_turn)
+
+        response = await self._ask(llm)
+
+        assert llm.client.messages.create.call_count == 1
+        assert response.input_tokens == 25
+        assert response.output_tokens == 10
+        assert response.tool_use_cost == pytest.approx(0.01)
+
+    async def test_truncation_reports_the_final_turn_output(self, llm):
+        """``max_tokens`` caps each turn, so the error names the turn that hit it."""
+        search_turn = _text_response("France is a country.")
+        search_turn.usage.output_tokens = 400
+        final_turn = _tool_use_response("CountryInfo", self.FRANCE, stop_reason="max_tokens")
+        final_turn.usage.output_tokens = 500
+        llm.client.messages.create = AsyncMock(side_effect=[search_turn, final_turn])
+
+        with pytest.raises(ResponseTruncatedError) as exc_info:
+            await self._ask(llm, max_tokens=500)
+
+        assert exc_info.value.output_tokens == 500
 
 
 class TestAnthropicTextBlockJoining:

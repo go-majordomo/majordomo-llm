@@ -125,6 +125,7 @@ class TestGeminiGetJSONResponse:
         mock_response.text = '```json\n{"key": "value"}\n```'
         mock_response.usage_metadata.prompt_token_count = 10
         mock_response.usage_metadata.candidates_token_count = 8
+        mock_response.usage_metadata.thoughts_token_count = 0
 
         gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
@@ -154,6 +155,7 @@ class TestGeminiStructuredResponse:
         mock_response.text = '{"name": "Germany", "capital": "Berlin", "population": 83000000}'
         mock_response.usage_metadata.prompt_token_count = 30
         mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.usage_metadata.thoughts_token_count = 0
 
         gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
@@ -184,6 +186,7 @@ class TestGeminiStructuredResponse:
         )
         mock_response.usage_metadata.prompt_token_count = 30
         mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.usage_metadata.thoughts_token_count = 0
 
         gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
@@ -206,6 +209,7 @@ class TestGeminiStructuredResponse:
         mock_response.text = '{"name": "Germany", "capital": "Berlin", "population": 83000000}'
         mock_response.usage_metadata.prompt_token_count = 30
         mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.usage_metadata.thoughts_token_count = 0
 
         gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
@@ -226,6 +230,7 @@ class TestGeminiStructuredResponse:
         mock_response.text = '{"name": "Germany", "capital": "Berlin", "population": 83000000}'
         mock_response.usage_metadata.prompt_token_count = 30
         mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.usage_metadata.thoughts_token_count = 0
 
         gemini_llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
@@ -361,6 +366,84 @@ class TestGeminiGetResponseStream:
         assert response.input_tokens == 15
 
 
+class TestGeminiThinkingTokens:
+    """Thinking is billed as output but reported outside the candidates count."""
+
+    @pytest.fixture
+    def gemini_llm(self):
+        with patch("majordomo_llm.providers.gemini.genai.Client"):
+            return Gemini(
+                model="gemini-3.6-flash",
+                input_cost=0.75,
+                output_cost=3.75,
+                api_key="test-key",
+            )
+
+    @staticmethod
+    def _response(text: str, thoughts: int | None) -> MagicMock:
+        response = MagicMock()
+        response.text = text
+        response.usage_metadata.prompt_token_count = 26
+        response.usage_metadata.candidates_token_count = 32
+        response.usage_metadata.thoughts_token_count = thoughts
+        response.usage_metadata.cached_content_token_count = 0
+        response.candidates = []
+        return response
+
+    async def test_text_response_bills_thoughts_as_output(self, gemini_llm):
+        gemini_llm.client.aio.models.generate_content = AsyncMock(
+            return_value=self._response("Nine.", thoughts=803)
+        )
+
+        response = await gemini_llm.get_response("How many sheep?")
+
+        assert response.input_tokens == 26
+        assert response.output_tokens == 835
+        assert response.output_cost == pytest.approx(835 * 3.75 / TOKENS_PER_MILLION)
+        assert response.total_cost == pytest.approx(
+            (26 * 0.75 + 835 * 3.75) / TOKENS_PER_MILLION
+        )
+
+    async def test_structured_response_bills_thoughts_as_output(self, gemini_llm):
+        gemini_llm.client.aio.models.generate_content = AsyncMock(
+            return_value=self._response('{"status": "ok"}', thoughts=803)
+        )
+
+        response = await gemini_llm.get_json_schema_response(
+            "Return status",
+            response_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+        )
+
+        assert response.output_tokens == 835
+
+    async def test_missing_thoughts_count_is_treated_as_zero(self, gemini_llm):
+        gemini_llm.client.aio.models.generate_content = AsyncMock(
+            return_value=self._response("Nine.", thoughts=None)
+        )
+
+        response = await gemini_llm.get_response("How many sheep?")
+
+        assert response.output_tokens == 32
+
+    async def test_stream_bills_thoughts_from_the_final_chunk(self, gemini_llm):
+        first = self._response("Nine ", thoughts=316)
+        first.usage_metadata.candidates_token_count = 8
+        last = self._response("sheep.", thoughts=316)
+
+        async def chunks():
+            yield first
+            yield last
+
+        gemini_llm.client.aio.models.generate_content_stream = AsyncMock(return_value=chunks())
+
+        stream = await gemini_llm.get_response_stream("How many sheep?")
+        text = "".join([piece async for piece in stream])
+
+        assert text == "Nine sheep."
+        assert stream.usage.output_tokens == 348
+        assert stream.usage.output_cost == pytest.approx(348 * 3.75 / TOKENS_PER_MILLION)
+
+
 class TestGeminiWebSearch:
     """Tests for Gemini web search wiring."""
 
@@ -434,6 +517,7 @@ class TestGeminiWebSearch:
         mock_response.text = '{"status": "ok"}'
         mock_response.usage_metadata.prompt_token_count = 30
         mock_response.usage_metadata.candidates_token_count = 20
+        mock_response.usage_metadata.thoughts_token_count = 0
         mock_response.candidates = []
         llm.client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
@@ -447,3 +531,74 @@ class TestGeminiWebSearch:
         assert config.tools[0].google_search is not None
         assert config.response_mime_type == "application/json"
         assert response.content == '{"status":"ok"}'
+
+    STATUS_SCHEMA = {"type": "object", "properties": {"status": {"type": "string"}}}
+
+    @staticmethod
+    def _structured_llm(use_web_search: bool) -> Gemini:
+        with patch("majordomo_llm.providers.gemini.genai.Client"):
+            return Gemini(
+                model="gemini-3.6-flash",
+                input_cost=0.75,
+                output_cost=3.75,
+                use_web_search=use_web_search,
+                api_key="test-key",
+            )
+
+    @staticmethod
+    def _structured_response(grounded_candidates: int) -> MagicMock:
+        response = MagicMock()
+        response.text = '{"status": "ok"}'
+        response.usage_metadata.prompt_token_count = 30
+        response.usage_metadata.candidates_token_count = 20
+        response.usage_metadata.thoughts_token_count = 0
+        response.usage_metadata.cached_content_token_count = 0
+        candidates = []
+        for _ in range(grounded_candidates):
+            candidate = MagicMock()
+            candidate.grounding_metadata = MagicMock()
+            candidates.append(candidate)
+        ungrounded = MagicMock()
+        ungrounded.grounding_metadata = None
+        response.candidates = candidates or [ungrounded]
+        return response
+
+    async def test_structured_grounded_call_bills_one_query_without_metadata(self):
+        """A grounded structured response carries no grounding_metadata, so one
+        query is billed as a floor."""
+        llm = self._structured_llm(use_web_search=True)
+        llm.client.aio.models.generate_content = AsyncMock(
+            return_value=self._structured_response(grounded_candidates=0)
+        )
+
+        response = await llm.get_json_schema_response(
+            "Return status", response_schema=self.STATUS_SCHEMA
+        )
+
+        assert response.tool_use_cost == pytest.approx(0.035)
+        expected_tokens_cost = (30 * 0.75 + 20 * 3.75) / TOKENS_PER_MILLION
+        assert response.total_cost == pytest.approx(expected_tokens_cost + 0.035)
+
+    async def test_structured_grounded_call_does_not_double_bill_with_metadata(self):
+        llm = self._structured_llm(use_web_search=True)
+        llm.client.aio.models.generate_content = AsyncMock(
+            return_value=self._structured_response(grounded_candidates=1)
+        )
+
+        response = await llm.get_json_schema_response(
+            "Return status", response_schema=self.STATUS_SCHEMA
+        )
+
+        assert response.tool_use_cost == pytest.approx(0.035)
+
+    async def test_structured_call_without_web_search_bills_no_query(self):
+        llm = self._structured_llm(use_web_search=False)
+        llm.client.aio.models.generate_content = AsyncMock(
+            return_value=self._structured_response(grounded_candidates=0)
+        )
+
+        response = await llm.get_json_schema_response(
+            "Return status", response_schema=self.STATUS_SCHEMA
+        )
+
+        assert response.tool_use_cost == 0.0
