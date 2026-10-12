@@ -137,6 +137,22 @@ class Gemini(LLM):
         grounded = sum(1 for c in candidates if getattr(c, "grounding_metadata", None) is not None)
         return grounded * self._GROUNDED_QUERY_COST
 
+    def _compute_structured_web_search_cost(self, response: Any) -> float:
+        """Return the grounded-query fee for a structured response.
+
+        A response produced with both a grounding tool and a response schema
+        carries no ``grounding_metadata`` even when the search ran (observed on
+        gemini-3.6-flash, gemini-3.8-flash and gemini-3.1-pro-preview,
+        2026-10-11), so nothing in it says whether or how often the model
+        searched. One query is billed as a floor whenever web search is
+        enabled. This is an estimate: it over-reports by one query if the model
+        chose not to search and under-reports if it issued several.
+        """
+        cost = self._compute_web_search_cost(response)
+        if not self.use_web_search:
+            return cost
+        return max(cost, self._GROUNDED_QUERY_COST)
+
     @retry_provider_call
     async def _get_response_impl(
         self,
@@ -262,9 +278,8 @@ class Gemini(LLM):
                     if chunk.text:
                         yield chunk.text
                     if chunk.usage_metadata:
-                        state.input_tokens = chunk.usage_metadata.prompt_token_count or 0
-                        state.output_tokens = chunk.usage_metadata.candidates_token_count or 0
-                        state.cached_tokens = chunk.usage_metadata.cached_content_token_count or 0
+                        counts = _gemini_token_counts(chunk)
+                        state.input_tokens, state.output_tokens, state.cached_tokens = counts
             except genai_errors.APIError as e:
                 raise ProviderError(
                     f"Gemini API error: {e}",
@@ -411,7 +426,7 @@ class Gemini(LLM):
         input_cost, output_cost, total_cost = self._calculate_costs(
             input_tokens, output_tokens, cached_tokens
         )
-        tool_use_cost = self._compute_web_search_cost(response)
+        tool_use_cost = self._compute_structured_web_search_cost(response)
         total_cost += tool_use_cost
 
         return LLMResponse(
@@ -471,11 +486,18 @@ def _gemini_token_counts(response: Any) -> tuple[int, int, int]:
     ``prompt_token_count`` is the full prompt size and already includes
     ``cached_content_token_count`` (cache reads), so the cached count is a subset
     of the input count.
+
+    Output is the visible answer plus the model's thinking. Gemini reports the
+    two separately (``candidates_token_count`` excludes
+    ``thoughts_token_count``) and bills both at the output rate, so they are
+    summed here. Stream chunks carry the same fields, cumulative, on every
+    chunk.
     """
     usage_metadata = response.usage_metadata
     assert usage_metadata is not None
     return (
         int(usage_metadata.prompt_token_count or 0),
-        int(usage_metadata.candidates_token_count or 0),
+        int(usage_metadata.candidates_token_count or 0)
+        + int(usage_metadata.thoughts_token_count or 0),
         int(usage_metadata.cached_content_token_count or 0),
     )

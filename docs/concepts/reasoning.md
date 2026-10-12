@@ -48,6 +48,12 @@ default; `claude-opus-5-5` and `claude-sonnet-5-5` think on every request, and
 `thinking="disabled"` is rejected by both. OpenAI, Gemini, Cohere, Bedrock and Bedrock Mantle have no reasoning setting in
 this library.
 
+Having no setting does not mean a model does not reason. Gemini 3 models think on
+every request and bill that thinking at the output rate, while reporting it apart
+from the visible answer. The library adds the two, so `output_tokens` and
+`output_cost` on a Gemini response cover both; on short answers the thinking is
+usually the larger part.
+
 ## Choosing for Yourself
 
 Pass `reasoning_effort` or `thinking` to `get_llm_instance()` to override the config

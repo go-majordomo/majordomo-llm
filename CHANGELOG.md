@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-10-12
+
+Cost reporting fixes for Gemini and for web search with structured output. **Reported Gemini cost rises on every call**: the library was not counting thinking tokens, which Google bills as output. Nothing about what the vendors charge has changed; the numbers now match it more closely. Each fix was checked against the live API on 2026-10-11 or 2026-10-12.
+
+### Fixed
+
+- **Gemini thinking tokens were never billed.** Gemini reports thinking in `thoughts_token_count`, outside `candidates_token_count`, and bills both at the output rate. The library read only the candidates count, so `output_tokens`, `output_cost` and `total_cost` covered the visible answer alone. They now include thinking on the text, structured and streaming paths. On `gemini-3.6-flash`, `gemini-3.8-flash` and `gemini-3.1-pro-preview` thinking ran from 3 to 35 times the answer; one structured call that reported 32 output tokens now reports 622
+  - Image generation (`gemini_image`) reads usage in a different shape and was not examined
+- **Anthropic web search with structured output reported only its last request.** When the model answers in prose instead of calling the schema tool, the library makes a second request for the tool call. Only that second request's usage was priced, dropping the first one's tokens, cache write and search fee. Usage is now summed over every request. On `claude-sonnet-5-5` and `claude-sonnet-5` the two-request case had reported $0.006 and $0.002 for calls that cost $0.046 and $0.045. A call answered in one request was already correct
+- **Anthropic web search with structured output could return an answer that ignored the search.** In the same two-request case, the second request carried only the original question, so the model answered from memory: `claude-sonnet-5-5` returned an outdated value and `claude-sonnet-5` returned `UNKNOWN` in every field, with no error. The first reply, search results included, is now sent with the second request, followed by an instruction to call the schema tool. The second request is larger as a result, about 8,000 input tokens where it was about 600
+  - The reply is carried only when that turn finished normally. A search turn cut off by `max_tokens`, or paused by Anthropic, still leads to a second request without the search results
+- **Gemini web search with structured output reported no search fee.** A response produced with both the search tool and a response schema carries no `grounding_metadata`, although the search runs, so the fee was always zero. One grounded query is now billed whenever `use_web_search` is on for a structured call. This is an estimate: the response does not say whether or how many times the model searched, so it is one query too high when the model did not search and too low when it searched more than once
+
+### Known gaps
+
+- **The Gemini search fee is still $0.035 per grounded response.** Google's pricing page lists $14 per 1,000 for Gemini 3 and newer and is not consistent on whether that is per request or per search query. The constant was left alone until the rate is confirmed
+
 ## [0.24.0] - 2026-10-11
 
 A registry refresh. Every model left in `llm_config.yaml` was called live on 2026-10-10 or 2026-10-11, and everything that no longer answered, or that belonged to an older generation, is gone.
@@ -490,7 +507,8 @@ A registry refresh. Every model left in `llm_config.yaml` was called live on 202
   - `ProviderError` - Provider API errors
   - `ResponseParsingError` - Response parsing failures
 
-[Unreleased]: https://github.com/go-majordomo/majordomo-llm/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/go-majordomo/majordomo-llm/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/go-majordomo/majordomo-llm/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.22.1...v0.23.0
 [0.4.0]: https://github.com/go-majordomo/majordomo-llm/compare/v0.3.1...v0.4.0

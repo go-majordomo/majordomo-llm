@@ -4,6 +4,7 @@ import base64
 import logging
 import time
 from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass
 from typing import Any
 
 import anthropic
@@ -49,6 +50,43 @@ MAX_NONSTREAMING_TOKENS = 21_333
 #: on Fable 5, where thinking is always on). Legacy ``enabled`` + ``budget_tokens``
 #: is intentionally not exposed here.
 _THINKING_MODES = frozenset({"adaptive", "disabled"})
+
+
+@dataclass(frozen=True)
+class _TurnUsage:
+    """Billable usage of one or more ``messages.create`` turns.
+
+    Every turn of a multi-turn exchange is billed, so a path that makes several
+    requests to produce one answer sums them with ``+`` and prices the total
+    rather than the last response alone.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    cache_creation_tokens: int = 0
+    web_search_requests: int = 0
+
+    @classmethod
+    def from_response(cls, response: Any) -> "_TurnUsage":
+        """Read the usage Anthropic reported for a single response."""
+        usage = response.usage
+        return cls(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_tokens=usage.cache_read_input_tokens or 0,
+            cache_creation_tokens=usage.cache_creation_input_tokens or 0,
+            web_search_requests=_web_search_requests(usage),
+        )
+
+    def __add__(self, other: "_TurnUsage") -> "_TurnUsage":
+        return _TurnUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
+            cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
+            web_search_requests=self.web_search_requests + other.web_search_requests,
+        )
 
 
 class Anthropic(LLM):
@@ -250,11 +288,7 @@ class Anthropic(LLM):
         Reads ``response.usage.server_tool_use.web_search_requests`` which is
         populated only when the web_search tool was actually invoked.
         """
-        server_tool_use = getattr(response.usage, "server_tool_use", None)
-        if server_tool_use is None:
-            return 0.0
-        requests = getattr(server_tool_use, "web_search_requests", 0) or 0
-        return requests * self._WEB_SEARCH_COST_PER_REQUEST
+        return _web_search_requests(response.usage) * self._WEB_SEARCH_COST_PER_REQUEST
 
     @retry_provider_call
     async def _get_response_impl(
@@ -595,7 +629,11 @@ class Anthropic(LLM):
         resolved_max_tokens = self._resolve_nonstreaming_max_tokens(max_tokens)
 
         if self.use_web_search:
-            response, execution_time = await self._json_schema_response_with_web_search_helper(
+            (
+                response,
+                usage,
+                execution_time,
+            ) = await self._json_schema_response_with_web_search_helper(
                 user_prompt=user_prompt,
                 response_schema=response_schema,
                 system_prompt=system_prompt,
@@ -607,7 +645,7 @@ class Anthropic(LLM):
             )
             content = _extract_tool_use_content(response.content, schema_name)
             return self._finalize_json_schema_response(
-                content, response, execution_time, response_schema, resolved_max_tokens
+                content, response, execution_time, response_schema, resolved_max_tokens, usage
             )
 
         if self.supports_structured_outputs:
@@ -767,30 +805,39 @@ class Anthropic(LLM):
         execution_time: float,
         response_schema: dict[str, Any],
         max_tokens: int,
+        usage: _TurnUsage | None = None,
     ) -> LLMResponse:
         """Compute usage/cost and validate structured content into an ``LLMResponse``.
 
+        ``usage`` is the total across every turn that produced ``response``; it
+        defaults to that response's own usage for the single-request paths.
+
         Raises :class:`ResponseTruncatedError` before parsing: a structured
         response cut off at the cap is malformed JSON, and reporting the cause
-        beats a downstream parse error that names the symptom.
+        beats a downstream parse error that names the symptom. ``max_tokens``
+        caps each turn separately, so the check reads the final turn's output
+        rather than the total.
         """
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
-        self._check_truncation(response.stop_reason, max_tokens, output_tokens, str(content))
-        cached_tokens = response.usage.cache_read_input_tokens or 0
-        cache_creation_tokens = response.usage.cache_creation_input_tokens or 0
-        input_cost, output_cost, total_cost = self._calculate_costs(
-            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        self._check_truncation(
+            response.stop_reason, max_tokens, response.usage.output_tokens, str(content)
         )
-        tool_use_cost = self._compute_web_search_cost(response)
+        if usage is None:
+            usage = _TurnUsage.from_response(response)
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_tokens,
+            usage.cache_creation_tokens,
+        )
+        tool_use_cost = usage.web_search_requests * self._WEB_SEARCH_COST_PER_REQUEST
         total_cost += tool_use_cost
 
         return LLMResponse(
             content=canonicalize_json_schema_output(content, response_schema),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_tokens=usage.cached_tokens,
+            cache_creation_tokens=usage.cache_creation_tokens,
             input_cost=input_cost,
             output_cost=output_cost,
             total_cost=total_cost,
@@ -809,8 +856,12 @@ class Anthropic(LLM):
         extra_headers: dict[str, str] | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         images: tuple[ImageInput, ...] = (),
-    ) -> tuple[Any, float]:
-        """Helper for web search with raw JSON-schema structured response."""
+    ) -> tuple[Any, _TurnUsage, float]:
+        """Helper for web search with raw JSON-schema structured response.
+
+        Returns the response carrying the schema tool call, the usage summed
+        over every turn it took to get there, and the elapsed time.
+        """
         structured_response_tool = ToolParam(
             name=schema_name,
             description=schema_description
@@ -835,6 +886,7 @@ class Anthropic(LLM):
         start_time = time.time()
         current_messages = messages.copy()
         search_count = 0
+        usage = _TurnUsage()
 
         try:
             while search_count < 3:
@@ -848,12 +900,13 @@ class Anthropic(LLM):
                     **self._config_create_kwargs(),
                     extra_headers=extra_headers,
                 )
+                usage += _TurnUsage.from_response(response)
 
                 if response.stop_reason == "tool_use":
                     tool_uses = [block for block in response.content if block.type == "tool_use"]
                     if any(tool_use.name == schema_name for tool_use in tool_uses):
                         execution_time = time.time() - start_time
-                        return response, execution_time
+                        return response, usage, execution_time
 
                     if any(tool_use.name == "web_search" for tool_use in tool_uses):
                         logger.info("Web search initiated (turn %d)", search_count + 1)
@@ -869,25 +922,33 @@ class Anthropic(LLM):
                             }
                         )
                         continue
+
+                # The model answered in prose instead of calling the schema
+                # tool. Its reply holds the search results, so it goes into the
+                # final request; without it the model answers from memory.
+                # Only a completed turn is carried: one cut short may end on a
+                # search with no result, which is not a valid message.
+                if response.stop_reason == "end_turn" and response.content:
+                    current_messages.append({"role": "assistant", "content": response.content})
                 break
 
-            # The model stopped searching without calling the schema tool. Ask
-            # for the answer with only that tool on offer. Models that reject a
-            # forced tool_choice get ``auto`` and an explicit instruction instead.
+            # Ask for the answer with only the schema tool on offer. Models that
+            # reject a forced tool_choice get ``auto``; every model gets the
+            # explicit instruction, which also closes the carried-over turn.
             final_tool_choice: ToolChoiceToolParam | ToolChoiceAutoParam
             if self.supports_forced_tool_choice:
                 final_tool_choice = ToolChoiceToolParam(type="tool", name=schema_name)
             else:
                 final_tool_choice = ToolChoiceAutoParam(type="auto")
-                current_messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Call the {schema_name} tool now with your final answer. "
-                            "Do not reply in plain text."
-                        ),
-                    }
-                )
+            current_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Call the {schema_name} tool now with your final answer. "
+                        "Do not reply in plain text."
+                    ),
+                }
+            )
 
             final_response = await self.client.messages.create(
                 model=self.model,
@@ -907,7 +968,19 @@ class Anthropic(LLM):
             ) from e
 
         execution_time = time.time() - start_time
-        return final_response, execution_time
+        return final_response, usage + _TurnUsage.from_response(final_response), execution_time
+
+
+def _web_search_requests(usage: Any) -> int:
+    """Return how many server-side web searches a response's usage reports.
+
+    ``usage.server_tool_use`` is populated only when the web_search tool was
+    actually invoked.
+    """
+    server_tool_use = getattr(usage, "server_tool_use", None)
+    if server_tool_use is None:
+        return 0
+    return getattr(server_tool_use, "web_search_requests", 0) or 0
 
 
 def _join_text_blocks(texts: Iterable[str]) -> str:

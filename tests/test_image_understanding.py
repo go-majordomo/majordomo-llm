@@ -169,6 +169,7 @@ async def test_gemini_sends_inline_image_part():
         usage_metadata=SimpleNamespace(
             prompt_token_count=20,
             candidates_token_count=3,
+            thoughts_token_count=None,
             cached_content_token_count=0,
         ),
         candidates=[],
