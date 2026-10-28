@@ -14,7 +14,7 @@ A fix for the Anthropic provider, which failed on every call with anthropic SDK 
 ### Added
 
 - **`InvalidRequestError`**, raised when a request's arguments are invalid before anything is sent: a non-positive `max_tokens`, or an Anthropic non-streaming `max_tokens` above the SDK's 21,333 limit. These raised a plain `ValueError` before. It subclasses `ValueError`, so `except ValueError` still catches it. `LLMCascade` does not fail over on it, since every provider would receive the same arguments
-- **CI that tests against current SDK releases.** `.github/workflows/tests.yml` runs the suite on Python 3.12 and 3.13 against the lockfile, every dependency at its declared minimum, the newest allowed releases, and anthropic 1.x, on every push and pull request and weekly. There was no test CI before
+- **CI that tests against current SDK releases.** `.github/workflows/tests.yml` runs the suite on Python 3.12 and 3.13 against the lockfile, every dependency at its declared minimum, the newest allowed releases, and anthropic 1.x, on every push to `main` and every pull request. There was no test CI before
 - **Tests that build each provider's request through its real SDK client** (`tests/test_sdk_payloads.py`), over a mock HTTP transport. The provider tests mock the SDK client and so could not see an SDK type or argument change; these fail on one. Bedrock is not covered
 
 ### Changed

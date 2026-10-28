@@ -4,10 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Provider SDKs ship new majors without any change here. The anthropic 2.x
-  # break reached users that way, so run weekly against whatever is newest.
-  schedule:
-    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -23,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.12"
           enable-cache: true
@@ -45,7 +41,7 @@ jobs:
         deps: [locked, lowest, highest, anthropic-1x]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
