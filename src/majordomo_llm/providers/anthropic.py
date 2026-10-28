@@ -5,11 +5,13 @@ import logging
 import time
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, cast
 
 import anthropic
 from anthropic.types import (
+    Base64ImageSourceParam,
     CacheControlEphemeralParam,
+    ImageBlockParam,
     MessageParam,
     TextBlockParam,
     ToolChoiceAutoParam,
@@ -30,7 +32,7 @@ from majordomo_llm.base import (
     resolve_api_key,
     strip_unsupported_schema_constraints,
 )
-from majordomo_llm.exceptions import ProviderError, ResponseParsingError
+from majordomo_llm.exceptions import InvalidRequestError, ProviderError, ResponseParsingError
 from majordomo_llm.retry import retry_provider_call
 
 logger = logging.getLogger(__name__)
@@ -247,11 +249,12 @@ class Anthropic(LLM):
             The cap to send.
 
         Raises:
-            ValueError: If the resolved cap exceeds :data:`MAX_NONSTREAMING_TOKENS`.
+            InvalidRequestError: If the resolved cap exceeds
+                :data:`MAX_NONSTREAMING_TOKENS`.
         """
         resolved = self._resolve_max_tokens(max_tokens)
         if resolved > MAX_NONSTREAMING_TOKENS:
-            raise ValueError(
+            raise InvalidRequestError(
                 f"max_tokens={resolved} exceeds the {MAX_NONSTREAMING_TOKENS} limit the "
                 f"Anthropic SDK allows on a non-streaming request. Lower it, or use "
                 f"get_response_stream(), which has no such limit."
@@ -1040,25 +1043,30 @@ def _anthropic_system_prompt(
 def _anthropic_user_message(
     user_prompt: str, images: tuple[ImageInput, ...] = ()
 ) -> list[MessageParam]:
-    """Create Anthropic user message."""
-    if images:
-        content: list[dict[str, Any]] = []
-        for image in images:
-            content.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": image.media_type,
-                        "data": base64.b64encode(image.data).decode("ascii"),
-                    },
-                }
-            )
-        content.append({"type": "text", "text": user_prompt})
-        return [MessageParam(role="user", content=content)]  # type: ignore[typeddict-item]
-    return [
-        MessageParam(
-            role="user",
-            content=user_prompt,
-        )
-    ]
+    """Create Anthropic user message.
+
+    The message is a plain dict annotated as ``MessageParam`` rather than a
+    ``MessageParam(...)`` call. In anthropic 2.x ``MessageParam`` is a
+    ``Union`` alias, which cannot be instantiated, and the concrete
+    ``UserMessageParam`` it unions over does not exist in 1.x. A dict literal
+    is valid on both.
+    """
+    if not images:
+        message: MessageParam = {"role": "user", "content": user_prompt}
+        return [message]
+
+    content: list[ImageBlockParam | TextBlockParam] = []
+    for image in images:
+        source: Base64ImageSourceParam = {
+            "type": "base64",
+            # ImageInput.__post_init__ restricts media_type to these four values.
+            "media_type": cast(
+                Literal["image/jpeg", "image/png", "image/gif", "image/webp"],
+                image.media_type,
+            ),
+            "data": base64.b64encode(image.data).decode("ascii"),
+        }
+        content.append({"type": "image", "source": source})
+    content.append({"type": "text", "text": user_prompt})
+    image_message: MessageParam = {"role": "user", "content": content}
+    return [image_message]

@@ -1,0 +1,85 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Provider SDKs ship new majors without any change here. The anthropic 2.x
+  # break reached users that way, so run weekly against whatever is newest.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff + mypy (locked)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-extras
+      - run: uv run ruff check src/majordomo_llm
+      - run: uv run mypy src/majordomo_llm
+
+  test:
+    name: pytest (py${{ matrix.python }}, ${{ matrix.deps }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+        # locked:       uv.lock as committed
+        # lowest:       every direct dependency at its declared minimum
+        # highest:      the newest release allowed by pyproject.toml
+        # anthropic-1x: highest, with anthropic held to the 1.x line
+        deps: [locked, lowest, highest, anthropic-1x]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+
+      - name: Install (locked)
+        if: matrix.deps == 'locked'
+        run: uv sync --locked --all-extras
+
+      - name: Install (lowest)
+        if: matrix.deps == 'lowest'
+        run: |
+          uv venv
+          uv pip install --resolution lowest-direct -e ".[dev]"
+
+      - name: Install (highest)
+        if: matrix.deps == 'highest'
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: Install (anthropic 1.x)
+        if: matrix.deps == 'anthropic-1x'
+        run: |
+          uv venv
+          uv pip install -e ".[dev]" "anthropic>=1,<2"
+
+      - name: Installed provider SDKs
+        run: uv pip list | grep -Ei '^(anthropic|openai|google-genai|cohere|aiobotocore|httpx2?) '
+
+      - run: uv run --no-sync pytest
+
+      # Type-checked on the newest SDKs as well as in the lint job. Not at the
+      # minimums: older SDK stubs are narrower in places (openai 2.15 types
+      # images.generate(size=) as a Literal), which is not a runtime failure.
+      - name: mypy (highest)
+        if: matrix.deps == 'highest'
+        run: uv run --no-sync mypy src/majordomo_llm

@@ -49,6 +49,13 @@ print(response.content)
 
 **Important**: Only `ProviderError` triggers failover. Application-level errors (bad prompts, validation failures) are not retried.
 
+A provider that fails with an exception that is not one of the library's own, such as a `TypeError` raised while the request is being built, reports it as a `ProviderError` with the original in `original_error`. The cascade fails over on it like an outage. It is not retried first: a request that cannot be built fails the same way every time.
+
+Errors that every provider would hit equally do not trigger failover:
+
+- `InvalidRequestError`: the request's arguments are invalid, for example a non-positive `max_tokens`
+- `ResponseTruncatedError`: the response hit the `max_tokens` cap
+
 ## Strategy Tips
 
 - **Diversify vendors**: Don't use multiple models from the same provider

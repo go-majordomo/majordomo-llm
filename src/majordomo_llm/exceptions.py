@@ -71,6 +71,19 @@ class ImageOptionUnsupported(ConfigurationError):
         self.supported = supported
 
 
+class InvalidRequestError(MajordomoError, ValueError):
+    """Raised when a request's arguments are invalid before anything is sent.
+
+    For example, a non-positive ``max_tokens``, or one above what the provider
+    SDK allows on a non-streaming call. The caller has to change the request,
+    so :class:`~majordomo_llm.cascade.LLMCascade` does not fail over on it:
+    every provider would receive the same arguments.
+
+    Subclasses :class:`ValueError` so code written against the earlier plain
+    ``ValueError`` keeps working.
+    """
+
+
 class ProviderError(MajordomoError):
     """Raised when an LLM provider returns an error.
 

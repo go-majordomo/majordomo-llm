@@ -365,7 +365,9 @@ Other adapters: `MySQLAdapter`, `SqliteAdapter`, `FileStorageAdapter`.
 from majordomo_llm.exceptions import (
     MajordomoError,       # base — catch-all for library errors
     ConfigurationError,   # missing/invalid API key or unknown provider/model
-    ProviderError,        # upstream API failure; has .provider and .original_error
+    ProviderError,        # upstream API failure, or an unexpected exception inside a
+                          # provider; has .provider and .original_error
+    InvalidRequestError,  # invalid request arguments, e.g. max_tokens=0 (a ValueError)
     ResponseParsingError, # JSON parse failure; has .raw_content
     ResponseTruncatedError,  # hit the max_tokens cap; has .max_tokens,
                              # .output_tokens, .partial_content
@@ -385,6 +387,8 @@ with exponential backoff on transient failures before raising `ProviderError`.
 `ResponseTruncatedError` is deliberately outside that policy: it is not retried (the
 same budget would hit the same ceiling) and does not trigger `LLMCascade` failover
 (the next provider would truncate identically). Fix it by raising `max_tokens`.
+`InvalidRequestError` is treated the same way: every provider would receive the same
+invalid arguments.
 
 ## Complete Example
 

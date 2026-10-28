@@ -13,11 +13,15 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from jsonschema import ValidationError as JSONSchemaValidationError
 from jsonschema import validate as validate_json_schema
 from pydantic import BaseModel
+from tenacity import RetryError
 
 from majordomo_llm.exceptions import (
     ConfigurationError,
     EmptyStructuredResponseError,
     InputModalityUnsupported,
+    InvalidRequestError,
+    MajordomoError,
+    ProviderError,
     ResponseParsingError,
     ResponseTruncatedError,
     StructuredOutputUnsupported,
@@ -863,11 +867,11 @@ class LLM(ABC):
             The output cap to send.
 
         Raises:
-            ValueError: If ``override`` is not a positive integer.
+            InvalidRequestError: If ``override`` is not a positive integer.
         """
         if override is not None:
             if override < 1:
-                raise ValueError(f"max_tokens must be a positive integer, got {override}")
+                raise InvalidRequestError(f"max_tokens must be a positive integer, got {override}")
             return override
         if self.max_tokens is not None:
             return self.max_tokens
@@ -1005,6 +1009,41 @@ class LLM(ABC):
         """Provider-specific implementation of ``get_response_stream``."""
         raise NotImplementedError()
 
+    async def _call_provider[R](self, call: Awaitable[R]) -> R:
+        """Await a provider call, reporting unexpected exceptions as ProviderError.
+
+        A provider can fail with an exception that is not one of the library's
+        own, for example a ``TypeError`` when an SDK type changes shape between
+        major versions and the request can no longer be built. Such an
+        exception is re-raised as :class:`ProviderError` with the original in
+        ``original_error``, so callers see library error types and
+        :class:`~majordomo_llm.cascade.LLMCascade` fails over to its next
+        provider.
+
+        It is not retried. The retry policy retries a ``ProviderError`` only
+        when it carries a transient HTTP status or transport error, and this
+        wrapper sits outside the retried provider methods in any case.
+
+        Passed through unchanged:
+
+        - :class:`MajordomoError` subclasses, which already describe the failure.
+        - tenacity's ``RetryError``, raised when retries are exhausted, which
+          ``LLMCascade`` already handles and existing callers may catch.
+
+        Hooks run outside this wrapper, so their exceptions are not affected.
+        """
+        try:
+            return await call
+        except (MajordomoError, RetryError):
+            raise
+        except Exception as e:
+            raise ProviderError(
+                f"Unexpected {type(e).__name__} from provider '{self.provider}' "
+                f"model '{self.model}': {e}",
+                provider=self.provider,
+                original_error=e,
+            ) from e
+
     async def get_response(
         self,
         user_prompt: str,
@@ -1048,22 +1087,26 @@ class LLM(ABC):
         async def impl(prompt: str) -> LLMResponse:
             self._validate_images(images)
             if images:
-                return await self._get_response_with_images_impl(
+                return await self._call_provider(
+                    self._get_response_with_images_impl(
+                        prompt,
+                        images,
+                        system_prompt,
+                        temperature,
+                        top_p,
+                        extra_headers=extra_headers,
+                        max_tokens=max_tokens,
+                    )
+                )
+            return await self._call_provider(
+                self._get_response_impl(
                     prompt,
-                    images,
                     system_prompt,
                     temperature,
                     top_p,
                     extra_headers=extra_headers,
                     max_tokens=max_tokens,
                 )
-            return await self._get_response_impl(
-                prompt,
-                system_prompt,
-                temperature,
-                top_p,
-                extra_headers=extra_headers,
-                max_tokens=max_tokens,
             )
 
         return await self._run_hooks_returning_response(user_prompt, caller_metadata, impl)
@@ -1092,22 +1135,26 @@ class LLM(ABC):
         del caller_metadata
         self._validate_images(images)
         if images:
-            return await self._get_response_stream_with_images_impl(
+            return await self._call_provider(
+                self._get_response_stream_with_images_impl(
+                    user_prompt,
+                    images,
+                    system_prompt,
+                    temperature,
+                    top_p,
+                    extra_headers=extra_headers,
+                    max_tokens=max_tokens,
+                )
+            )
+        return await self._call_provider(
+            self._get_response_stream_impl(
                 user_prompt,
-                images,
                 system_prompt,
                 temperature,
                 top_p,
                 extra_headers=extra_headers,
                 max_tokens=max_tokens,
             )
-        return await self._get_response_stream_impl(
-            user_prompt,
-            system_prompt,
-            temperature,
-            top_p,
-            extra_headers=extra_headers,
-            max_tokens=max_tokens,
         )
 
     async def _run_hooks_returning_response(
@@ -1334,9 +1381,23 @@ class LLM(ABC):
         async def impl(prompt: str) -> LLMResponse:
             self._validate_images(images)
             if images:
-                return await self._get_json_schema_response_with_images_retried(
+                return await self._call_provider(
+                    self._get_json_schema_response_with_images_retried(
+                        user_prompt=prompt,
+                        images=images,
+                        response_schema=response_schema,
+                        system_prompt=system_prompt,
+                        schema_name=schema_name,
+                        schema_description=schema_description,
+                        temperature=temperature,
+                        top_p=top_p,
+                        extra_headers=extra_headers,
+                        max_tokens=max_tokens,
+                    )
+                )
+            return await self._call_provider(
+                self._get_json_schema_response_retried(
                     user_prompt=prompt,
-                    images=images,
                     response_schema=response_schema,
                     system_prompt=system_prompt,
                     schema_name=schema_name,
@@ -1346,16 +1407,6 @@ class LLM(ABC):
                     extra_headers=extra_headers,
                     max_tokens=max_tokens,
                 )
-            return await self._get_json_schema_response_retried(
-                user_prompt=prompt,
-                response_schema=response_schema,
-                system_prompt=system_prompt,
-                schema_name=schema_name,
-                schema_description=schema_description,
-                temperature=temperature,
-                top_p=top_p,
-                extra_headers=extra_headers,
-                max_tokens=max_tokens,
             )
 
         return await self._run_hooks_returning_response(user_prompt, caller_metadata, impl)

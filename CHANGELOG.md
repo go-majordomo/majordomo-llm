@@ -7,12 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.24.1] - 2026-10-12
+## [0.24.1] - 2026-10-28
 
-Cost reporting fixes for Gemini and for web search with structured output. **Reported Gemini cost rises on every call**: the library was not counting thinking tokens, which Google bills as output. Nothing about what the vendors charge has changed; the numbers now match it more closely. Each fix was checked against the live API on 2026-10-11 or 2026-10-12.
+A fix for the Anthropic provider, which failed on every call with anthropic SDK 2.x, plus cost reporting fixes for Gemini and for web search with structured output. **Reported Gemini cost rises on every call**: the library was not counting thinking tokens, which Google bills as output. Nothing about what the vendors charge has changed; the numbers now match it more closely. Each cost fix was checked against the live API on 2026-10-11 or 2026-10-12.
+
+### Added
+
+- **`InvalidRequestError`**, raised when a request's arguments are invalid before anything is sent: a non-positive `max_tokens`, or an Anthropic non-streaming `max_tokens` above the SDK's 21,333 limit. These raised a plain `ValueError` before. It subclasses `ValueError`, so `except ValueError` still catches it. `LLMCascade` does not fail over on it, since every provider would receive the same arguments
+- **CI that tests against current SDK releases.** `.github/workflows/tests.yml` runs the suite on Python 3.12 and 3.13 against the lockfile, every dependency at its declared minimum, the newest allowed releases, and anthropic 1.x, on every push and pull request and weekly. There was no test CI before
+- **Tests that build each provider's request through its real SDK client** (`tests/test_sdk_payloads.py`), over a mock HTTP transport. The provider tests mock the SDK client and so could not see an SDK type or argument change; these fail on one. Bedrock is not covered
+
+### Changed
+
+- **An unexpected exception inside a provider call is raised as `ProviderError`.** Any exception that is not a library error, such as a `TypeError` while the request is built, now reaches callers as `ProviderError` with the original in `original_error`, and `LLMCascade` fails over to its next provider. Before, it escaped the cascade, so no later provider was tried. It is not retried. Code that caught `TypeError` or another built-in exception from `get_response`, `get_response_stream`, `get_json_response`, `get_structured_json_response` or `get_json_schema_response` must catch `ProviderError` instead. tenacity's `RetryError`, raised when retries run out, is unchanged
+- **Provider SDK versions are bounded by the tested range.** The declared minimums were not all installable or importable: `google-genai` 1.60 lacks a module `majordomo_llm` imports at startup, `cohere` 5.1.8 lacks `JsonObjectResponseFormatV2`, `pyyaml` 6.0 does not build on Python 3.12, and `asyncpg` 0.29 does not build on 3.13. Each minimum below is the oldest release the suite passes on:
+
+  | Package | Before | Now |
+  |---|---|---|
+  | `anthropic` | `>=0.116.0` | `>=0.116.0,<3` |
+  | `openai` | `>=2.15.0` | `>=2.15.0,<4` |
+  | `google-genai` | `>=1.60.0` | `>=2.9.0,<3` |
+  | `cohere` | `>=5.1.8` | `>=5.9.3,<8` |
+  | `aiobotocore` | `>=3.0.0` | `>=3.0.0,<4` |
+  | `pyyaml` | `>=6.0` | `>=6.0.1` |
+  | `asyncpg` (`logging` extra) | `>=0.29.0` | `>=0.30.0` |
+
+- The lockfile moves to anthropic 2.3.0, openai 3.40.0, google-genai 2.33.0, cohere 7.3.0 and aiobotocore 3.10.0. anthropic 1.0 and openai 3.0 depend on `httpx2` rather than `httpx`, so it is now installed alongside
 
 ### Fixed
 
+- **The Anthropic provider failed on every call with anthropic SDK 2.x.** In 2.x `anthropic.types.MessageParam` is a `Union` alias, and the library called it as a constructor, which raises `TypeError: Cannot instantiate typing.Union` before any request is sent. Text, streaming, image, JSON and structured calls all failed, directly and through `LLMCascade`, and Bedrock Mantle, which reuses the Anthropic provider, failed the same way. Messages are now built as plain dicts typed as `MessageParam`, which works on anthropic 0.x, 1.x and 2.x. The suggested alternative, `UserMessageParam(...)`, does not exist in 1.x
 - **Gemini thinking tokens were never billed.** Gemini reports thinking in `thoughts_token_count`, outside `candidates_token_count`, and bills both at the output rate. The library read only the candidates count, so `output_tokens`, `output_cost` and `total_cost` covered the visible answer alone. They now include thinking on the text, structured and streaming paths. On `gemini-3.6-flash`, `gemini-3.8-flash` and `gemini-3.1-pro-preview` thinking ran from 3 to 35 times the answer; one structured call that reported 32 output tokens now reports 622
   - Image generation (`gemini_image`) reads usage in a different shape and was not examined
 - **Anthropic web search with structured output reported only its last request.** When the model answers in prose instead of calling the schema tool, the library makes a second request for the tool call. Only that second request's usage was priced, dropping the first one's tokens, cache write and search fee. Usage is now summed over every request. On `claude-sonnet-5-5` and `claude-sonnet-5` the two-request case had reported $0.006 and $0.002 for calls that cost $0.046 and $0.045. A call answered in one request was already correct

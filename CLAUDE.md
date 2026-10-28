@@ -55,7 +55,7 @@ Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, Cohere, Am
 
 - **`examples/`**: Demo app showing multi-provider usage with logging. Run with `uv run python examples/demo.py`
 
-- **`exceptions.py`**: Exception hierarchy: `MajordomoError` (base) → `ConfigurationError`, `ProviderError`, `ResponseParsingError`, `ResponseTruncatedError`
+- **`exceptions.py`**: Exception hierarchy: `MajordomoError` (base) → `ConfigurationError`, `InvalidRequestError` (also a `ValueError`), `ProviderError`, `ResponseParsingError`, `ResponseTruncatedError`
 
 ### Key Patterns
 
@@ -70,6 +70,9 @@ Unified async interface for LLM providers (OpenAI, Anthropic, Gemini, Cohere, Am
 - Web search with structured output is billed in full. Anthropic's path takes several `messages.create` turns, so `_json_schema_response_with_web_search_helper` sums a `_TurnUsage` across all of them and the total is priced, not the last response. When the model answers in prose instead of calling the schema tool, that reply (which holds the search results) is carried into the final request, followed by an instruction to call the tool. Gemini's grounded structured responses carry no `grounding_metadata`, so `_compute_structured_web_search_cost` bills one grounded query as a floor whenever `use_web_search` is on; that figure is an estimate
 - Gemini reports thinking apart from the answer (`thoughts_token_count` is not in `candidates_token_count`) and bills both as output. `_gemini_token_counts()` sums them and every Gemini path, streaming included, reads usage through it
 - Truncation raises `ResponseTruncatedError` via `LLM._check_truncation()`. It subclasses `MajordomoError` rather than `ProviderError` specifically so it is neither retried by `retry_provider_call` nor failed over by `LLMCascade` — both would repeat the same call against the same ceiling. On structured paths the check runs before content extraction, so the cause is reported instead of a downstream parse error
+- Unexpected exceptions from a provider become `ProviderError`. `LLM._call_provider()` wraps every provider call made by `get_response`, `get_response_stream` and `get_json_schema_response`; any exception that is not a `MajordomoError` or tenacity's `RetryError` is re-raised as `ProviderError(original_error=...)`, so `LLMCascade` fails over on it. It sits outside the retried methods and is not retried. Invalid request arguments raise `InvalidRequestError` instead of a bare `ValueError`, so they are not mistaken for a provider failure
+- Anthropic request params are built as plain dicts annotated with the SDK's `TypedDict`s, never by calling `MessageParam(...)`: from anthropic 2.x it is a `Union` alias and cannot be instantiated, and the concrete `UserMessageParam` does not exist in 1.x
+- SDK compatibility: `pyproject.toml` bounds each provider SDK by major version, and `.github/workflows/tests.yml` runs the suite against the locked versions, every dependency at its minimum, the newest allowed, and anthropic 1.x. `tests/test_sdk_payloads.py` drives each provider through its real SDK client over a mock transport, so a change in an SDK's types or arguments fails there; the provider test modules mock the client and cannot catch it. anthropic 1.0 and openai 3.0 use `httpx2` instead of `httpx`
 - API key hashing: `_hash_api_key()` uses SHA256 truncated to 16 hex chars for safe logging
 - All providers accept `api_key_alias` for human-readable key identification in logs
 

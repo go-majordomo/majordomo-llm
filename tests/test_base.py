@@ -4,6 +4,7 @@ import time
 
 import pytest
 from pydantic import BaseModel
+from tenacity import Future, RetryError
 
 from majordomo_llm.base import (
     DEFAULT_MAX_TOKENS,
@@ -19,7 +20,13 @@ from majordomo_llm.base import (
     canonicalize_json_schema_output,
     is_empty_structured_result,
 )
-from majordomo_llm.exceptions import EmptyStructuredResponseError, ResponseParsingError
+from majordomo_llm.exceptions import (
+    EmptyStructuredResponseError,
+    InvalidRequestError,
+    ProviderError,
+    ResponseParsingError,
+    ResponseTruncatedError,
+)
 
 COUNTRY_SCHEMA = {
     "type": "object",
@@ -848,3 +855,112 @@ class TestStopReasonPropagation:
             input_cost=0.0, output_cost=0.0, total_cost=0.0, response_time=0.1,
         )
         assert response.stop_reason is None
+
+
+class _RaisingLLM(LLM):
+    """Test double whose every provider method raises ``error``."""
+
+    def __init__(self, error: BaseException):
+        super().__init__(provider="test", model="test-model", input_cost=1.0, output_cost=2.0)
+        self.error = error
+        self.calls = 0
+
+    async def _get_response_impl(self, *args, **kwargs):
+        self.calls += 1
+        raise self.error
+
+    async def _get_response_stream_impl(self, *args, **kwargs):
+        self.calls += 1
+        raise self.error
+
+    async def _get_json_schema_response(self, *args, **kwargs):
+        self.calls += 1
+        raise self.error
+
+
+class TestUnexpectedProviderExceptions:
+    """An exception that is not a library error reaches callers as ProviderError."""
+
+    async def test_get_response_wraps_unexpected_exception(self):
+        original = TypeError("Cannot instantiate typing.Union")
+        llm = _RaisingLLM(original)
+
+        with pytest.raises(ProviderError) as exc_info:
+            await llm.get_response("prompt")
+
+        error = exc_info.value
+        assert error.provider == "test"
+        assert error.original_error is original
+        assert error.__cause__ is original
+        assert "TypeError" in str(error)
+        assert "test-model" in str(error)
+
+    async def test_stream_wraps_unexpected_exception(self):
+        llm = _RaisingLLM(KeyError("missing"))
+
+        with pytest.raises(ProviderError) as exc_info:
+            await llm.get_response_stream("prompt")
+
+        assert isinstance(exc_info.value.original_error, KeyError)
+
+    async def test_json_schema_response_wraps_unexpected_exception(self):
+        llm = _RaisingLLM(AttributeError("no such field"))
+
+        with pytest.raises(ProviderError) as exc_info:
+            await llm.get_json_schema_response("prompt", COUNTRY_SCHEMA)
+
+        assert isinstance(exc_info.value.original_error, AttributeError)
+
+    async def test_unexpected_exception_is_not_retried(self):
+        """The structured path is retry-wrapped; a request that cannot be built is not retried."""
+        llm = _RaisingLLM(TypeError("cannot build request"))
+
+        with pytest.raises(ProviderError):
+            await llm.get_json_schema_response("prompt", COUNTRY_SCHEMA)
+
+        assert llm.calls == 1
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ProviderError("down", provider="test"),
+            InvalidRequestError("max_tokens must be a positive integer, got 0"),
+            ResponseParsingError("bad json"),
+            ResponseTruncatedError(max_tokens=10, output_tokens=10),
+        ],
+        ids=lambda e: type(e).__name__,
+    )
+    async def test_library_errors_pass_through_unchanged(self, error):
+        llm = _RaisingLLM(error)
+
+        with pytest.raises(type(error)) as exc_info:
+            await llm.get_response("prompt")
+
+        assert exc_info.value is error
+
+    async def test_retry_error_passes_through_unchanged(self):
+        """Callers and LLMCascade already handle tenacity's exhausted-retries error."""
+        error = RetryError(
+            Future.construct(attempt_number=3, value=RuntimeError("x"), has_exception=True)
+        )
+        llm = _RaisingLLM(error)
+
+        with pytest.raises(RetryError) as exc_info:
+            await llm.get_response("prompt")
+
+        assert exc_info.value is error
+
+    def test_invalid_request_error_is_a_value_error(self):
+        """Code that caught the earlier plain ValueError keeps working."""
+        assert issubclass(InvalidRequestError, ValueError)
+
+    async def test_non_positive_max_tokens_raises_invalid_request_error(self):
+        class _CapLLM(_RaisingLLM):
+            async def _get_response_impl(self, *args, max_tokens=None, **kwargs):
+                self._resolve_max_tokens(max_tokens)
+                raise AssertionError("unreachable")
+
+        llm = _CapLLM(RuntimeError("unused"))
+
+        with pytest.raises(InvalidRequestError, match="positive integer"):
+            await llm.get_response("prompt", max_tokens=0)

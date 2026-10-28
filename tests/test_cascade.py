@@ -7,6 +7,7 @@ from tenacity import Future, RetryError
 
 from majordomo_llm import LLMCascade
 from majordomo_llm.exceptions import (
+    InvalidRequestError,
     ProviderError,
     ResponseParsingError,
     ResponseTruncatedError,
@@ -626,3 +627,87 @@ class TestLLMCascadeTruncation:
         await cascade.get_response("Test prompt", max_tokens=4096)
 
         assert cascade.llms[0].get_response.call_args.kwargs["max_tokens"] == 4096
+
+
+class TestLLMCascadeUnexpectedProviderException:
+    """A member that fails with a non-library exception is failed over like an outage.
+
+    The members here are real providers with mocked SDK clients, so each call
+    goes through the member's own public method and its exception handling.
+    """
+
+    @pytest.fixture
+    def cascade(self, mock_all_clients):
+        return LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-5"),
+                ("openai", "gpt-6.1-sol"),
+            ]
+        )
+
+    @pytest.fixture
+    def unbuildable_anthropic_request(self):
+        """Make the Anthropic member fail the way anthropic 2.x did, before sending."""
+        with patch(
+            "majordomo_llm.providers.anthropic._anthropic_user_message",
+            side_effect=TypeError("Cannot instantiate typing.Union"),
+        ) as builder:
+            yield builder
+
+    async def test_falls_through_on_text_request(self, cascade, unbuildable_anthropic_request):
+        fallback = MagicMock()
+        fallback.content = "from openai"
+        cascade.llms[1].get_response = AsyncMock(return_value=fallback)
+
+        response = await cascade.get_response("Test prompt")
+
+        assert response.content == "from openai"
+        cascade.llms[0].client.messages.create.assert_not_called()
+        unbuildable_anthropic_request.assert_called_once()
+
+    async def test_falls_through_on_json_schema_request(
+        self, cascade, unbuildable_anthropic_request
+    ):
+        fallback = MagicMock()
+        fallback.content = '{"answer":"from openai"}'
+        cascade.llms[1].get_json_schema_response = AsyncMock(return_value=fallback)
+
+        response = await cascade.get_json_schema_response(
+            "Test prompt", {"type": "object", "properties": {"answer": {"type": "string"}}}
+        )
+
+        assert response.content == '{"answer":"from openai"}'
+        unbuildable_anthropic_request.assert_called_once()
+
+    async def test_reports_the_wrapped_cause_when_every_member_fails(
+        self, cascade, unbuildable_anthropic_request
+    ):
+        last = ProviderError("down", provider="openai")
+        cascade.llms[1].get_response = AsyncMock(side_effect=last)
+
+        with pytest.raises(ProviderError, match="All providers in cascade failed") as exc_info:
+            await cascade.get_response("Test prompt")
+
+        assert exc_info.value.original_error is last
+
+    async def test_only_unexpected_member_reports_its_original_exception(
+        self, cascade, unbuildable_anthropic_request
+    ):
+        cascade.llms = cascade.llms[:1]
+
+        with pytest.raises(ProviderError) as exc_info:
+            await cascade.get_response("Test prompt")
+
+        member_error = exc_info.value.original_error
+        assert isinstance(member_error, ProviderError)
+        assert member_error.provider == "anthropic"
+        assert isinstance(member_error.original_error, TypeError)
+
+    async def test_does_not_fail_over_on_invalid_request(self, cascade):
+        """Every member would get the same invalid arguments, so there is nothing to try."""
+        cascade.llms[1].get_response = AsyncMock()
+
+        with pytest.raises(InvalidRequestError, match="positive integer"):
+            await cascade.get_response("Test prompt", max_tokens=0)
+
+        cascade.llms[1].get_response.assert_not_called()
