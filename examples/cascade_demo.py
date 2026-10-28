@@ -14,7 +14,9 @@ returns a ready-made cascade rather than a single model.
 This script demonstrates:
 
 - Listing the alias registry, single-model and cascade alike
-- Running a cascade alias end to end and reporting which member answered
+- Running a cascade alias end to end and reporting which member answered,
+  read from the response: response.provider / response.model name it, and
+  response.attempted lists every member tried, ending with it
 - Forced failover: a deliberately broken first hop, proving the second is used
 - register_alias() for a chain assembled at runtime
 
@@ -28,16 +30,14 @@ Gateway mode (--gateway) routes through Majordomo Steward:
     - MAJORDOMO_API_KEY (required)
 """
 
-import contextlib
-import logging
 import os
 import textwrap
-from collections.abc import Iterator
 
 from shared import gateway_kwargs, run_demo
 
 from majordomo_llm import (
     LLMCascade,
+    LLMResponse,
     get_aliases,
     get_llm_by_alias,
     register_alias,
@@ -45,48 +45,13 @@ from majordomo_llm import (
 
 PROMPT = "Name the three primary additive colors. Answer in one short sentence."
 
-# LLMResponse does not record which cascade member served the request (unlike
-# routed_provider / routed_model for gateway-routed calls). The cascade does log
-# every failover it performs, so the answering member is the first one that never
-# appears in those warnings.
-CASCADE_LOGGER = "majordomo_llm.cascade"
+def report_answer(response: LLMResponse) -> None:
+    """Print which member answered and, after a fallback, every member tried."""
+    print(f"  Answered by: {response.provider}/{response.model}")
+    if len(response.attempted) > 1:
+        tried = " -> ".join(f"{p}/{m}" for p, m in response.attempted)
+        print(f"  Tried:       {tried}")
 
-
-class _FailoverRecorder(logging.Handler):
-    """Collect the cascade's failover warnings."""
-
-    def __init__(self) -> None:
-        super().__init__(level=logging.WARNING)
-        self.messages: list[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(record.getMessage())
-
-
-@contextlib.contextmanager
-def capture_failovers() -> Iterator[_FailoverRecorder]:
-    """Temporarily record failover warnings emitted by LLMCascade."""
-    handler = _FailoverRecorder()
-    logger = logging.getLogger(CASCADE_LOGGER)
-    previous_level, previous_propagate = logger.level, logger.propagate
-    logger.addHandler(handler)
-    logger.setLevel(logging.WARNING)
-    logger.propagate = False
-    try:
-        yield handler
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(previous_level)
-        logger.propagate = previous_propagate
-
-
-def report_winner(llm: object, recorder: _FailoverRecorder) -> str:
-    """Name the member that answered, given the failovers that were logged."""
-    for member in llm.llms:
-        label = f"{member.provider}/{member.model}"
-        if not any(label in message for message in recorder.messages):
-            return label
-    return "unknown"
 
 # Candidate hosts for a runtime-assembled GLM-5.3 cascade. All three charge the
 # same input and output rate, so Baseten leads on its cheaper cached reads.
@@ -130,15 +95,12 @@ async def demo_cascade_alias(use_gateway: bool = False) -> bool:
     print(f"\n  get_llm_by_alias({alias!r}) -> {chain}")
 
     try:
-        with capture_failovers() as recorder:
-            response = await llm.get_response(PROMPT)
+        response = await llm.get_response(PROMPT)
     except Exception as e:
         print(f"  Every member failed: {e}")
         return False
 
-    for message in recorder.messages:
-        print(f"  Failover: {message}")
-    print(f"  Answered by: {report_winner(llm, recorder)}")
+    report_answer(response)
     print("  Content:")
     print(textwrap.fill(response.content.strip(), width=88,
                         initial_indent="    ", subsequent_indent="    "))
@@ -170,18 +132,13 @@ async def demo_forced_failover(hosts: list[tuple[str, str]]) -> bool:
     cascade.llms = [broken.llms[0], healthy.llms[0]]
 
     try:
-        with capture_failovers() as recorder:
-            await cascade.get_response(PROMPT)
+        response = await cascade.get_response(PROMPT)
     except Exception as e:
         print(f"  Both members failed: {e}")
         return False
 
-    for message in recorder.messages:
-        print(f"  Failover: {message}")
-
-    winner = report_winner(cascade, recorder)
-    print(f"  Answered by: {winner}")
-    if winner.startswith(f"{fallback[0]}/"):
+    report_answer(response)
+    if (response.provider, response.model) == fallback and len(response.attempted) == 2:
         print("  Failover worked — the broken primary was skipped.")
     else:
         print("  Unexpected: the primary answered despite the invalid key.")
@@ -205,14 +162,13 @@ async def demo_runtime_alias(hosts: list[tuple[str, str]]) -> bool:
 
     llm = get_llm_by_alias(name)
     try:
-        with capture_failovers() as recorder:
-            response = await llm.get_response(PROMPT)
+        response = await llm.get_response(PROMPT)
     except Exception as e:
         print(f"  Every member failed: {e}")
         return False
 
-    print(f"  Answered by: {report_winner(llm, recorder)} "
-          f"| Cost: ${response.total_cost:.6f}")
+    report_answer(response)
+    print(f"  Cost: ${response.total_cost:.6f}")
     return True
 
 

@@ -302,21 +302,26 @@ class LLMCascade(LLM):
             **kwargs: Arguments to pass to the method.
 
         Returns:
-            The response from the first successful provider.
+            The response from the first successful provider. Its ``provider`` and
+            ``model`` name that member, and ``attempted`` lists every member
+            tried, ending with it.
 
         Raises:
             ProviderError: If all providers fail.
         """
         last_error: Exception | None = None
+        failed: list[tuple[str, str]] = []
 
         for llm in self.llms:
             try:
                 method = getattr(llm, method_name)
-                result = await method(**kwargs)
-                return cast(LLMResponse | LLMJSONResponse | LLMStreamResponse, result)
+                result = cast(
+                    LLMResponse | LLMJSONResponse | LLMStreamResponse, await method(**kwargs)
+                )
             except failover_exceptions as e:
                 self._log_provider_failure(llm, e)
                 last_error = e
+                failed.append((llm.provider, llm.model))
                 continue
             except RetryError as e:
                 exc = e.last_attempt.exception()
@@ -325,7 +330,11 @@ class LLMCascade(LLM):
 
                 self._log_provider_failure(llm, exc)
                 last_error = exc
+                failed.append((llm.provider, llm.model))
                 continue
+            # The member records itself; the members that failed came before it.
+            result.attempted = [*failed, *result.attempted]
+            return result
 
         raise ProviderError(
             f"All providers in cascade failed. Last error: {last_error}",

@@ -115,10 +115,17 @@ class LoggingLLM(LLM):
                 request_id, request_body, response_content
             )
 
+        # Log who served the call. Around an LLMCascade that is the member that
+        # answered, not "cascade" and the primary model. A failed call has no
+        # response, so it is logged against the configured provider and model.
+        provider, model = self.provider, self.model
+        if response is not None and response.provider is not None and response.model is not None:
+            provider, model = response.provider, response.model
+
         entry = LogEntry(
             request_id=request_id,
-            provider=self.provider,
-            model=self.model,
+            provider=provider,
+            model=model,
             timestamp=datetime.now(UTC),
             response_time=response.response_time if response else None,
             input_tokens=response.input_tokens if response else None,

@@ -7,7 +7,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from jsonschema import ValidationError as JSONSchemaValidationError
@@ -482,6 +482,17 @@ class Usage:
         total_cost: Total cost (input + output + tool use) in USD.
         response_time: Time taken for the request in seconds.
         tool_use_cost: Cost for provider-side tool calls (e.g. web search) in USD.
+        provider: The provider that served the call (e.g. ``"anthropic"``). Through
+            an :class:`~majordomo_llm.cascade.LLMCascade` this is the member that
+            answered, not ``"cascade"``. Set on every response the library
+            returns; ``None`` only on an object built by hand.
+        model: The model that served the call, as configured (e.g.
+            ``"claude-sonnet-5-5"``). For a deprecated model name this is its
+            replacement. For the Majordomo gateway it is the canonical model; the
+            backend the gateway chose is in ``routed_provider``/``routed_model``.
+        attempted: Every ``(provider, model)`` tried for this call, in order,
+            ending with the one that answered. One entry for a direct call; more
+            than one means a cascade fell through to a later member.
     """
 
     input_tokens: int
@@ -493,6 +504,9 @@ class Usage:
     response_time: float
     cache_creation_tokens: int = field(default=0, kw_only=True)
     tool_use_cost: float = field(default=0.0, kw_only=True)
+    provider: str | None = field(default=None, kw_only=True)
+    model: str | None = field(default=None, kw_only=True)
+    attempted: list[tuple[str, str]] = field(default_factory=list, kw_only=True)
 
 
 @dataclass
@@ -601,6 +615,10 @@ class LLMStreamResponse:
         self._stream = stream
         self._state = state
         self._llm = llm
+        #: Every ``(provider, model)`` tried for this call, ending with the one
+        #: streaming it. An :class:`~majordomo_llm.cascade.LLMCascade` prepends
+        #: the members that failed before this one.
+        self.attempted: list[tuple[str, str]] = [(llm.provider, llm.model)]
         self._chunks: list[str] = []
         self._consumed = False
         self._usage: Usage | None = None
@@ -651,6 +669,9 @@ class LLMStreamResponse:
             output_cost=output_cost,
             total_cost=total_cost,
             response_time=response_time,
+            provider=self.provider,
+            model=self.model,
+            attempted=list(self.attempted),
         )
         if self._on_complete:
             self._on_complete(self._usage, "".join(self._chunks))
@@ -659,6 +680,16 @@ class LLMStreamResponse:
     def usage(self) -> Usage | None:
         """Usage metrics, available after the stream is fully consumed."""
         return self._usage
+
+    @property
+    def provider(self) -> str:
+        """The provider streaming this response; a cascade's member, not ``"cascade"``."""
+        return self._llm.provider
+
+    @property
+    def model(self) -> str:
+        """The model streaming this response."""
+        return self._llm.model
 
     @property
     def routed_provider(self) -> str | None:
@@ -695,6 +726,9 @@ class LLMStreamResponse:
             routed_provider=self._state.routed_provider,
             routed_model=self._state.routed_model,
             stop_reason=self._state.stop_reason,
+            provider=self.provider,
+            model=self.model,
+            attempted=list(self.attempted),
         )
 
 
@@ -1044,6 +1078,22 @@ class LLM(ABC):
                 original_error=e,
             ) from e
 
+    def _record_origin(self, response: LLMResponse) -> LLMResponse:
+        """Record on ``response`` that this LLM served it, unless already recorded.
+
+        Runs after every provider call, so no provider has to set the fields
+        itself. A response that already names its origin is left alone: through
+        an :class:`~majordomo_llm.cascade.LLMCascade` the member that answered
+        records itself first, and the cascade's own pass must not overwrite it
+        with ``"cascade"``.
+        """
+        provider = response.provider if response.provider is not None else self.provider
+        model = response.model if response.model is not None else self.model
+        response.provider, response.model = provider, model
+        if not response.attempted:
+            response.attempted = [(provider, model)]
+        return response
+
     async def get_response(
         self,
         user_prompt: str,
@@ -1087,25 +1137,29 @@ class LLM(ABC):
         async def impl(prompt: str) -> LLMResponse:
             self._validate_images(images)
             if images:
-                return await self._call_provider(
-                    self._get_response_with_images_impl(
+                return self._record_origin(
+                    await self._call_provider(
+                        self._get_response_with_images_impl(
+                            prompt,
+                            images,
+                            system_prompt,
+                            temperature,
+                            top_p,
+                            extra_headers=extra_headers,
+                            max_tokens=max_tokens,
+                        )
+                    )
+                )
+            return self._record_origin(
+                await self._call_provider(
+                    self._get_response_impl(
                         prompt,
-                        images,
                         system_prompt,
                         temperature,
                         top_p,
                         extra_headers=extra_headers,
                         max_tokens=max_tokens,
                     )
-                )
-            return await self._call_provider(
-                self._get_response_impl(
-                    prompt,
-                    system_prompt,
-                    temperature,
-                    top_p,
-                    extra_headers=extra_headers,
-                    max_tokens=max_tokens,
                 )
             )
 
@@ -1182,21 +1236,8 @@ class LLM(ABC):
         assert captured is not None
         if final_text == captured.content:
             return captured
-        return LLMResponse(
-            content=final_text,
-            input_tokens=captured.input_tokens,
-            output_tokens=captured.output_tokens,
-            cached_tokens=captured.cached_tokens,
-            cache_creation_tokens=captured.cache_creation_tokens,
-            input_cost=captured.input_cost,
-            output_cost=captured.output_cost,
-            total_cost=captured.total_cost,
-            response_time=captured.response_time,
-            deprecation_warning=captured.deprecation_warning,
-            routed_provider=captured.routed_provider,
-            routed_model=captured.routed_model,
-            stop_reason=captured.stop_reason,
-        )
+        # Copy every other field, so usage, provenance and routing survive the rewrite.
+        return replace(captured, content=final_text)
 
     async def get_json_response(
         self,
@@ -1259,6 +1300,9 @@ class LLM(ABC):
             output_cost=response.output_cost,
             total_cost=response.total_cost,
             response_time=response.response_time,
+            provider=response.provider,
+            model=response.model,
+            attempted=list(response.attempted),
         )
 
     async def get_structured_json_response(
@@ -1333,6 +1377,9 @@ class LLM(ABC):
             output_cost=response.output_cost,
             total_cost=response.total_cost,
             response_time=response.response_time,
+            provider=response.provider,
+            model=response.model,
+            attempted=list(response.attempted),
         )
 
     async def get_json_schema_response(
@@ -1381,10 +1428,26 @@ class LLM(ABC):
         async def impl(prompt: str) -> LLMResponse:
             self._validate_images(images)
             if images:
-                return await self._call_provider(
-                    self._get_json_schema_response_with_images_retried(
+                return self._record_origin(
+                    await self._call_provider(
+                        self._get_json_schema_response_with_images_retried(
+                            user_prompt=prompt,
+                            images=images,
+                            response_schema=response_schema,
+                            system_prompt=system_prompt,
+                            schema_name=schema_name,
+                            schema_description=schema_description,
+                            temperature=temperature,
+                            top_p=top_p,
+                            extra_headers=extra_headers,
+                            max_tokens=max_tokens,
+                        )
+                    )
+                )
+            return self._record_origin(
+                await self._call_provider(
+                    self._get_json_schema_response_retried(
                         user_prompt=prompt,
-                        images=images,
                         response_schema=response_schema,
                         system_prompt=system_prompt,
                         schema_name=schema_name,
@@ -1394,18 +1457,6 @@ class LLM(ABC):
                         extra_headers=extra_headers,
                         max_tokens=max_tokens,
                     )
-                )
-            return await self._call_provider(
-                self._get_json_schema_response_retried(
-                    user_prompt=prompt,
-                    response_schema=response_schema,
-                    system_prompt=system_prompt,
-                    schema_name=schema_name,
-                    schema_description=schema_description,
-                    temperature=temperature,
-                    top_p=top_p,
-                    extra_headers=extra_headers,
-                    max_tokens=max_tokens,
                 )
             )
 

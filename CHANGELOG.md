@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-28
+
+Every response now says which provider and model produced it. Through `LLMCascade` this was not knowable before: the cascade reports itself as `"cascade"` with the primary's model, and `routed_provider`/`routed_model` are set only by the Majordomo gateway, so a caller could not tell whether the primary answered or a fallback did.
+
+### Added
+
+- **`provider`, `model` and `attempted` on every response**: `LLMResponse`, `LLMJSONResponse`, `LLMStructuredResponse`, and the `usage` of a finished `LLMStreamResponse`, which also has `provider` and `model` properties from the start of the stream
+  - `provider` and `model` name what served the call. Through `LLMCascade` that is the member that answered. For a deprecated model name, `model` is its replacement. For the Majordomo gateway they are `"majordomo"` and the canonical model; the backend the gateway chose stays in `routed_provider`/`routed_model`
+  - `attempted` lists every `(provider, model)` tried, in order, ending with the one that answered. A direct call has one entry; more than one means a cascade fell through
+  - Providers do not set these fields. The base class fills them after each provider call, so a provider added later gets them without any code of its own
+
+### Fixed
+
+- **`LoggingLLM` around a cascade logged the wrong model.** It recorded `"cascade"` and the primary model even when a fallback answered, so per-model cost in the log database was attributed to the primary. It now logs the provider and model that served the call. A failed call has no response and is still logged against the configured provider and model
+- **A hook that rewrote a response dropped `tool_use_cost`.** The rewritten response copied fields one by one and missed it, so the web-search part of the cost breakdown read `0`. `total_cost` was unaffected. Every field is now carried across
+
+### Known gaps
+
+- `LLMJSONResponse` and `LLMStructuredResponse` still lack `deprecation_warning`, `routed_provider`, `routed_model` and `stop_reason`, and drop `tool_use_cost`. `total_cost` is correct
+- Image responses (`ImageResponse`) do not have these fields
+
 ## [0.24.1] - 2026-10-28
 
 A fix for the Anthropic provider, which failed on every call with anthropic SDK 2.x, plus cost reporting fixes for Gemini and for web search with structured output. **Reported Gemini cost rises on every call**: the library was not counting thinking tokens, which Google bills as output. Nothing about what the vendors charge has changed; the numbers now match it more closely. Each cost fix was checked against the live API on 2026-10-11 or 2026-10-12.

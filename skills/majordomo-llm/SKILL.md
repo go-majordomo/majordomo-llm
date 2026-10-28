@@ -79,6 +79,9 @@ response.input_cost     # float USD
 response.output_cost    # float USD
 response.total_cost     # float USD
 response.response_time  # float seconds
+response.provider       # str — provider that served the call ("anthropic", ...)
+response.model          # str — model that served the call
+response.attempted      # list[(provider, model)] tried, ending with the one that answered
 response.deprecation_warning  # str | None — set if model was auto-replaced
 response.stop_reason    # str | None — "end_turn", "tool_use", "max_tokens", ...
 ```
@@ -280,6 +283,8 @@ cascade = LLMCascade([
 ])
 
 response = await cascade.get_response("Hello!")  # same interface as LLM
+response.provider, response.model  # the member that answered, e.g. ("openai", "gpt-5-mini")
+response.attempted                 # every member tried; len > 1 means it fell through
 ```
 
 ## Optimal Routing (Majordomo Gateway)

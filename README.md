@@ -519,10 +519,15 @@ All response objects include usage metrics:
 | `output_cost` | `float` | Cost for output tokens (USD) |
 | `total_cost` | `float` | Total cost (USD) |
 | `response_time` | `float` | Response time in seconds |
+| `provider` | `str` | The provider that served the call. Through `LLMCascade`, the member that answered |
+| `model` | `str` | The model that served the call. For a deprecated name, its replacement |
+| `attempted` | `list[tuple[str, str]]` | Every `(provider, model)` tried, ending with the one that answered; more than one entry means a cascade fell through |
 | `deprecation_warning` | `str \| None` | Warning if a deprecated model was auto-replaced |
 | `routed_provider` | `str \| None` | For `majordomo` optimal routing, the backend the gateway selected (`None` otherwise) |
 | `routed_model` | `str \| None` | For `majordomo` optimal routing, the routed backend's native model id (`None` otherwise) |
 | `stop_reason` | `str \| None` | Why the provider stopped generating (`end_turn`, `tool_use`, `max_tokens`, …); `None` where unreported |
+
+`deprecation_warning`, `routed_provider`, `routed_model` and `stop_reason` are on `LLMResponse` only. On a stream, `provider`, `model` and `attempted` are on `stream.usage` once the stream is consumed; `stream.provider` and `stream.model` are available from the start.
 
 ## Advanced Usage
 
@@ -545,6 +550,15 @@ response = await cascade.get_response("Hello!")
 ```
 
 All response methods (`get_response`, `get_json_response`, `get_structured_json_response`, `get_response_stream`) support automatic fallback.
+
+Every response says which member answered:
+
+```python
+response = await cascade.get_response("Hello!")
+response.provider   # "anthropic", or "openai" if Anthropic failed
+response.model      # "claude-sonnet-5", or "gpt-6.1-sol"
+response.attempted  # [("anthropic", "claude-sonnet-5"), ("openai", "gpt-6.1-sol")] after one fallback
+```
 
 ### Optimal Routing (Majordomo Gateway)
 

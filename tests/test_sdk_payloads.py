@@ -71,6 +71,7 @@ class Reply:
 
     content: bytes
     headers: dict[str, str] = field(default_factory=lambda: {"content-type": "application/json"})
+    status: int = 200
 
 
 class RecordingTransport:
@@ -86,7 +87,7 @@ class RecordingTransport:
         if not self._replies:
             raise AssertionError(f"Unexpected extra request to {request.url}")
         reply = self._replies.pop(0)
-        return self._http.Response(200, content=reply.content, headers=reply.headers)
+        return self._http.Response(reply.status, content=reply.content, headers=reply.headers)
 
     def client(self, http: ModuleType = httpx) -> Any:
         """Return an ``AsyncClient`` of ``http`` that sends every request here."""
@@ -166,6 +167,56 @@ def _anthropic_direct(transport: RecordingTransport, **kwargs: Any) -> Anthropic
     return _with_anthropic_transport(llm, transport)
 
 
+def _anthropic_stream(text: str = "ok") -> Reply:
+    """A complete Messages API event stream whose answer is ``text``."""
+    return _sse(
+        [
+            (
+                "message_start",
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_test",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-test",
+                        "content": [],
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 10, "output_tokens": 0},
+                    },
+                },
+            ),
+            (
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": text},
+                },
+            ),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            (
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {"output_tokens": 2},
+                },
+            ),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+    )
+
+
 class TestAnthropicPayloads:
     async def test_text_request(self):
         transport = RecordingTransport(_anthropic_text())
@@ -203,54 +254,7 @@ class TestAnthropicPayloads:
         assert text_block == {"type": "text", "text": "Describe it."}
 
     async def test_streaming_request(self):
-        transport = RecordingTransport(
-            _sse(
-                [
-                    (
-                        "message_start",
-                        {
-                            "type": "message_start",
-                            "message": {
-                                "id": "msg_test",
-                                "type": "message",
-                                "role": "assistant",
-                                "model": "claude-test",
-                                "content": [],
-                                "stop_reason": None,
-                                "stop_sequence": None,
-                                "usage": {"input_tokens": 10, "output_tokens": 0},
-                            },
-                        },
-                    ),
-                    (
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": 0,
-                            "content_block": {"type": "text", "text": ""},
-                        },
-                    ),
-                    (
-                        "content_block_delta",
-                        {
-                            "type": "content_block_delta",
-                            "index": 0,
-                            "delta": {"type": "text_delta", "text": "ok"},
-                        },
-                    ),
-                    ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-                    (
-                        "message_delta",
-                        {
-                            "type": "message_delta",
-                            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                            "usage": {"output_tokens": 2},
-                        },
-                    ),
-                    ("message_stop", {"type": "message_stop"}),
-                ]
-            )
-        )
+        transport = RecordingTransport(_anthropic_stream())
         llm = _anthropic(transport)
 
         stream = await llm.get_response_stream("Reply with the word ok.")
@@ -580,3 +584,92 @@ async def test_cascade_falls_through_when_a_provider_cannot_build_its_request(mo
     assert response.content == "from openai"
     assert anthropic_transport.requests == []
     assert len(openai_transport.requests) == 1
+
+
+# --- Which provider and model answered ---------------------------------------
+
+
+DIRECT_CALLS = [
+    ("anthropic", "claude-haiku-5-5", lambda t: _anthropic(t), _anthropic_text),
+    ("openai", "gpt-6.1-sol", _openai, _openai_response),
+    ("cohere", "command-a-03-2025", _cohere, _cohere_chat),
+    ("gemini", "gemini-3.8-flash", _gemini, _gemini_content),
+    *[
+        (provider, model, lambda t, p=provider, m=model: _chat_provider(t, p, m), _chat_completion)
+        for provider, model in CHAT_COMPLETION_MODELS
+    ],
+]
+
+
+class TestResponseProvenance:
+    """Every response names the provider and model that served it."""
+
+    @pytest.mark.parametrize(
+        ("provider", "model", "build", "reply"),
+        DIRECT_CALLS,
+        ids=[f"{provider}/{model}" for provider, model, _, _ in DIRECT_CALLS],
+    )
+    async def test_direct_call(self, provider, model, build, reply):
+        llm = build(RecordingTransport(reply()))
+
+        response = await llm.get_response("Reply with the word ok.")
+
+        assert (response.provider, response.model) == (provider, model)
+        assert response.attempted == [(provider, model)]
+
+    async def test_cascade_reports_the_primary_when_it_answers(self):
+        anthropic_transport = RecordingTransport(_anthropic_text("from anthropic"))
+        openai_transport = RecordingTransport()
+        cascade = LLMCascade(
+            [("anthropic", "claude-sonnet-5-5"), ("openai", "gpt-5.5")], api_key="test-key"
+        )
+        _with_anthropic_transport(cascade.llms[0], anthropic_transport)
+        cascade.llms[1].client = openai.AsyncOpenAI(
+            api_key="test-key", http_client=openai_transport.client(OPENAI_HTTP)
+        )
+
+        response = await cascade.get_response("hi")
+
+        assert response.content == "from anthropic"
+        assert (response.provider, response.model) == ("anthropic", "claude-sonnet-5-5")
+        assert response.attempted == [("anthropic", "claude-sonnet-5-5")]
+        assert openai_transport.requests == []
+
+    async def test_cascade_reports_the_fallback_when_the_primary_fails(self):
+        # A 400 is not retried by the SDK or the library, so the cascade moves on at once.
+        rejected = Reply(
+            json.dumps(
+                {"type": "error", "error": {"type": "invalid_request_error", "message": "no"}}
+            ).encode(),
+            status=400,
+        )
+        anthropic_transport = RecordingTransport(rejected)
+        openai_transport = RecordingTransport(_openai_response("from openai"))
+        cascade = LLMCascade(
+            [("anthropic", "claude-sonnet-5-5"), ("openai", "gpt-5.5")], api_key="test-key"
+        )
+        _with_anthropic_transport(cascade.llms[0], anthropic_transport)
+        cascade.llms[1].client = openai.AsyncOpenAI(
+            api_key="test-key", http_client=openai_transport.client(OPENAI_HTTP)
+        )
+
+        response = await cascade.get_response("hi")
+
+        assert response.content == "from openai"
+        assert (response.provider, response.model) == ("openai", "gpt-5.5")
+        assert response.attempted == [
+            ("anthropic", "claude-sonnet-5-5"),
+            ("openai", "gpt-5.5"),
+        ]
+
+    async def test_stream_reports_provider_after_it_finishes(self):
+        llm = _anthropic(RecordingTransport(_anthropic_stream()), model="claude-sonnet-5-5")
+
+        stream = await llm.get_response_stream("Reply with the word ok.")
+        async for _ in stream:
+            pass
+
+        assert (stream.provider, stream.model) == ("anthropic", "claude-sonnet-5-5")
+        assert stream.usage is not None
+        assert (stream.usage.provider, stream.usage.model) == ("anthropic", "claude-sonnet-5-5")
+        assert stream.usage.attempted == [("anthropic", "claude-sonnet-5-5")]

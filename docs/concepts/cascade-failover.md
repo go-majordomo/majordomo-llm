@@ -47,6 +47,8 @@ print(response.content)
 3. If OpenAI fails, try Gemini
 4. If all fail, raise the last `ProviderError`
 
+The response says which member answered. `response.provider` and `response.model` name it, and `response.attempted` lists every `(provider, model)` tried, in order, ending with it. After one fallback from Anthropic to OpenAI, `attempted` is `[("anthropic", "claude-sonnet-5"), ("openai", "gpt-6.1-sol")]`. A `LoggingLLM` wrapped around a cascade logs that member too.
+
 **Important**: Only `ProviderError` triggers failover. Application-level errors (bad prompts, validation failures) are not retried.
 
 A provider that fails with an exception that is not one of the library's own, such as a `TypeError` raised while the request is being built, reports it as a `ProviderError` with the original in `original_error`. The cascade fails over on it like an outage. It is not retried first: a request that cannot be built fails the same way every time.
