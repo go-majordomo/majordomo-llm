@@ -20,6 +20,7 @@ from majordomo_llm.base import (
     canonicalize_json_schema_output,
     enforce_strict_object_schema,
     resolve_api_key,
+    usage_fields,
 )
 from majordomo_llm.exceptions import ConfigurationError, ProviderError, ResponseParsingError
 from majordomo_llm.retry import retry_provider_call
@@ -235,21 +236,16 @@ class Bedrock(LLM):
         # Converse spells the stop reason "stopReason" but uses the same
         # "max_tokens" value as the Messages API, so no normalization is needed.
         stop_reason = response.get("stopReason")
-        self._check_truncation(stop_reason, resolved_max_tokens, output_tokens, content)
-        input_cost, output_cost, total_cost = self._calculate_costs(
-            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        usage = self._priced_usage(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens, execution_time
+        )
+        self._check_truncation(
+            stop_reason, resolved_max_tokens, output_tokens, content, usage=usage
         )
 
         return LLMResponse(
             content=content,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
+            **usage_fields(usage),
             deprecation_warning=self.deprecation_warning,
             stop_reason=stop_reason,
         )
@@ -308,7 +304,7 @@ class Bedrock(LLM):
                     original_error=e,
                 ) from e
             self._check_truncation(
-                state.stop_reason, resolved_max_tokens, state.output_tokens, ""
+                state.stop_reason, resolved_max_tokens, state.output_tokens, "", usage=None
             )
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
@@ -376,26 +372,18 @@ class Bedrock(LLM):
         execution_time = time.time() - start_time
         input_tokens, output_tokens, cached_tokens, cache_creation_tokens = _extract_usage(response)
         stop_reason = response.get("stopReason")
+        usage = self._priced_usage(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens, execution_time
+        )
         # Guard before extraction: a truncated turn has no complete toolUse block,
         # so this would otherwise surface as a missing-tool parse error.
-        self._check_truncation(stop_reason, resolved_max_tokens, output_tokens, "")
-        content = _extract_tool_use_input(response, schema_name)
-        input_cost, output_cost, total_cost = self._calculate_costs(
-            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
-        )
+        self._check_truncation(stop_reason, resolved_max_tokens, output_tokens, "", usage=usage)
+        with self._usage_on_parse_error(usage):
+            content = canonicalize_json_schema_output(
+                _extract_tool_use_input(response, schema_name), response_schema
+            )
 
-        return LLMResponse(
-            content=canonicalize_json_schema_output(content, response_schema),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
-            stop_reason=stop_reason,
-        )
+        return LLMResponse(content=content, **usage_fields(usage), stop_reason=stop_reason)
 
     @retry_provider_call
     async def _get_structured_response(
@@ -454,26 +442,17 @@ class Bedrock(LLM):
 
         execution_time = time.time() - start_time
         input_tokens, output_tokens, cached_tokens, cache_creation_tokens = _extract_usage(response)
+        usage = self._priced_usage(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens, execution_time
+        )
         # Guard before extraction: a truncated turn has no complete toolUse block.
         self._check_truncation(
-            response.get("stopReason"), resolved_max_tokens, output_tokens, ""
+            response.get("stopReason"), resolved_max_tokens, output_tokens, "", usage=usage
         )
-        content = _extract_tool_use_input(response, "structured_response")
-        input_cost, output_cost, total_cost = self._calculate_costs(
-            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
-        )
+        with self._usage_on_parse_error(usage):
+            content = _extract_tool_use_input(response, "structured_response")
 
-        return LLMJSONResponse(
-            content=content,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
-        )
+        return LLMJSONResponse(content=content, **usage_fields(usage))
 
 
 def _bedrock_user_message(user_prompt: str) -> list[dict[str, Any]]:

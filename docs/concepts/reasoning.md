@@ -44,8 +44,11 @@ exception: Baseten's `GLM-5.2`, where reasoning is opt-in and stays off.
 
 Anthropic models carry no default. Reasoning there is configured through named
 profiles (`claude-opus-4-8-fast`, `-medium`, `-deep`) or left to the model's own
-default; `claude-opus-5-5` and `claude-sonnet-5-5` think on every request, and
-`thinking="disabled"` is rejected by both. OpenAI, Gemini, Cohere, Bedrock and Bedrock Mantle have no reasoning setting in
+default. With nothing sent, the model decides for itself whether to think, and bills
+any thinking as output. On a one-word classification, `claude-opus-5` and
+`claude-fable-5` thought and the 5.5 models did not; on a Markdown rewrite with about
+4,300 tokens of text, `claude-sonnet-5-5` used 8,700 output tokens. `claude-opus-5-5`,
+`claude-fable-5-1` and `claude-fable-5` cannot have thinking turned off. OpenAI, Gemini, Cohere, Bedrock and Bedrock Mantle have no reasoning setting in
 this library.
 
 Having no setting does not mean a model does not reason. Gemini 3 models think on
@@ -74,14 +77,16 @@ llm = get_llm_instance(
 )
 ```
 
-Three rules govern the override:
+Four rules govern the override:
 
 1. **It is one override, not two.** Passing either argument replaces *both* configured
    values. `thinking="disabled"` on a model configured with `reasoning_effort: low`
    sends only `thinking`, never the two together.
 2. **`reasoning_effort="default"` sends nothing.** It removes the library's `low` and
    leaves the host's own default in force.
-3. **Values are passed through as-is.** The library checks that a value is one a host
+3. **`thinking="disabled"` means off on every model.** It is sent as that model's own
+   spelling of "off"; see [Turning Thinking Off](#turning-thinking-off).
+4. **Other values are passed through as-is.** The library checks that a value is one a host
    could accept (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` for effort;
    `enabled` or `disabled` for thinking on the open-weight hosts). Whether a particular
    model accepts it is up to the host, and a rejected value comes back as a
@@ -89,6 +94,39 @@ Three rules govern the override:
 
 The override is supported on `anthropic`, `fireworks`, `together` and `baseten`. On any
 other provider it raises `ConfigurationError` rather than being silently ignored.
+
+## Turning Thinking Off
+
+Models spell "off" differently, and some have no "off". `thinking="disabled"` is the
+one spelling callers use; `get_llm_instance()` sends whatever the model needs, read from
+the `thinking_off` key of its `llm_config.yaml` entry. A `thinking: disabled` set in
+the config itself is translated the same way, and so is a cascade member's
+`{"thinking": "disabled"}`.
+
+| `thinking_off` | Sent for `thinking="disabled"` | Models |
+|----------------|--------------------------------|--------|
+| absent (`disabled`) | `{"type": "disabled"}` | Every model not listed below. Measured to work on `claude-haiku-5-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-5`, Kimi K3, Qwen 3.8, Together's `GLM-5.2`, and the DeepSeek V4 models on Together and Baseten; the rest have not been probed |
+| `between_tools` | `{"type": "between_tools"}` | `claude-sonnet-5-5`, which rejects `disabled` with a 400 |
+| `default` | nothing | Baseten's `GLM-5.2`, which reasons only when asked |
+| `unsupported` | raises `ConfigurationError` | `claude-opus-5-5`, `claude-fable-5-1` and `claude-fable-5`, which reject both `disabled` and `between_tools`; `glm-5p3` and `inkling` on Fireworks; `GLM-5.3`, `Qwen3.5-9B` and `Inkling` on Together |
+
+An `unsupported` model raises rather than accepting a value that would not turn
+reasoning off, so a caller asking for no thinking finds out when the instance is built,
+not from the bill. On those Claude models the API's advice is to keep thinking
+`adaptive` and lower `reasoning_effort` instead.
+
+`between_tools` on `claude-sonnet-5-5` is "off" before the answer, not everywhere.
+In the API's words, the model "does not think before responding", but the short
+updates it writes between tool calls come back as thinking blocks. With web search
+on, those updates are still billed as output; the library drops them from `content`.
+
+The Anthropic rows come from `scripts/check_anthropic_thinking.py`, which sends each
+registered Claude model `disabled` and `between_tools` and prints which one it accepts
+next to the configured value, along with the API's error message for each one it
+rejects. Run it when adding a Claude model.
+
+Constructing a provider class directly (`Anthropic(thinking=...)`) bypasses the
+translation and sends the value as given.
 
 ## Values Are Not Portable
 
@@ -137,9 +175,12 @@ off at the cap raises `ResponseTruncatedError`; see `max_tokens` in the README.
 - **Why the default is set per model.** A blanket `low` would have switched reasoning
   on for Baseten's `GLM-5.2` and done nothing for six other models. Each entry reflects
   what was measured for that model on that host.
-- **Why values are not translated.** Mapping one vocabulary onto every host would need
-  a table that goes stale as fast as the hosts change their models. Passing values
-  through keeps the library honest about what it knows.
+- **Why only "off" is translated.** Mapping every value onto every host would need a
+  table that goes stale as fast as the hosts change their models. "Off" is the one
+  request whose meaning is the same everywhere, and getting it wrong costs money
+  silently, so it alone is translated, from a per-model key set only where the
+  behaviour was measured. Every other value is passed through, which keeps the
+  library honest about what it knows.
 - **These hosts change often.** Re-measure before relying on a row above for anything
   cost-sensitive.
 

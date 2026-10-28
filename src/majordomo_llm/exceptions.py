@@ -1,5 +1,12 @@
 """Custom exceptions for majordomo-llm."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from majordomo_llm.base import Usage
+
 
 class MajordomoError(Exception):
     """Base exception for all majordomo-llm errors.
@@ -138,17 +145,29 @@ class ResponseParsingError(MajordomoError):
 
     Attributes:
         raw_content: The raw response content that failed to parse.
+        usage: Tokens, cost, provider, model and ``attempted`` of the call
+            whose response failed to parse. That call was billed. ``None`` when
+            the error was raised outside a provider call, or by a path that
+            has no usage to report (image generation).
     """
 
-    def __init__(self, message: str, raw_content: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        raw_content: str | None = None,
+        *,
+        usage: Usage | None = None,
+    ):
         """Initialize the parsing error.
 
         Args:
             message: Human-readable error description.
             raw_content: The raw response content that failed to parse.
+            usage: Usage of the call that produced the response, if known.
         """
         super().__init__(message)
         self.raw_content = raw_content
+        self.usage = usage
 
 
 class EmptyStructuredResponseError(ResponseParsingError):
@@ -193,6 +212,10 @@ class ResponseTruncatedError(MajordomoError):
         output_tokens: Tokens the model actually emitted before being cut off.
         partial_content: Whatever content arrived before truncation. May be an
             empty string when the cut preceded the first text block.
+        usage: Tokens, cost, provider, model and ``attempted`` of the truncated
+            call. The call was billed in full, so this is what it cost. Set on
+            every truncation the library raises; ``None`` only on an error
+            built by hand.
     """
 
     def __init__(
@@ -202,6 +225,7 @@ class ResponseTruncatedError(MajordomoError):
         partial_content: str = "",
         *,
         provider: str | None = None,
+        usage: Usage | None = None,
     ):
         """Initialize the truncation error.
 
@@ -210,6 +234,7 @@ class ResponseTruncatedError(MajordomoError):
             output_tokens: Tokens emitted before the cut.
             partial_content: Content received before truncation.
             provider: Optional provider name, included in the message.
+            usage: Usage of the truncated call.
         """
         where = f" from provider '{provider}'" if provider else ""
         super().__init__(
@@ -221,3 +246,4 @@ class ResponseTruncatedError(MajordomoError):
         self.output_tokens = output_tokens
         self.partial_content = partial_content
         self.provider = provider
+        self.usage = usage

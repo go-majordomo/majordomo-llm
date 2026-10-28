@@ -279,11 +279,8 @@ class Cohere(LLM):
         cached_tokens = 0
         input_cost, output_cost, total_cost = self._calculate_costs(input_tokens, output_tokens)
 
-        return LLMResponse(
-            content=canonicalize_json_schema_output(
-                _cohere_text_content(response),
-                response_schema,
-            ),
+        result = LLMResponse(
+            content=_cohere_text_content(response),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -292,6 +289,10 @@ class Cohere(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+        # Priced before parsing, so a parse error carries what the call cost.
+        with self._usage_on_parse_error(result):
+            result.content = canonicalize_json_schema_output(result.content, response_schema)
+        return result
 
 
 def _cohere_token_counts(response: Any) -> tuple[int, int]:

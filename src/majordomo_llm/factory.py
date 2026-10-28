@@ -41,6 +41,19 @@ _REASONING_PROVIDERS = frozenset({"anthropic", "fireworks", "together", "baseten
 #: never reaches a provider.
 REASONING_VENDOR_DEFAULT = "default"
 
+#: The model-neutral way to turn thinking off: ``thinking="disabled"``. Models
+#: spell "off" differently on the wire, so the factory sends each model's own
+#: spelling, read from the ``thinking_off`` key of its ``llm_config.yaml`` entry.
+THINKING_OFF = "disabled"
+
+#: ``thinking_off`` value for a model whose thinking cannot be turned off.
+#: Asking for ``thinking="disabled"`` on it raises :class:`ConfigurationError`.
+THINKING_OFF_UNSUPPORTED = "unsupported"
+
+#: ``thinking_off`` value for a model that does not think unless asked to, so
+#: "off" is sent as no thinking option at all.
+THINKING_OFF_VENDOR_DEFAULT = "default"
+
 #: Mapping of provider name to its implementing class. Module-level so pricing
 #: lookups (:func:`get_model_pricing`) can read a provider's cache-accounting
 #: mode without instantiating a client.
@@ -303,6 +316,31 @@ def get_model_pricing(provider: str, model: str) -> ModelPricing | None:
     )
 
 
+def _resolve_thinking(
+    provider: str, model: str, thinking: str | None, model_attributes: dict[str, Any]
+) -> str | None:
+    """Translate the model-neutral ``thinking="disabled"`` into this model's spelling.
+
+    Any other value is returned unchanged, for the provider to validate.
+
+    Raises:
+        ConfigurationError: If thinking is asked to be off on a model whose
+            ``thinking_off`` is ``unsupported``.
+    """
+    if thinking != THINKING_OFF:
+        return thinking
+    off = model_attributes.get("thinking_off", THINKING_OFF)
+    if off == THINKING_OFF_UNSUPPORTED:
+        raise ConfigurationError(
+            f"Model '{model}' for provider '{provider}' cannot turn thinking off "
+            f"(thinking_off: {THINKING_OFF_UNSUPPORTED} in llm_config.yaml). "
+            f"Leave thinking unset, or lower reasoning_effort to reduce it."
+        )
+    if off == THINKING_OFF_VENDOR_DEFAULT:
+        return None
+    return cast(str, off)
+
+
 def get_llm_instance(
     provider: str,
     model: str,
@@ -350,7 +388,16 @@ def get_llm_instance(
             baseten.
         thinking: Override the model's thinking mode (``"enabled"`` /
             ``"disabled"`` on the open-weight hosts, ``"adaptive"`` /
-            ``"disabled"`` on Anthropic). Same providers as ``reasoning_effort``.
+            ``"disabled"`` / ``"between_tools"`` on Anthropic). Same providers
+            as ``reasoning_effort``.
+
+            ``"disabled"`` means "off" on every model, whatever that model calls
+            it: the factory sends the spelling in the model's ``thinking_off``
+            config key (``between_tools`` on ``claude-sonnet-5-5``, for
+            example), sends nothing where the model does not think unless asked
+            to, and raises :class:`ConfigurationError` where thinking cannot be
+            turned off. The same translation applies to a ``thinking: disabled``
+            set in the config. Any other value is sent as given.
 
             The two arguments are one override: passing either replaces BOTH
             configured values for the model, so only what the caller supplied is
@@ -364,6 +411,8 @@ def get_llm_instance(
             ``use_web_search`` is set on a model whose config does not declare
             ``supports_web_search: true``, or if ``reasoning_effort`` /
             ``thinking`` is passed for a provider that does not support them.
+            Also raised if ``thinking="disabled"`` is asked of a model whose
+            thinking cannot be turned off.
         ValueError: If ``reasoning_effort`` or ``thinking`` is not a value the
             provider recognizes.
 
@@ -432,10 +481,14 @@ def get_llm_instance(
             provider_kwargs["reasoning_effort"] = (
                 None if reasoning_effort == REASONING_VENDOR_DEFAULT else reasoning_effort
             )
-            provider_kwargs["thinking"] = thinking
+            provider_kwargs["thinking"] = _resolve_thinking(
+                provider, model, thinking, model_attributes
+            )
         else:
             provider_kwargs["reasoning_effort"] = model_attributes.get("reasoning_effort")
-            provider_kwargs["thinking"] = model_attributes.get("thinking")
+            provider_kwargs["thinking"] = _resolve_thinking(
+                provider, model, model_attributes.get("thinking"), model_attributes
+            )
     if provider in ("bedrock", "bedrock_mantle"):
         provider_kwargs["region"] = region
 

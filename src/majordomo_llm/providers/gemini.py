@@ -429,8 +429,8 @@ class Gemini(LLM):
         tool_use_cost = self._compute_structured_web_search_cost(response)
         total_cost += tool_use_cost
 
-        return LLMResponse(
-            content=canonicalize_json_schema_output(response.text or "", response_schema),
+        result = LLMResponse(
+            content=response.text or "",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -440,6 +440,10 @@ class Gemini(LLM):
             response_time=execution_time,
             tool_use_cost=tool_use_cost,
         )
+        # Priced before parsing, so a parse error carries what the call cost.
+        with self._usage_on_parse_error(result):
+            result.content = canonicalize_json_schema_output(result.content, response_schema)
+        return result
 
 
 def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:

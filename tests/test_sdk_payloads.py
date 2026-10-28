@@ -34,7 +34,14 @@ import pytest
 from google import genai
 from google.genai import types as genai_types
 
-from majordomo_llm import ImageInput, LLMCascade, get_llm_instance
+from majordomo_llm import (
+    ConfigurationError,
+    ImageInput,
+    LLMCascade,
+    ResponseParsingError,
+    ResponseTruncatedError,
+    get_llm_instance,
+)
 from majordomo_llm.providers import Anthropic
 
 COUNTRY_SCHEMA: dict[str, Any] = {
@@ -167,7 +174,7 @@ def _anthropic_direct(transport: RecordingTransport, **kwargs: Any) -> Anthropic
     return _with_anthropic_transport(llm, transport)
 
 
-def _anthropic_stream(text: str = "ok") -> Reply:
+def _anthropic_stream(text: str = "ok", stop_reason: str = "end_turn") -> Reply:
     """A complete Messages API event stream whose answer is ``text``."""
     return _sse(
         [
@@ -208,7 +215,7 @@ def _anthropic_stream(text: str = "ok") -> Reply:
                 "message_delta",
                 {
                     "type": "message_delta",
-                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "delta": {"stop_reason": stop_reason, "stop_sequence": None},
                     "usage": {"output_tokens": 2},
                 },
             ),
@@ -673,3 +680,303 @@ class TestResponseProvenance:
         assert stream.usage is not None
         assert (stream.usage.provider, stream.usage.model) == ("anthropic", "claude-sonnet-5-5")
         assert stream.usage.attempted == [("anthropic", "claude-sonnet-5-5")]
+
+
+# --- Thinking off ------------------------------------------------------------
+
+
+def _anthropic_rejected() -> Reply:
+    """A 400, which neither the SDK nor the library retries."""
+    return Reply(
+        json.dumps(
+            {"type": "error", "error": {"type": "invalid_request_error", "message": "no"}}
+        ).encode(),
+        status=400,
+    )
+
+
+def _openai_rejected() -> Reply:
+    return Reply(
+        json.dumps(
+            {"error": {"message": "no", "type": "invalid_request_error", "code": None}}
+        ).encode(),
+        status=400,
+    )
+
+
+class TestThinkingOff:
+    """``thinking="disabled"`` is sent as each model's own spelling of "off"."""
+
+    async def test_sonnet_5_5_is_sent_between_tools(self):
+        transport = RecordingTransport(_anthropic_text())
+        llm = _with_anthropic_transport(
+            get_llm_instance(
+                "anthropic", "claude-sonnet-5-5", api_key="test-key", thinking="disabled"
+            ),
+            transport,
+        )
+
+        await llm.get_response("Reply with the word ok.")
+
+        assert transport.body()["thinking"] == {"type": "between_tools"}
+
+    @pytest.mark.parametrize("model", ["claude-haiku-5-5", "claude-opus-5"])
+    async def test_model_that_takes_disabled_is_sent_disabled(self, model):
+        transport = RecordingTransport(_anthropic_text())
+        llm = _with_anthropic_transport(
+            get_llm_instance("anthropic", model, api_key="test-key", thinking="disabled"),
+            transport,
+        )
+
+        await llm.get_response("Reply with the word ok.")
+
+        assert transport.body()["thinking"] == {"type": "disabled"}
+
+    async def test_nothing_is_sent_when_thinking_is_left_unset(self):
+        transport = RecordingTransport(_anthropic_text())
+        llm = _anthropic(transport, model="claude-sonnet-5-5")
+
+        await llm.get_response("Reply with the word ok.")
+
+        assert "thinking" not in transport.body()
+
+    @pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-fable-5-1", "claude-fable-5"])
+    def test_model_that_cannot_turn_thinking_off_is_refused(self, model):
+        with pytest.raises(ConfigurationError, match="cannot turn thinking off"):
+            get_llm_instance("anthropic", model, api_key="test-key", thinking="disabled")
+
+    async def test_open_weight_model_is_sent_disabled(self):
+        transport = RecordingTransport(_chat_completion())
+        llm = get_llm_instance(
+            "together", "deepseek-ai/DeepSeek-V4.1-Flash", api_key="test-key", thinking="disabled"
+        )
+        llm.client = openai.AsyncOpenAI(
+            api_key="test-key",
+            base_url="https://test.invalid/v1",
+            http_client=transport.client(OPENAI_HTTP),
+        )
+
+        await llm.get_response("Reply with the word ok.")
+
+        assert transport.body()["thinking"] == {"type": "disabled"}
+
+    async def test_open_weight_model_off_by_default_is_sent_nothing(self):
+        """Baseten's GLM-5.2 reasons only when asked, so "off" sends no option."""
+        transport = RecordingTransport(_chat_completion())
+        llm = get_llm_instance(
+            "baseten", "zai-org/GLM-5.2", api_key="test-key", thinking="disabled"
+        )
+        llm.client = openai.AsyncOpenAI(
+            api_key="test-key",
+            base_url="https://test.invalid/v1",
+            http_client=transport.client(OPENAI_HTTP),
+        )
+
+        await llm.get_response("Reply with the word ok.")
+
+        body = transport.body()
+        assert "thinking" not in body
+        assert "reasoning_effort" not in body
+
+    @pytest.mark.parametrize(
+        ("provider", "model"),
+        [
+            ("fireworks", "accounts/fireworks/models/glm-5p3"),
+            ("together", "zai-org/GLM-5.3"),
+            ("together", "Qwen/Qwen3.5-9B"),
+        ],
+    )
+    def test_open_weight_model_that_cannot_turn_thinking_off_is_refused(self, provider, model):
+        with pytest.raises(ConfigurationError, match="cannot turn thinking off"):
+            get_llm_instance(provider, model, api_key="test-key", thinking="disabled")
+
+
+class TestCascadeMemberOptions:
+    async def test_each_member_sends_its_own_options(self):
+        anthropic_transport = RecordingTransport(_anthropic_rejected())
+        together_transport = RecordingTransport(_chat_completion("from together"))
+        cascade = LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-5-5", {"thinking": "disabled"}),
+                ("together", "moonshotai/Kimi-K3", {"reasoning_effort": "high"}),
+            ],
+            api_key="test-key",
+        )
+        _with_anthropic_transport(cascade.llms[0], anthropic_transport)
+        cascade.llms[1].client = openai.AsyncOpenAI(
+            api_key="test-key",
+            base_url="https://test.invalid/v1",
+            http_client=together_transport.client(OPENAI_HTTP),
+        )
+
+        response = await cascade.get_response("hi")
+
+        assert response.content == "from together"
+        assert anthropic_transport.body()["thinking"] == {"type": "between_tools"}
+        together_body = together_transport.body()
+        assert together_body["reasoning_effort"] == "high"
+        assert "thinking" not in together_body
+
+    async def test_member_without_options_keeps_its_config(self):
+        transport = RecordingTransport(_chat_completion())
+        cascade = LLMCascade(
+            [("together", "moonshotai/Kimi-K3"), ("anthropic", "claude-sonnet-5-5")],
+            api_key="test-key",
+        )
+        cascade.llms[0].client = openai.AsyncOpenAI(
+            api_key="test-key",
+            base_url="https://test.invalid/v1",
+            http_client=transport.client(OPENAI_HTTP),
+        )
+
+        await cascade.get_response("hi")
+
+        # llm_config.yaml sets reasoning_effort: low on this model.
+        assert transport.body()["reasoning_effort"] == "low"
+
+
+# --- Billed errors carry their usage ------------------------------------------
+
+
+class TestTruncatedResponseCarriesUsage:
+    def _expected_costs(self, llm: Any, input_tokens: int, output_tokens: int) -> tuple:
+        return llm._calculate_costs(input_tokens, output_tokens, 0, 0)
+
+    async def test_text(self):
+        llm = _anthropic(
+            RecordingTransport(
+                _anthropic_message([{"type": "text", "text": "cut"}], stop_reason="max_tokens")
+            ),
+            model="claude-sonnet-5-5",
+        )
+
+        with pytest.raises(ResponseTruncatedError) as caught:
+            await llm.get_response("Write a long essay.", max_tokens=2)
+
+        error = caught.value
+        assert error.partial_content == "cut"
+        usage = error.usage
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (10, 2)
+        input_cost, output_cost, total_cost = self._expected_costs(llm, 10, 2)
+        assert (usage.input_cost, usage.output_cost, usage.total_cost) == (
+            input_cost,
+            output_cost,
+            total_cost,
+        )
+        assert total_cost > 0
+        assert (usage.provider, usage.model) == ("anthropic", "claude-sonnet-5-5")
+        assert usage.attempted == [("anthropic", "claude-sonnet-5-5")]
+
+    async def test_stream(self):
+        llm = _anthropic(
+            RecordingTransport(_anthropic_stream("cut", stop_reason="max_tokens")),
+            model="claude-sonnet-5-5",
+        )
+
+        stream = await llm.get_response_stream("Write a long essay.", max_tokens=2)
+        with pytest.raises(ResponseTruncatedError) as caught:
+            async for _ in stream:
+                pass
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (10, 2)
+        assert usage.total_cost == self._expected_costs(llm, 10, 2)[2]
+        assert (usage.provider, usage.model) == ("anthropic", "claude-sonnet-5-5")
+        assert usage.attempted == [("anthropic", "claude-sonnet-5-5")]
+
+    async def test_structured_reports_truncation_not_a_parse_error(self):
+        """Cut off before any text block: the cause is reported, with its cost."""
+        llm = _anthropic(
+            RecordingTransport(_anthropic_message([], stop_reason="max_tokens")),
+            model="claude-sonnet-5-5",
+        )
+
+        with pytest.raises(ResponseTruncatedError) as caught:
+            await llm.get_json_schema_response("Tell me about France.", COUNTRY_SCHEMA)
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.total_cost == self._expected_costs(llm, 10, 2)[2]
+
+    async def test_cascade_records_the_members_tried_first(self):
+        openai_transport = RecordingTransport(_openai_rejected())
+        anthropic_transport = RecordingTransport(
+            _anthropic_message([{"type": "text", "text": "cut"}], stop_reason="max_tokens")
+        )
+        cascade = LLMCascade(
+            [("openai", "gpt-5.5"), ("anthropic", "claude-sonnet-5-5")], api_key="test-key"
+        )
+        cascade.llms[0].client = openai.AsyncOpenAI(
+            api_key="test-key", http_client=openai_transport.client(OPENAI_HTTP)
+        )
+        _with_anthropic_transport(cascade.llms[1], anthropic_transport)
+
+        with pytest.raises(ResponseTruncatedError) as caught:
+            await cascade.get_response("Write a long essay.", max_tokens=2)
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert (usage.provider, usage.model) == ("anthropic", "claude-sonnet-5-5")
+        assert usage.attempted == [("openai", "gpt-5.5"), ("anthropic", "claude-sonnet-5-5")]
+
+    async def test_cascade_stream_records_the_members_tried_first(self):
+        openai_transport = RecordingTransport(_openai_rejected())
+        cascade = LLMCascade(
+            [("openai", "gpt-5.5"), ("anthropic", "claude-sonnet-5-5")], api_key="test-key"
+        )
+        cascade.llms[0].client = openai.AsyncOpenAI(
+            api_key="test-key", http_client=openai_transport.client(OPENAI_HTTP)
+        )
+        _with_anthropic_transport(
+            cascade.llms[1],
+            RecordingTransport(_anthropic_stream("cut", stop_reason="max_tokens")),
+        )
+
+        stream = await cascade.get_response_stream("Write a long essay.", max_tokens=2)
+        with pytest.raises(ResponseTruncatedError) as caught:
+            await stream.collect()
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.attempted == [("openai", "gpt-5.5"), ("anthropic", "claude-sonnet-5-5")]
+
+
+class TestParseErrorCarriesUsage:
+    async def test_structured_response_that_fails_the_schema(self):
+        llm = _openai(RecordingTransport(_openai_response(json.dumps({"name": "France"}))))
+
+        with pytest.raises(ResponseParsingError) as caught:
+            await llm.get_json_schema_response("Tell me about France.", COUNTRY_SCHEMA)
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (10, 2)
+        assert usage.total_cost == llm._calculate_costs(10, 2, 0)[2]
+        assert (usage.provider, usage.model) == ("openai", "gpt-6.1-sol")
+        assert usage.attempted == [("openai", "gpt-6.1-sol")]
+
+    async def test_anthropic_refusal(self):
+        llm = _anthropic(
+            RecordingTransport(_anthropic_message([], stop_reason="refusal")),
+            model="claude-sonnet-5-5",
+        )
+
+        with pytest.raises(ResponseParsingError, match="refused") as caught:
+            await llm.get_json_schema_response("Tell me about France.", COUNTRY_SCHEMA)
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert usage.total_cost == llm._calculate_costs(10, 2, 0, 0)[2]
+
+    async def test_json_response_that_is_not_json(self):
+        llm = _anthropic(RecordingTransport(_anthropic_text("not json")))
+
+        with pytest.raises(ResponseParsingError) as caught:
+            await llm.get_json_response("Return JSON.")
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert (usage.provider, usage.model) == ("anthropic", "claude-haiku-5-5")
+        assert usage.total_cost == llm._calculate_costs(10, 2, 0, 0)[2]

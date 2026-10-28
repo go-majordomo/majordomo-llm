@@ -3,7 +3,7 @@
 import base64
 import logging
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
@@ -31,6 +31,7 @@ from majordomo_llm.base import (
     enforce_strict_object_schema,
     resolve_api_key,
     strip_unsupported_schema_constraints,
+    usage_fields,
 )
 from majordomo_llm.exceptions import InvalidRequestError, ProviderError, ResponseParsingError
 from majordomo_llm.retry import retry_provider_call
@@ -48,10 +49,15 @@ _EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
 MAX_NONSTREAMING_TOKENS = 21_333
 
 #: Valid ``thinking.type`` modes. ``adaptive`` is the on-mode for the 4.6+/5
-#: generation (Claude decides depth); ``disabled`` turns thinking off (rejected
-#: on Fable 5, where thinking is always on). Legacy ``enabled`` + ``budget_tokens``
-#: is intentionally not exposed here.
-_THINKING_MODES = frozenset({"adaptive", "disabled"})
+#: generation (Claude decides depth). "Off" is spelled per model: ``disabled``
+#: on most, ``between_tools`` on ``claude-sonnet-5-5`` (which rejects
+#: ``disabled`` with a 400), and unavailable on ``claude-opus-5-5``,
+#: ``claude-fable-5-1`` and ``claude-fable-5``, which reject both. Through the
+#: factory, ``thinking="disabled"`` is translated to the model's spelling via
+#: its ``thinking_off`` config key; constructed directly, the value is sent as
+#: given. Legacy ``enabled`` + ``budget_tokens`` is
+#: intentionally not exposed here.
+_THINKING_MODES = frozenset({"adaptive", "disabled", "between_tools"})
 
 
 @dataclass(frozen=True)
@@ -160,12 +166,20 @@ class Anthropic(LLM):
                 distinct effort profiles.
             thinking: Optional ``thinking.type`` mode applied to every request —
                 ``adaptive`` (Claude decides how much to think; the on-mode for
-                the 4.6+/5 generation) or ``disabled``. ``None`` (default) omits
-                the field, so the model runs without thinking. Effort only
-                meaningfully modulates depth when thinking is on, so pair the two.
-                Note: ``disabled`` is rejected on Fable 5 (thinking is always on),
-                and with thinking on ``max_tokens`` covers thinking + answer, so
-                a deep-thinking profile needs headroom for both. Raise it with the
+                the 4.6+/5 generation), ``disabled``, or ``between_tools``
+                (how ``claude-sonnet-5-5`` spells "off"). Sent exactly as given;
+                :func:`~majordomo_llm.factory.get_llm_instance` is what turns a
+                model-neutral ``disabled`` into the model's own spelling.
+                ``None`` (default) omits the field, which leaves the model's own
+                default in force. That varies by model and by prompt: on a
+                one-word prompt ``claude-opus-5`` and Fable 5 thought and the
+                5.5 models did not, while ``claude-sonnet-5-5`` thought heavily
+                on a long rewrite. Thinking is billed as output.
+                Effort only meaningfully modulates depth when thinking is on.
+                Note: ``claude-opus-5-5``, ``claude-fable-5-1`` and Fable 5
+                reject every "off" value, and with thinking on ``max_tokens``
+                covers thinking + answer, so a deep-thinking profile needs
+                headroom for both. Raise it with the
                 ``max_tokens`` key in ``llm_config.yaml`` or the per-request
                 ``max_tokens`` argument; a response that hits the cap raises
                 :class:`~majordomo_llm.exceptions.ResponseTruncatedError` rather
@@ -336,38 +350,8 @@ class Anthropic(LLM):
                 original_error=e,
             ) from e
 
-        execution_time = time.time() - start_time
-        final_response = [c.text for c in response_message.content if c.type == "text"]
-
-        input_tokens = response_message.usage.input_tokens
-        output_tokens = response_message.usage.output_tokens
-        self._check_truncation(
-            response_message.stop_reason,
-            resolved_max_tokens,
-            output_tokens,
-            _join_text_blocks(final_response),
-        )
-        cached_tokens = response_message.usage.cache_read_input_tokens or 0
-        cache_creation_tokens = response_message.usage.cache_creation_input_tokens or 0
-        input_cost, output_cost, total_cost = self._calculate_costs(
-            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
-        )
-        tool_use_cost = self._compute_web_search_cost(response_message)
-        total_cost += tool_use_cost
-
-        return LLMResponse(
-            content=_join_text_blocks(final_response),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
-            tool_use_cost=tool_use_cost,
-            deprecation_warning=self.deprecation_warning,
-            stop_reason=response_message.stop_reason,
+        return self._finalize_text_response(
+            response_message, resolved_max_tokens, time.time() - start_time
         )
 
     @retry_provider_call
@@ -405,32 +389,39 @@ class Anthropic(LLM):
                 f"Anthropic API error: {e}", provider="anthropic", original_error=e
             ) from e
 
+        return self._finalize_text_response(
+            response_message, resolved_max_tokens, time.time() - start_time
+        )
+
+    def _finalize_text_response(
+        self, response_message: Any, max_tokens: int, execution_time: float
+    ) -> LLMResponse:
+        """Price a text response and raise if it was cut off at ``max_tokens``.
+
+        Priced before the truncation check, so a truncated call's error carries
+        what it cost.
+        """
         content = _join_text_blocks(
             block.text for block in response_message.content if block.type == "text"
         )
-        input_tokens = response_message.usage.input_tokens
-        output_tokens = response_message.usage.output_tokens
+        usage = self._priced_usage(
+            response_message.usage.input_tokens,
+            response_message.usage.output_tokens,
+            response_message.usage.cache_read_input_tokens or 0,
+            response_message.usage.cache_creation_input_tokens or 0,
+            execution_time,
+            tool_use_cost=self._compute_web_search_cost(response_message),
+        )
         self._check_truncation(
-            response_message.stop_reason, resolved_max_tokens, output_tokens, content
+            response_message.stop_reason,
+            max_tokens,
+            response_message.usage.output_tokens,
+            content,
+            usage=usage,
         )
-        cached_tokens = response_message.usage.cache_read_input_tokens or 0
-        cache_creation_tokens = response_message.usage.cache_creation_input_tokens or 0
-        input_cost, output_cost, total_cost = self._calculate_costs(
-            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
-        )
-        tool_use_cost = self._compute_web_search_cost(response_message)
-        total_cost += tool_use_cost
         return LLMResponse(
             content=content,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=time.time() - start_time,
-            tool_use_cost=tool_use_cost,
+            **usage_fields(usage),
             deprecation_warning=self.deprecation_warning,
             stop_reason=response_message.stop_reason,
         )
@@ -494,7 +485,9 @@ class Anthropic(LLM):
             # Raised after the last chunk is yielded, so a truncated stream fails
             # the same way a truncated non-streaming call does rather than ending
             # quietly mid-sentence.
-            self._check_truncation(state.stop_reason, resolved_max_tokens, state.output_tokens, "")
+            self._check_truncation(
+                state.stop_reason, resolved_max_tokens, state.output_tokens, "", usage=None
+            )
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
@@ -546,7 +539,9 @@ class Anthropic(LLM):
                 raise ProviderError(
                     f"Anthropic API error: {e}", provider="anthropic", original_error=e
                 ) from e
-            self._check_truncation(state.stop_reason, resolved_max_tokens, state.output_tokens, "")
+            self._check_truncation(
+                state.stop_reason, resolved_max_tokens, state.output_tokens, "", usage=None
+            )
 
         return LLMStreamResponse(stream=generator(), state=state, llm=self)
 
@@ -646,9 +641,13 @@ class Anthropic(LLM):
                 max_tokens=resolved_max_tokens,
                 images=images,
             )
-            content = _extract_tool_use_content(response.content, schema_name)
             return self._finalize_json_schema_response(
-                content, response, execution_time, response_schema, resolved_max_tokens, usage
+                lambda: _extract_tool_use_content(response.content, schema_name),
+                response,
+                execution_time,
+                response_schema,
+                resolved_max_tokens,
+                usage,
             )
 
         if self.supports_structured_outputs:
@@ -726,14 +725,17 @@ class Anthropic(LLM):
             ) from e
 
         execution_time = time.time() - start_time
-        if response.stop_reason == "refusal":
-            raise ResponseParsingError(
-                "Anthropic refused the structured-output request.",
-                raw_content=str(response.content),
-            )
-        content = _extract_structured_text(response.content)
+
+        def extract() -> str:
+            if response.stop_reason == "refusal":
+                raise ResponseParsingError(
+                    "Anthropic refused the structured-output request.",
+                    raw_content=str(response.content),
+                )
+            return _extract_structured_text(response.content)
+
         return self._finalize_json_schema_response(
-            content, response, execution_time, response_schema, max_tokens
+            extract, response, execution_time, response_schema, max_tokens
         )
 
     async def _forced_tool_json_schema_response(
@@ -796,56 +798,60 @@ class Anthropic(LLM):
             ) from e
 
         execution_time = time.time() - start_time
-        content = _extract_tool_use_content(response.content, schema_name)
         return self._finalize_json_schema_response(
-            content, response, execution_time, response_schema, max_tokens
+            lambda: _extract_tool_use_content(response.content, schema_name),
+            response,
+            execution_time,
+            response_schema,
+            max_tokens,
         )
 
     def _finalize_json_schema_response(
         self,
-        content: Any,
+        extract: Callable[[], Any],
         response: Any,
         execution_time: float,
         response_schema: dict[str, Any],
         max_tokens: int,
         usage: _TurnUsage | None = None,
     ) -> LLMResponse:
-        """Compute usage/cost and validate structured content into an ``LLMResponse``.
+        """Price a structured response, then extract and validate its content.
 
-        ``usage`` is the total across every turn that produced ``response``; it
-        defaults to that response's own usage for the single-request paths.
+        ``extract`` pulls the structured content out of ``response`` and may raise
+        :class:`ResponseParsingError`. ``usage`` is the total across every turn
+        that produced ``response``; it defaults to that response's own usage for
+        the single-request paths.
 
-        Raises :class:`ResponseTruncatedError` before parsing: a structured
-        response cut off at the cap is malformed JSON, and reporting the cause
-        beats a downstream parse error that names the symptom. ``max_tokens``
-        caps each turn separately, so the check reads the final turn's output
-        rather than the total.
+        The call is priced first, so a truncation or parse error carries what
+        the call cost. Truncation is checked before ``extract`` runs: a
+        structured response cut off at the cap is malformed or missing, and
+        reporting the cause beats a parse error that names the symptom.
+        ``max_tokens`` caps each turn separately, so the check reads the final
+        turn's output rather than the total.
         """
-        self._check_truncation(
-            response.stop_reason, max_tokens, response.usage.output_tokens, str(content)
-        )
         if usage is None:
             usage = _TurnUsage.from_response(response)
-        input_cost, output_cost, total_cost = self._calculate_costs(
+        priced = self._priced_usage(
             usage.input_tokens,
             usage.output_tokens,
             usage.cached_tokens,
             usage.cache_creation_tokens,
+            execution_time,
+            tool_use_cost=usage.web_search_requests * self._WEB_SEARCH_COST_PER_REQUEST,
         )
-        tool_use_cost = usage.web_search_requests * self._WEB_SEARCH_COST_PER_REQUEST
-        total_cost += tool_use_cost
+        self._check_truncation(
+            response.stop_reason,
+            max_tokens,
+            response.usage.output_tokens,
+            _join_text_blocks(block.text for block in response.content if block.type == "text"),
+            usage=priced,
+        )
+        with self._usage_on_parse_error(priced):
+            content = canonicalize_json_schema_output(extract(), response_schema)
 
         return LLMResponse(
-            content=canonicalize_json_schema_output(content, response_schema),
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cached_tokens=usage.cached_tokens,
-            cache_creation_tokens=usage.cache_creation_tokens,
-            input_cost=input_cost,
-            output_cost=output_cost,
-            total_cost=total_cost,
-            response_time=execution_time,
-            tool_use_cost=tool_use_cost,
+            content=content,
+            **usage_fields(priced),
             stop_reason=response.stop_reason,
         )
 

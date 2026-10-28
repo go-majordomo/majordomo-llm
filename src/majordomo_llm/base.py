@@ -6,8 +6,9 @@ import logging
 import os
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from jsonschema import ValidationError as JSONSchemaValidationError
@@ -509,6 +510,27 @@ class Usage:
     attempted: list[tuple[str, str]] = field(default_factory=list, kw_only=True)
 
 
+
+def usage_of(response: Usage) -> Usage:
+    """Return the :class:`Usage` part of ``response`` as a plain ``Usage``.
+
+    Errors carry a call's usage without its content, so a response or other
+    ``Usage`` subclass is reduced to the base fields. ``attempted`` is copied,
+    so later changes to the response do not reach the copy.
+    """
+    values = usage_fields(response)
+    values["attempted"] = list(response.attempted)
+    return Usage(**values)
+
+
+def usage_fields(usage: Usage) -> dict[str, Any]:
+    """Return the :class:`Usage` fields of ``usage`` as keyword arguments.
+
+    Lets a provider price a call once, as a ``Usage``, and then build its
+    response from it: ``LLMResponse(content=..., **usage_fields(usage))``.
+    """
+    return {f.name: getattr(usage, f.name) for f in fields(Usage)}
+
 @dataclass
 class LLMResponse(Usage):
     """Response from an LLM containing plain text content.
@@ -637,14 +659,17 @@ class LLMStreamResponse:
             self._finalize()
             raise
         except Exception as e:
+            # A stream cut off at the cap, or one whose content fails to parse,
+            # was billed for what the provider sent. Report it on the error, with
+            # the attempts a cascade recorded on this stream.
+            if isinstance(e, ResponseTruncatedError | ResponseParsingError) and e.usage is None:
+                e.usage = self._compute_usage()
             if self._on_error:
                 self._on_error(e)
             raise
 
-    def _finalize(self) -> None:
-        if self._consumed:
-            return
-        self._consumed = True
+    def _compute_usage(self) -> Usage:
+        """Price what the stream has reported so far."""
         response_time = time.time() - self._state.start_time
         if self._state.price_override is not None:
             input_cost, output_cost, total_cost = self._state.price_override(
@@ -660,7 +685,7 @@ class LLMStreamResponse:
                 self._state.cached_tokens,
                 self._state.cache_creation_tokens,
             )
-        self._usage = Usage(
+        return Usage(
             input_tokens=self._state.input_tokens,
             output_tokens=self._state.output_tokens,
             cached_tokens=self._state.cached_tokens,
@@ -673,6 +698,12 @@ class LLMStreamResponse:
             model=self.model,
             attempted=list(self.attempted),
         )
+
+    def _finalize(self) -> None:
+        if self._consumed:
+            return
+        self._consumed = True
+        self._usage = self._compute_usage()
         if self._on_complete:
             self._on_complete(self._usage, "".join(self._chunks))
 
@@ -912,15 +943,28 @@ class LLM(ABC):
         return DEFAULT_STREAM_MAX_TOKENS if streaming else DEFAULT_MAX_TOKENS
 
     def _check_truncation(
-        self, stop_reason: str | None, max_tokens: int, output_tokens: int, content: str
+        self,
+        stop_reason: str | None,
+        max_tokens: int,
+        output_tokens: int,
+        content: str,
+        *,
+        usage: Usage | None,
     ) -> None:
         """Raise when the provider reports the response was cut off by the cap.
 
         Args:
             stop_reason: The provider's stop reason, verbatim.
             max_tokens: The cap that was sent on the request.
-            output_tokens: Tokens the model emitted.
+            output_tokens: Tokens the model emitted on the request that hit the
+                cap. On a multi-turn path this is the last turn's count, while
+                ``usage`` is the total.
             content: Whatever content arrived before the cut.
+            usage: What the call cost, attached to the error. A response may be
+                passed; only its :class:`Usage` fields are kept. Streaming paths
+                pass ``None`` because the stream is still being read here;
+                :class:`LLMStreamResponse` attaches its own usage as the error
+                passes through it.
 
         Raises:
             ResponseTruncatedError: If ``stop_reason`` indicates truncation.
@@ -932,7 +976,23 @@ class LLM(ABC):
             output_tokens=output_tokens,
             partial_content=content,
             provider=self.provider,
+            usage=usage_of(usage) if usage is not None else None,
         )
+
+    @contextmanager
+    def _usage_on_parse_error(self, usage: Usage) -> Iterator[None]:
+        """Attach ``usage`` to a :class:`ResponseParsingError` raised in the block.
+
+        Wrap the code that extracts and parses a response the provider has
+        already billed for, so a caller that catches the parse error still sees
+        what the call cost. An error that already carries usage keeps it.
+        """
+        try:
+            yield
+        except ResponseParsingError as e:
+            if e.usage is None:
+                e.usage = usage_of(usage)
+            raise
 
     def _sampling_params(self, temperature: float | None, top_p: float | None) -> dict[str, Any]:
         """Resolve which sampling parameters to send on a request.
@@ -970,6 +1030,37 @@ class LLM(ABC):
         if top_p is not None:
             params["top_p"] = top_p
         return params
+
+    def _priced_usage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int,
+        cache_creation_tokens: int,
+        response_time: float,
+        *,
+        tool_use_cost: float = 0.0,
+    ) -> Usage:
+        """Price a call's token counts as a :class:`Usage`.
+
+        ``tool_use_cost`` is added to ``total_cost``. ``provider``, ``model`` and
+        ``attempted`` are left empty; :meth:`_record_origin` fills them once the
+        call returns or fails.
+        """
+        input_cost, output_cost, total_cost = self._calculate_costs(
+            input_tokens, output_tokens, cached_tokens, cache_creation_tokens
+        )
+        return Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            total_cost=total_cost + tool_use_cost,
+            response_time=response_time,
+            tool_use_cost=tool_use_cost,
+        )
 
     def _calculate_costs(
         self,
@@ -1064,11 +1155,22 @@ class LLM(ABC):
         - tenacity's ``RetryError``, raised when retries are exhausted, which
           ``LLMCascade`` already handles and existing callers may catch.
 
+        Truncation and parse errors that carry a call's usage have it marked
+        with this LLM as the one that served the call, by the same rule as
+        :meth:`_record_origin`. That includes the last attempt inside a
+        ``RetryError``.
+
         Hooks run outside this wrapper, so their exceptions are not affected.
         """
         try:
             return await call
-        except (MajordomoError, RetryError):
+        except MajordomoError as e:
+            self._record_error_origin(e)
+            raise
+        except RetryError as e:
+            last = e.last_attempt.exception()
+            if isinstance(last, MajordomoError):
+                self._record_error_origin(last)
             raise
         except Exception as e:
             raise ProviderError(
@@ -1078,7 +1180,15 @@ class LLM(ABC):
                 original_error=e,
             ) from e
 
-    def _record_origin(self, response: LLMResponse) -> LLMResponse:
+    def _record_error_origin(self, error: BaseException) -> None:
+        """Mark the usage on a truncation or parse error as served by this LLM."""
+        if (
+            isinstance(error, ResponseTruncatedError | ResponseParsingError)
+            and error.usage is not None
+        ):
+            self._record_origin(error.usage)
+
+    def _record_origin[U: Usage](self, response: U) -> U:
         """Record on ``response`` that this LLM served it, unless already recorded.
 
         Runs after every provider call, so no provider has to set the fields
@@ -1289,6 +1399,7 @@ class LLM(ABC):
             raise ResponseParsingError(
                 f"Failed to parse JSON response: {e}",
                 raw_content=response.content,
+                usage=usage_of(response),
             ) from e
         return LLMJSONResponse(
             content=parsed_content,

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-28
+
+Thinking can now be turned off by one name on every model that allows it, and a call that was billed but then failed reports what it cost.
+
+### Added
+
+- **`thinking="disabled"` means "off" on every model.** Models spell it differently: `claude-sonnet-5-5` rejects `{"type": "disabled"}` with a 400 and wants `{"type": "between_tools"}`. Each model's spelling is now a `thinking_off` key in `llm_config.yaml`, and `get_llm_instance()` sends it whenever thinking is asked to be off, whether by argument, by a `thinking: disabled` config entry, or by a cascade member's options. Absent means `disabled`. `between_tools` is also accepted as a raw Anthropic `thinking` value
+  - `between_tools` on `claude-sonnet-5-5`. It stops thinking before the answer; with web search on, the short updates the model writes between tool calls still come back as thinking blocks and are billed
+  - `default` (send nothing) on Baseten's `GLM-5.2`, where reasoning is off unless asked for
+  - `unsupported` on `claude-opus-5-5`, `claude-fable-5-1` and `claude-fable-5`, which reject both `disabled` and `between_tools`, on `glm-5p3` and `inkling` on Fireworks, and on `GLM-5.3`, `Qwen3.5-9B` and `Inkling` on Together. Asking for thinking off there raises `ConfigurationError` when the instance is built; before, the request either failed or was accepted and kept reasoning
+- **Per-member options in `LLMCascade`.** A member may be `(provider, model, {"thinking": ..., "reasoning_effort": ...})`. The options go to `get_llm_instance()` for that member only, with the same rules as the arguments there. Any other key, or a malformed member, raises `ConfigurationError`. The option type is exported as `CascadeMemberOptions`, and a member as `CascadeMember`
+- **Billed errors carry their usage.** `ResponseTruncatedError` and `ResponseParsingError` (including `EmptyStructuredResponseError`) have a `usage` attribute: tokens, costs, `provider`, `model` and `attempted`. Through a cascade, `attempted` includes the members that failed before. It is set on every truncation the library raises, streaming included, and on parse errors raised after the provider billed for the response, on every provider
+- **`scripts/check_anthropic_thinking.py`**: sends each registered Claude model `disabled` and `between_tools` and reports which one it accepts, next to the configured `thinking_off`. Every Anthropic `thinking_off` value was set from its output
+
+### Fixed
+
+- **Docs and docstrings said a Claude model with no `thinking` set does not think.** With nothing sent, the model decides for itself, and bills any thinking as output: `claude-opus-5` and `claude-fable-5` thought on a one-word prompt, and a Markdown rewrite with about 4,300 tokens of text used 8,700 output tokens on `claude-sonnet-5-5`. The config comment saying thinking cannot be disabled on the 5.5 models was wrong for `claude-sonnet-5-5` and `claude-haiku-5-5`
+- **An Anthropic structured response cut off before any text or tool block raised a parse error instead of `ResponseTruncatedError`.** Extraction ran before the truncation check on the native and forced-tool paths. The check now runs first
+
+### Known gaps
+
+- Bedrock Mantle sends no `thinking` field, so its Claude models cannot have thinking turned on or off
+- When a structured call's retries run out, the error carries the last attempt's usage only; the earlier attempts' cost is not added in. Likewise, a cascade member that fails over on a parse error does not report its cost
+- OpenAI, Gemini, Cohere, Fireworks, Together and Baseten send no output cap and never raise `ResponseTruncatedError`, so a response cut off by a model's own limit returns as a success
+- Constructing a provider class directly (`Anthropic(thinking="disabled")`) bypasses the translation
+- Aliases still take `(provider, model)` members only
+
 ## [0.25.0] - 2026-10-28
 
 Every response now says which provider and model produced it. Through `LLMCascade` this was not knowable before: the cascade reports itself as `"cascade"` with the primary's model, and `routed_provider`/`routed_model` are set only by the Majordomo gateway, so a caller could not tell whether the primary answered or a fallback did.

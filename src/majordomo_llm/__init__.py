@@ -23,7 +23,7 @@ from majordomo_llm.base import (
     LLMStructuredResponse,
     Usage,
 )
-from majordomo_llm.cascade import LLMCascade
+from majordomo_llm.cascade import CascadeMember, CascadeMemberOptions, LLMCascade
 from majordomo_llm.exceptions import (
     ConfigurationError,
     EmptyStructuredResponseError,
@@ -97,7 +97,7 @@ from majordomo_llm.providers.openai import OpenAI
 from majordomo_llm.providers.openai_image import OpenAIImage
 from majordomo_llm.providers.together import Together
 
-__version__ = "0.25.0"
+__version__ = "0.26.0"
 
 __all__ = [
     # Base classes and types
@@ -163,6 +163,8 @@ __all__ = [
     "get_aliases",
     # Cascade
     "LLMCascade",
+    "CascadeMember",
+    "CascadeMemberOptions",
     "ImageCascade",
     # Provider implementations
     "Anthropic",

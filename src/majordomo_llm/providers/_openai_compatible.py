@@ -360,11 +360,8 @@ class OpenAICompatibleLLM(LLM):
             input_tokens, output_tokens, cached_tokens
         )
 
-        return LLMResponse(
-            content=canonicalize_json_schema_output(
-                response.choices[0].message.content or "",
-                response_schema,
-            ),
+        result = LLMResponse(
+            content=response.choices[0].message.content or "",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
@@ -373,3 +370,7 @@ class OpenAICompatibleLLM(LLM):
             total_cost=total_cost,
             response_time=execution_time,
         )
+        # Priced before parsing, so a parse error carries what the call cost.
+        with self._usage_on_parse_error(result):
+            result.content = canonicalize_json_schema_output(result.content, response_schema)
+        return result

@@ -15,7 +15,11 @@ from tenacity import Future, RetryError
 
 from majordomo_llm import LLMCascade
 from majordomo_llm.base import LLM, LLMResponse, LLMStreamResponse, _StreamState
-from majordomo_llm.exceptions import ProviderError
+from majordomo_llm.exceptions import (
+    EmptyStructuredResponseError,
+    ProviderError,
+    ResponseParsingError,
+)
 from majordomo_llm.hooks import HookContext, HookOutcome, HookPipeline
 from majordomo_llm.logging.interfaces import DatabaseAdapter
 from majordomo_llm.logging.models import LogEntry
@@ -228,6 +232,47 @@ class TestCascade:
             ("openai", "gpt-5.5"),
         ]
         assert collected.attempted == stream.usage.attempted
+
+
+class TestBilledErrors:
+    """A parse error that ends a cascade names the members tried, like a response."""
+
+    def _empty(self) -> EmptyStructuredResponseError:
+        return EmptyStructuredResponseError("empty", raw_content="{}", usage=_response("{}"))
+
+    async def test_json_parse_error_after_failover(self):
+        """get_json_response parses the member's answer, so its usage names that member."""
+        cascade = _cascade(
+            _FakeLLM("anthropic", "claude-sonnet-5-5", error=_down("anthropic")),
+            _FakeLLM("openai", "gpt-5.5", content="not json"),
+        )
+
+        with pytest.raises(ResponseParsingError) as caught:
+            await cascade.get_json_response("hi")
+
+        usage = caught.value.usage
+        assert usage is not None
+        assert (usage.provider, usage.model) == ("openai", "gpt-5.5")
+        assert usage.attempted == [("anthropic", "claude-sonnet-5-5"), ("openai", "gpt-5.5")]
+        assert usage.total_cost == 0.03
+
+    async def test_parse_error_inside_exhausted_retries(self):
+        empty = self._empty()
+        exhausted = RetryError(Future.construct(attempt_number=3, value=empty, has_exception=True))
+        cascade = _cascade(
+            _FakeLLM("anthropic", "claude-sonnet-5-5", error=_down("anthropic")),
+            _FakeLLM("openai", "gpt-5.5", error=exhausted),
+        )
+
+        with pytest.raises(RetryError):
+            await cascade.get_json_schema_response("hi", {"type": "object"})
+
+        assert empty.usage is not None
+        assert (empty.usage.provider, empty.usage.model) == ("openai", "gpt-5.5")
+        assert empty.usage.attempted == [
+            ("anthropic", "claude-sonnet-5-5"),
+            ("openai", "gpt-5.5"),
+        ]
 
 
 class _UppercaseHook:

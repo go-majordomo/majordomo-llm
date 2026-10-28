@@ -40,6 +40,20 @@ response = await cascade.get_response(
 print(response.content)
 ```
 
+## Per-Member Options
+
+A member can be `(provider, model, options)`, where `options` holds `thinking` and/or `reasoning_effort`. They apply to that member only and override its `llm_config.yaml` values exactly as the same arguments to `get_llm_instance()` do:
+
+```python
+cascade = LLMCascade([
+    ("anthropic", "claude-sonnet-5-5", {"thinking": "disabled"}),   # sent as between_tools
+    ("together", "moonshotai/Kimi-K3", {"reasoning_effort": "low"}),
+    ("openai", "gpt-6.1-sol"),
+])
+```
+
+Any other key raises `ConfigurationError` when the cascade is built, as does an option the member cannot honour, such as `thinking="disabled"` on `claude-opus-5-5`.
+
 ## Failover Behavior
 
 1. Request sent to Anthropic
@@ -57,6 +71,8 @@ Errors that every provider would hit equally do not trigger failover:
 
 - `InvalidRequestError`: the request's arguments are invalid, for example a non-positive `max_tokens`
 - `ResponseTruncatedError`: the response hit the `max_tokens` cap
+
+Such an error still reports what the call cost. Its `usage` has the tokens and costs of the call that hit the cap, the member that made it in `provider`/`model`, and every member tried in `attempted`, including those that failed over before it.
 
 ## Strategy Tips
 

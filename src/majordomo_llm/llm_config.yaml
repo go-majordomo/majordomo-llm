@@ -129,11 +129,39 @@ anthropic:
     #
     # The 5.5 / 5.1 generation rejects a forced tool_choice ("tool" / "any") with
     # a 400, so those entries set supports_forced_tool_choice: false and must
-    # keep supports_structured_outputs: true. Thinking cannot be disabled on
-    # them, and claude-opus-5-5 defaults to medium effort where claude-opus-5
-    # defaults to high — set reasoning_effort on a profile entry to pin it.
+    # keep supports_structured_outputs: true. claude-opus-5-5 defaults to medium
+    # effort where claude-opus-5 defaults to high — set reasoning_effort on a
+    # profile entry to pin it.
+    #
+    # thinking_off is how the model spells "thinking off" on the wire. The
+    # factory sends it when a caller (or a `thinking: disabled` entry) asks for
+    # thinking="disabled". Absent means `disabled`; `unsupported` means thinking
+    # cannot be turned off and asking raises ConfigurationError.
+    # Measured 2026-10-28 with scripts/check_anthropic_thinking.py (one-word
+    # classification; which "off" spelling is accepted, and output tokens with
+    # nothing sent, of which a thinking block came back):
+    #   claude-opus-5-5    unsupported    400 on `disabled` and `between_tools`;
+    #                                     4 tokens, no thinking, with nothing sent
+    #   claude-sonnet-5-5  between_tools  400 on `disabled`; 4, no thinking
+    #   claude-fable-5-1   unsupported    400 on both; 4, no thinking
+    #   claude-haiku-5-5   disabled       400 on `between_tools`; 4, no thinking
+    #   claude-opus-5      disabled       41, thinking (4 with `disabled`)
+    #   claude-fable-5     unsupported    400 on both; 10, thinking
+    #   claude-opus-4-8    disabled       4, no thinking
+    #   claude-sonnet-5    disabled       39, no thinking
+    # The API's 400s say what each value means. On claude-sonnet-5-5,
+    # between_tools: "The model does not think before responding. The short
+    # updates it writes between tool calls come back as thinking blocks", so
+    # with web search on, those updates are still billed. Where "off" is
+    # unsupported: "Use thinking.type.adaptive and output_config.effort to
+    # control thinking behavior", i.e. lower reasoning_effort instead.
+    # The models above decide for themselves whether to think when nothing is
+    # sent. On this prompt most did not; on a ~4,300-token Markdown rewrite,
+    # claude-sonnet-5-5 used 8,700 output tokens. Re-run the script when adding
+    # a Claude model.
     # Rates from the Anthropic pricing page, 2026-10-06.
     claude-opus-5-5:
+      thinking_off: unsupported
       supports_image_input: true
       input_cost: 4.00
       output_cost: 20.00
@@ -144,6 +172,7 @@ anthropic:
       supports_structured_outputs: true
       supports_forced_tool_choice: false
     claude-sonnet-5-5:
+      thinking_off: between_tools
       supports_image_input: true
       input_cost: 2.00
       output_cost: 10.00
@@ -154,6 +183,7 @@ anthropic:
       supports_structured_outputs: true
       supports_forced_tool_choice: false
     claude-fable-5-1:
+      thinking_off: unsupported
       supports_image_input: true
       input_cost: 10.00
       output_cost: 50.00
@@ -186,6 +216,7 @@ anthropic:
       supports_web_search: true
       supports_structured_outputs: true
     claude-fable-5:
+      thinking_off: unsupported
       supports_image_input: true
       input_cost: 10.00
       output_cost: 50.00
@@ -448,6 +479,8 @@ fireworks:
     #   kimi-k3            default 135 (121)   low 47 (33)   disabled 8 (0)
     #   qwen3p8-*          default ~77 (~73)   low ~42 (~38)  disabled 2 (0)
     #   inkling            ~80 under every setting; no control has any effect
+    # From these rows, glm-5p3 and inkling set thinking_off: unsupported, so
+    # thinking="disabled" fails loudly there instead of being ignored.
     # Every model reasons at its top tier when nothing is sent, and reasoning
     # tokens bill as output, so every entry that can be lowered sets
     # reasoning_effort: low. Inkling is the exception: nothing changes it.
@@ -458,6 +491,7 @@ fireworks:
     # which returned 4 output tokens for the prompt above; left at the default it
     # produced six times Baseten's output tokens across the demo prompts.
     accounts/fireworks/models/glm-5p3:
+      thinking_off: unsupported
       input_cost: 1.40
       output_cost: 4.40
       cached_input_cost: 0.26
@@ -481,6 +515,7 @@ fireworks:
       cached_input_cost: 0.25
       reasoning_effort: low
     accounts/fireworks/models/inkling:
+      thinking_off: unsupported
       input_cost: 1.00
       output_cost: 4.05
       cached_input_cost: 0.17
@@ -521,6 +556,7 @@ fireworks:
 #                           reasoning.enabled=false, which the provider cannot send
 #   Inkling                 default 69 (62)    low 67        off only with
 #                           reasoning_effort 'none', which the provider rejects
+# From these rows, GLM-5.3, Qwen3.5-9B and Inkling set thinking_off: unsupported.
 together:
   models:
     # Added 2026-10-11 from the catalog and confirmed with a live call the same
@@ -534,6 +570,7 @@ together:
       output_cost: 1.20
       cached_input_cost: 0.006
     zai-org/GLM-5.3:
+      thinking_off: unsupported
       input_cost: 1.40
       output_cost: 4.40
       cached_input_cost: 0.26
@@ -574,6 +611,7 @@ together:
       input_cost: 0.15
       output_cost: 0.47
     Qwen/Qwen3.5-9B:
+      thinking_off: unsupported
       input_cost: 0.17
       output_cost: 0.25
     zai-org/GLM-5.2:
@@ -581,6 +619,7 @@ together:
       output_cost: 4.40
       cached_input_cost: 0.26
     thinkingmachines/Inkling:
+      thinking_off: unsupported
       input_cost: 1.00
       output_cost: 4.05
       cached_input_cost: 0.17
@@ -610,7 +649,8 @@ together:
 #                           thinking: disabled -> 3
 #   GLM-5.2                 default 1 (0)      low 259 (256) reasoning is OPT-IN
 #                           here, so any reasoning_effort turns it ON. Do not
-#                           set one.
+#                           set one. thinking_off: default, so thinking="disabled"
+#                           sends nothing and reasoning stays off.
 baseten:
   models:
     # Added 2026-10-11 from the pricing table and confirmed with a live call the
@@ -646,6 +686,7 @@ baseten:
       supports_temperature_top_p: false
       reasoning_effort: low
     zai-org/GLM-5.2:
+      thinking_off: default
       input_cost: 1.40
       output_cost: 4.40
       cached_input_cost: 0.14

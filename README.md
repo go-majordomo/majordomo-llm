@@ -451,13 +451,22 @@ llm = get_llm_instance(                      # send nothing; the host's default 
 ```
 
 - Passing either argument replaces **both** configured values for that model.
-- Values are passed to the host as-is and are **not portable**: `low` cuts reasoning on
+- `thinking="disabled"` means "off" on every model, whatever that model calls it. The
+  factory sends the spelling in the model's `thinking_off` config key: `between_tools`
+  on `claude-sonnet-5-5` (which rejects `disabled`), nothing at all on Baseten's
+  `GLM-5.2` (off unless asked), and `disabled` everywhere else. A model whose thinking
+  cannot be turned off (`claude-opus-5-5`, `claude-fable-5-1`, `claude-fable-5`, GLM 5.3
+  on Fireworks and Together, Together's `Qwen3.5-9B` and `Inkling`, Fireworks'
+  `inkling`) raises `ConfigurationError` instead
+  of quietly thinking anyway.
+- Every other value is passed to the host as-is and is **not portable**: `low` cuts reasoning on
   GLM 5.3, does nothing on Together's GLM 5.2, and switches reasoning *on* for
   Baseten's GLM 5.2, where it is opt-in.
 - Supported on `anthropic`, `fireworks`, `together` and `baseten`; other providers
   raise `ConfigurationError`.
 - Reasoning tokens are included in `output_tokens` and `output_cost`; they are not
-  reported separately.
+  reported separately. With nothing set, a Claude model decides for itself whether to
+  think, and on a long task that can cost more than the answer.
 
 See [Reasoning & Thinking](docs/concepts/reasoning.md) for the per-model defaults and
 what each value does on each host.
@@ -498,7 +507,13 @@ try:
 except ResponseTruncatedError as e:
     print(f"hit {e.max_tokens} after {e.output_tokens} tokens")
     print(e.partial_content)   # whatever arrived before the cut
+    print(e.usage.total_cost)  # the call was billed; this is what it cost
 ```
+
+`e.usage` is the full `Usage` of the truncated call: tokens, costs, `provider`, `model`
+and `attempted`, with any cascade members that failed before it. A
+`ResponseParsingError` (including `EmptyStructuredResponseError`) carries the same
+`usage` when it is raised after the provider has billed for the response.
 
 The error is not retried — re-sampling would spend the same budget against the same
 ceiling — and does not trigger `LLMCascade` failover, since the next provider would
@@ -550,6 +565,17 @@ response = await cascade.get_response("Hello!")
 ```
 
 All response methods (`get_response`, `get_json_response`, `get_structured_json_response`, `get_response_stream`) support automatic fallback.
+
+A member can carry its own `thinking` / `reasoning_effort`, which override that model's config just as the same arguments to `get_llm_instance()` do:
+
+```python
+cascade = LLMCascade([
+    ("anthropic", "claude-sonnet-5-5", {"thinking": "disabled"}),
+    ("together", "moonshotai/Kimi-K3", {"reasoning_effort": "low"}),
+])
+```
+
+Any other key raises `ConfigurationError`.
 
 Every response says which member answered:
 

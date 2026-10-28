@@ -582,3 +582,40 @@ class TestBedrockMaxTokens:
             await llm.get_structured_json_response(
                 response_model=CountryInfo, user_prompt="Tell me about France"
             )
+
+    async def test_truncation_carries_the_cost_of_the_call(self):
+        """The truncated call was billed; the error reports what it cost."""
+        llm = _make_bedrock()
+        client = _install_mock_client(llm)
+        client.converse.return_value = _truncated_converse_response("Section one")
+
+        with pytest.raises(ResponseTruncatedError) as exc_info:
+            await llm.get_response("Write six sections")
+
+        usage = exc_info.value.usage
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (25, 1024)
+        assert usage.total_cost == pytest.approx(25 * 3.0 / 1e6 + 1024 * 15.0 / 1e6)
+        assert (usage.provider, usage.model) == ("bedrock", llm.model)
+        assert usage.attempted == [("bedrock", llm.model)]
+
+    async def test_streaming_truncation_carries_the_cost_of_the_call(self):
+        llm = _make_bedrock()
+        client = _install_mock_client(llm)
+
+        async def stream_iter():
+            yield {"contentBlockDelta": {"delta": {"text": "Section one"}}}
+            yield {"metadata": {"usage": {"inputTokens": 25, "outputTokens": 1024}}}
+            yield {"messageStop": {"stopReason": "max_tokens"}}
+
+        client.converse_stream.return_value = {"stream": stream_iter()}
+
+        stream = await llm.get_response_stream("Write six sections")
+        with pytest.raises(ResponseTruncatedError) as exc_info:
+            async for _ in stream:
+                pass
+
+        usage = exc_info.value.usage
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (25, 1024)
+        assert usage.total_cost == pytest.approx(25 * 3.0 / 1e6 + 1024 * 15.0 / 1e6)

@@ -7,6 +7,7 @@ from tenacity import Future, RetryError
 
 from majordomo_llm import LLMCascade
 from majordomo_llm.exceptions import (
+    ConfigurationError,
     InvalidRequestError,
     ProviderError,
     ResponseParsingError,
@@ -83,6 +84,47 @@ class TestLLMCascadeInit:
             LLMCascade([])
 
         assert "at least one provider" in str(exc_info.value)
+
+
+class TestLLMCascadeMemberOptions:
+    """A member may carry its own thinking / reasoning_effort override."""
+
+    def test_options_reach_only_their_member(self, mock_all_clients):
+        cascade = LLMCascade(
+            [
+                ("anthropic", "claude-sonnet-5-5", {"thinking": "disabled"}),
+                ("anthropic", "claude-opus-4-8-medium"),
+            ]
+        )
+
+        assert cascade.llms[0].thinking == "between_tools"
+        # The second member keeps its configured profile.
+        assert (cascade.llms[1].reasoning_effort, cascade.llms[1].thinking) == (
+            "medium",
+            "adaptive",
+        )
+
+    def test_options_replace_both_configured_values(self, mock_all_clients):
+        cascade = LLMCascade([("anthropic", "claude-opus-4-8-medium", {"reasoning_effort": "max"})])
+
+        assert (cascade.llms[0].reasoning_effort, cascade.llms[0].thinking) == ("max", None)
+
+    def test_unknown_option_is_rejected(self, mock_all_clients):
+        with pytest.raises(ConfigurationError, match="Unknown option.*temperature"):
+            LLMCascade([("anthropic", "claude-sonnet-5-5", {"temperature": 0.2})])
+
+    def test_options_must_be_a_dict(self, mock_all_clients):
+        with pytest.raises(ConfigurationError, match="must be a dict"):
+            LLMCascade([("anthropic", "claude-sonnet-5-5", "disabled")])
+
+    @pytest.mark.parametrize("member", [("anthropic",), ("anthropic", "claude-sonnet-5-5", {}, 1)])
+    def test_member_of_the_wrong_length_is_rejected(self, member, mock_all_clients):
+        with pytest.raises(ConfigurationError, match=r"must be \(provider, model\)"):
+            LLMCascade([member])
+
+    def test_option_a_member_cannot_honour_is_rejected(self, mock_all_clients):
+        with pytest.raises(ConfigurationError, match="cannot turn thinking off"):
+            LLMCascade([("anthropic", "claude-fable-5", {"thinking": "disabled"})])
 
 
 class TestLLMCascadeGetResponse:

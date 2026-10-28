@@ -381,6 +381,19 @@ class TestReasoningOverrides:
         llm = get_llm_instance("anthropic", "claude-opus-4-8-medium", reasoning_effort="max")
         assert (llm.reasoning_effort, llm.thinking) == ("max", None)
 
+    def test_configured_thinking_disabled_is_translated(self, mock_all_clients, monkeypatch):
+        """A `thinking: disabled` config entry gets the model's spelling too."""
+        attrs = LLM_CONFIG["anthropic"]["models"]["claude-sonnet-5-5"]
+        monkeypatch.setitem(attrs, "thinking", "disabled")
+
+        llm = get_llm_instance("anthropic", "claude-sonnet-5-5")
+
+        assert llm.thinking == "between_tools"
+
+    def test_other_thinking_values_pass_through(self, mock_all_clients):
+        llm = get_llm_instance("anthropic", "claude-sonnet-5-5", thinking="adaptive")
+        assert llm.thinking == "adaptive"
+
     def test_invalid_value_is_rejected_by_the_provider(self, mock_all_clients):
         with pytest.raises(ValueError, match="reasoning_effort"):
             get_llm_instance(*self.FIREWORKS_GLM, reasoning_effort="turbo")

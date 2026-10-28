@@ -190,6 +190,7 @@ try:
 except ResponseTruncatedError as e:
     print(f"hit {e.max_tokens} after {e.output_tokens} tokens")
     print(e.partial_content)   # whatever arrived before the cut
+    print(e.usage.total_cost)  # billed; e.usage has tokens, costs, provider, model, attempted
 ```
 
 ### Reasoning (`reasoning_effort`, `thinking`)
@@ -205,8 +206,13 @@ llm = get_llm_instance("fireworks", "accounts/fireworks/models/kimi-k3",
                        reasoning_effort="default")   # send nothing; host default
 ```
 
-Passing either argument replaces both configured values. Values go to the host as-is
-and are **not portable**: `low` does nothing on some models and switches reasoning *on*
+Passing either argument replaces both configured values. `thinking="disabled"` is
+model-neutral: the factory sends each model's own spelling from its `thinking_off`
+config key (`between_tools` on `claude-sonnet-5-5`, nothing on Baseten's `GLM-5.2`), and
+raises `ConfigurationError` where thinking cannot be turned off (Opus 5.5, Fable 5.1,
+Fable 5, GLM 5.3,
+Inkling, Together's Qwen3.5-9B). Other values go to the host as-is and are **not
+portable**: `low` does nothing on some models and switches reasoning *on*
 for Baseten's `zai-org/GLM-5.2`. Supported on `anthropic`, `fireworks`, `together`,
 `baseten`; other providers raise `ConfigurationError`. Reasoning tokens are counted in
 `output_tokens`, not reported separately. Per-model behaviour:
@@ -285,6 +291,12 @@ cascade = LLMCascade([
 response = await cascade.get_response("Hello!")  # same interface as LLM
 response.provider, response.model  # the member that answered, e.g. ("openai", "gpt-5-mini")
 response.attempted                 # every member tried; len > 1 means it fell through
+
+# A member may carry its own thinking / reasoning_effort (any other key is rejected):
+cascade = LLMCascade([
+    ("anthropic", "claude-sonnet-5-5", {"thinking": "disabled"}),
+    ("together", "moonshotai/Kimi-K3", {"reasoning_effort": "low"}),
+])
 ```
 
 ## Optimal Routing (Majordomo Gateway)
@@ -373,9 +385,10 @@ from majordomo_llm.exceptions import (
     ProviderError,        # upstream API failure, or an unexpected exception inside a
                           # provider; has .provider and .original_error
     InvalidRequestError,  # invalid request arguments, e.g. max_tokens=0 (a ValueError)
-    ResponseParsingError, # JSON parse failure; has .raw_content
+    ResponseParsingError, # JSON parse failure; has .raw_content, and .usage
+                          # when the provider had already billed for the response
     ResponseTruncatedError,  # hit the max_tokens cap; has .max_tokens,
-                             # .output_tokens, .partial_content
+                             # .output_tokens, .partial_content, .usage (the cost)
 )
 
 try:
