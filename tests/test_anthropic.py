@@ -10,6 +10,7 @@ from majordomo_llm.base import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_STREAM_MAX_TOKENS,
     TOKENS_PER_MILLION,
+    LongContextPricing,
 )
 from majordomo_llm.exceptions import (
     ConfigurationError,
@@ -17,6 +18,7 @@ from majordomo_llm.exceptions import (
     ResponseParsingError,
     ResponseTruncatedError,
 )
+from majordomo_llm.factory import get_llm_instance, get_model_pricing
 from majordomo_llm.providers import Anthropic
 from majordomo_llm.providers.anthropic import MAX_NONSTREAMING_TOKENS
 
@@ -73,6 +75,30 @@ def _text_response(text: str, stop_reason: str = "end_turn") -> MagicMock:
     response.stop_reason = stop_reason
     response.usage = _usage_mock()
     return response
+
+
+@pytest.mark.parametrize(
+    ("uncached", "rates"),
+    [(98_000, (0.10, 0.50, 0.01, 0.125)), (98_001, (0.50, 2.50, 0.05, 0.625))],
+)
+async def test_haiku_prompt_tier_includes_cache_reads_and_writes(uncached, rates):
+    with patch("majordomo_llm.providers.anthropic.anthropic.AsyncAnthropic"):
+        llm = get_llm_instance("anthropic", "claude-haiku-5-5", api_key="test-key")
+    result = _text_response("ok")
+    result.usage.input_tokens = uncached
+    result.usage.cache_read_input_tokens = 1_500
+    result.usage.cache_creation_input_tokens = 500
+    result.usage.output_tokens = 200
+    llm.client.messages.create = AsyncMock(return_value=result)
+
+    response = await llm.get_response("test")
+    input_rate, output_rate, read_rate, write_rate = rates
+    expected_input = (uncached * input_rate + 1_500 * read_rate + 500 * write_rate) / 1_000_000
+    assert response.input_cost == pytest.approx(expected_input)
+    assert response.output_cost == pytest.approx(200 * output_rate / 1_000_000)
+    pricing = get_model_pricing("anthropic", "claude-haiku-5-5", prompt_tokens=uncached + 2_000)
+    assert pricing is not None
+    assert pricing[:4] == rates
 
 
 class TestAnthropicGetResponse:
@@ -812,6 +838,21 @@ class TestAnthropicWebSearchStructuredUsage:
         assert response.total_cost == pytest.approx(
             expected_input_cost + expected_output_cost + 0.03
         )
+
+    async def test_pricing_tier_applies_to_each_request(self, llm):
+        llm.long_context_pricing = LongContextPricing(100_000, 5.0, 25.0, 0.5, 6.25)
+        first = _text_response("France is a country.")
+        first.usage.input_tokens = 60_000
+        second = _tool_use_response("CountryInfo", self.FRANCE)
+        second.usage.input_tokens = 99_000
+        second.usage.cache_read_input_tokens = 1_001
+        llm.client.messages.create = AsyncMock(side_effect=[first, second])
+
+        response = await self._ask(llm)
+
+        expected_input = (60_000 * 2.0 + 99_000 * 5.0 + 1_001 * 0.5) / 1_000_000
+        assert response.input_cost == pytest.approx(expected_input)
+        assert response.output_cost == pytest.approx((10 * 10.0 + 10 * 25.0) / 1_000_000)
 
     async def test_single_turn_reports_that_turn_alone(self, llm):
         only_turn = _tool_use_response("CountryInfo", self.FRANCE)

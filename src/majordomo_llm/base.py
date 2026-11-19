@@ -411,6 +411,17 @@ logger = logging.getLogger(__name__)
 TOKENS_PER_MILLION = 1_000_000
 
 
+@dataclass(frozen=True)
+class LongContextPricing:
+    """Per-million rates for one request above the configured prompt length."""
+
+    threshold_tokens: int
+    input_cost: float
+    output_cost: float
+    cached_input_cost: float
+    cache_write_cost: float
+
+
 def compute_costs(
     input_tokens: int,
     output_tokens: int,
@@ -422,6 +433,7 @@ def compute_costs(
     cached_input_cost: float | None = None,
     cache_write_cost: float | None = None,
     cache_accounting: str = "subset",
+    long_context: LongContextPricing | None = None,
 ) -> tuple[float, float, float]:
     """Price a request from explicit per-million rates.
 
@@ -440,12 +452,22 @@ def compute_costs(
         output_cost: Cost per million output tokens in USD.
         cached_input_cost: Cost per million cache-read tokens in USD, or ``None``.
         cache_write_cost: Cost per million cache-write tokens in USD, or ``None``.
+        long_context: Optional rates for requests above a prompt-token threshold.
         cache_accounting: ``"subset"`` or ``"additive"`` (see
             :meth:`LLM._calculate_costs`).
 
     Returns:
         Tuple of (input_cost, output_cost, total_cost) in USD.
     """
+    if long_context is not None:
+        prompt_tokens = input_tokens
+        if cache_accounting == "additive":
+            prompt_tokens += cached_tokens + cache_creation_tokens
+        if prompt_tokens > long_context.threshold_tokens:
+            input_cost = long_context.input_cost
+            output_cost = long_context.output_cost
+            cached_input_cost = long_context.cached_input_cost
+            cache_write_cost = long_context.cache_write_cost
     if cache_accounting == "additive":
         read_rate = cached_input_cost if cached_input_cost is not None else 0.0
         write_rate = cache_write_cost if cache_write_cost is not None else 0.0
@@ -859,6 +881,7 @@ class LLM(ABC):
         self.model = model
         self.input_cost = input_cost
         self.output_cost = output_cost
+        self.long_context_pricing: LongContextPricing | None = None
         self.cached_input_cost = cached_input_cost
         self.cache_write_cost = cache_write_cost
         self.use_prompt_caching = use_prompt_caching
@@ -1102,6 +1125,7 @@ class LLM(ABC):
             cached_input_cost=self.cached_input_cost,
             cache_write_cost=self.cache_write_cost,
             cache_accounting=self._cache_accounting,
+            long_context=self.long_context_pricing,
         )
 
     @abstractmethod

@@ -176,7 +176,7 @@ anthropic:
       supports_image_input: true
       input_cost: 2.00
       output_cost: 10.00
-      cached_input_cost: 0.20
+      cached_input_cost: 0.10
       cache_write_cost: 2.50
       supports_temperature_top_p: false
       supports_web_search: true
@@ -204,6 +204,12 @@ anthropic:
       output_cost: 0.50
       cached_input_cost: 0.01
       cache_write_cost: 0.125
+      long_context:
+        threshold_tokens: 100000
+        input_cost: 0.50
+        output_cost: 2.50
+        cached_input_cost: 0.05
+        cache_write_cost: 0.625
       supports_temperature_top_p: false
       supports_structured_outputs: true
     claude-opus-5:

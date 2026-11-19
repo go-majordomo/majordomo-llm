@@ -160,7 +160,7 @@ class Majordomo(LLM):
         # Lazy import to avoid a circular import (factory imports this module).
         from majordomo_llm.factory import get_model_pricing
 
-        pricing = get_model_pricing(routed_provider, routed_model)
+        pricing = get_model_pricing(routed_provider, routed_model, prompt_tokens=input_tokens)
         if pricing is None:
             logger.warning(
                 "Majordomo: no pricing configured for routed pair %s/%s; reporting cost 0.0",
@@ -169,6 +169,9 @@ class Majordomo(LLM):
             )
             return 0.0, 0.0, 0.0
 
+        # Gateway prompt_tokens includes cache hits, even for additive native APIs.
+        if pricing.cache_accounting == "additive":
+            input_tokens = max(input_tokens - cached_tokens - cache_creation_tokens, 0)
         return compute_costs(
             input_tokens,
             output_tokens,

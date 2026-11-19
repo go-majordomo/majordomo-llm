@@ -9,7 +9,7 @@ from typing import Any, NamedTuple, cast
 
 import yaml
 
-from majordomo_llm.base import LLM
+from majordomo_llm.base import LLM, LongContextPricing
 from majordomo_llm.exceptions import ConfigurationError
 from majordomo_llm.hooks.image_pipeline import ImageHookPipeline
 from majordomo_llm.image import ImageModel
@@ -281,7 +281,12 @@ class ModelPricing(NamedTuple):
     cache_accounting: str
 
 
-def get_model_pricing(provider: str, model: str) -> ModelPricing | None:
+def _long_context_pricing(attributes: dict[str, Any]) -> LongContextPricing | None:
+    tier = attributes.get("long_context")
+    return LongContextPricing(**tier) if tier is not None else None
+
+
+def get_model_pricing(provider: str, model: str, *, prompt_tokens: int = 0) -> ModelPricing | None:
     """Resolve the token pricing for a concrete (provider, model) pair.
 
     Looks the pair up in ``llm_config.yaml`` and pairs its rates with the
@@ -294,6 +299,7 @@ def get_model_pricing(provider: str, model: str) -> ModelPricing | None:
         provider: The concrete backend provider name (e.g. "fireworks").
         model: The backend's native model identifier (e.g.
             "accounts/fireworks/models/kimi-k3").
+        prompt_tokens: Whole request prompt length used to select the price tier.
 
     Returns:
         A :class:`ModelPricing` for the pair, or ``None`` if the provider or
@@ -307,6 +313,15 @@ def get_model_pricing(provider: str, model: str) -> ModelPricing | None:
         return None
     cls = _PROVIDER_CLASSES.get(provider)
     cache_accounting = getattr(cls, "_cache_accounting", "subset") if cls is not None else "subset"
+    tier = _long_context_pricing(model_attributes)
+    if tier is not None and prompt_tokens > tier.threshold_tokens:
+        return ModelPricing(
+            tier.input_cost,
+            tier.output_cost,
+            tier.cached_input_cost,
+            tier.cache_write_cost,
+            cache_accounting,
+        )
     return ModelPricing(
         input_cost=model_attributes["input_cost"],
         output_cost=model_attributes["output_cost"],
@@ -555,6 +570,8 @@ def get_llm_instance(
         default_headers=default_headers,
         **provider_kwargs,
     )
+
+    llm.long_context_pricing = _long_context_pricing(model_attributes)
 
     if deprecation_warning:
         llm.deprecation_warning = deprecation_warning
