@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Price Claude Haiku 5.5 requests above 100,000 prompt tokens at the long-context rate, including cache reads and writes when selecting the tier. Multi-turn web searches price each provider request separately. Correct Claude Sonnet 5.5 cache reads to $0.10 per million tokens.
+
 ## [0.26.0] - 2026-10-28
 
 Thinking can now be turned off by one name on every model that allows it, and a call that was billed but then failed reports what it cost.

@@ -260,7 +260,7 @@ class TestUsePromptCachingForwarding:
 
     def test_cache_costs_loaded_from_config(self, mock_all_clients):
         llm = get_llm_instance("anthropic", "claude-sonnet-5-5")
-        assert llm.cached_input_cost == 0.20
+        assert llm.cached_input_cost == 0.10
         assert llm.cache_write_cost == 2.50
 
 
@@ -443,7 +443,7 @@ class TestLatestModelsRegistered:
         ("provider", "model", "input_cost", "output_cost", "cached_input_cost"),
         [
             ("anthropic", "claude-opus-5-5", 4.00, 20.00, 0.20),
-            ("anthropic", "claude-sonnet-5-5", 2.00, 10.00, 0.20),
+            ("anthropic", "claude-sonnet-5-5", 2.00, 10.00, 0.10),
             ("anthropic", "claude-fable-5-1", 10.00, 50.00, 0.25),
             ("anthropic", "claude-haiku-5-5", 0.10, 0.50, 0.01),
             ("openai", "gpt-6-astra", 10.00, 50.00, 1.00),

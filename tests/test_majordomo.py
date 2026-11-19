@@ -159,6 +159,25 @@ class TestMajordomoGetResponse:
         assert response.output_cost == pytest.approx(expected_output)
         assert response.total_cost == pytest.approx(expected_input + expected_output)
 
+    async def test_haiku_route_prices_cached_prompt_tokens_once(self, majordomo_llm):
+        raw = _make_raw(
+            content="ok",
+            prompt_tokens=150_000,
+            completion_tokens=1_000,
+            cached_tokens=140_000,
+            routed_provider="anthropic",
+            routed_model="claude-haiku-5-5",
+        )
+        majordomo_llm.client.chat.completions.with_raw_response.create = AsyncMock(
+            return_value=raw
+        )
+
+        response = await majordomo_llm.get_response("test")
+
+        assert response.input_tokens == 150_000
+        assert response.cached_tokens == 140_000
+        assert response.total_cost == pytest.approx(0.0145)
+
     async def test_same_usage_priced_differently_by_route(self, majordomo_llm):
         """Identical usage should cost differently depending on the routed backend."""
 
